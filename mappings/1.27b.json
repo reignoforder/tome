@@ -1,0 +1,729 @@
+{
+  "schema": 2,
+  "name": "1.27b",
+  "file_version": "1.27.1.7085",
+  "pe_timestamp": "0x584a499e",
+  "size_of_image": "0x00e6e000",
+  "sha256": "d51e5680243fc90e19c9d6074f7fac433c466d3cf5f46e2364291725574d8236",
+  "symbols": {
+
+    "BindNative": {
+      "kind": "function", "rva": "0x0090d120", "conv": "fastcall",
+      "sig": "void(void* fn, const char* name, const char* signature)",
+      "bytes": "55 8b ec 81 ec 0c 01 00 00 a1 ?? ?? ?? ?? 33 c5 89 45 fc 56 8b 75 08 57"
+    },
+    "InitNatives": {
+      "kind": "function", "rva": "0x00207490", "conv": "cdecl", "sig": "void(void)",
+      "bytes": "e8 2b 56 70 00 68 ?? ?? ?? ?? ba ?? ?? ?? ?? b9",
+      "doc": "Registers every common.j native."
+    },
+    "InitNatives.call.startup": { "kind": "call", "rva": "0x0004542b", "target": "InitNatives" },
+    "InitNatives.call.map_load_1": { "kind": "call", "rva": "0x001dfd64", "target": "InitNatives" },
+    "InitNatives.call.map_load_2": { "kind": "call", "rva": "0x001e37a2", "target": "InitNatives" },
+    "RCString::GetText": {
+      "kind": "function", "rva": "0x0006e8d0", "conv": "thiscall",
+      "sig": "const char*(RCString* this)",
+      "bytes": "8b 41 08 85 c0 74 04 8b 40 1c c3 33 c0 c3 cc cc",
+      "doc": "The text of a JASS string argument: natives receive an RCString*. Returns [[this+8]+0x1C], or NULL without a string rep."
+    },
+    "CreateJassString": {
+      "kind": "function", "rva": "0x001f7f60", "conv": "fastcall",
+      "sig": "uint32_t(const char* text)",
+      "bytes": "85 c9 75 03 33 c0 c3 51 8b 0d ?? ?? ?? ?? e8 3d",
+      "doc": "What natives returning a string return (I2S, SubString, GetPlayerName): adds the text to the map script's string table and returns its id, 0 for NULL. Reads CGameWar3.instance without checking it."
+    },
+    "Native.CreateTrigger": {
+      "kind": "function", "rva": "0x001fc7e0", "conv": "cdecl", "sig": "uint32_t(void)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 34 a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 33 f6 89 75 c0 c7 45 fc 01 00 00 00 e8 14 b6",
+      "doc": "The common.j native: returns a trigger handle. Its first 48 bytes (a common SEH prologue) also occur elsewhere; Tome checks them at this address."
+    },
+    "Native.DestroyTrigger": {
+      "kind": "function", "rva": "0x001fd210", "conv": "cdecl", "sig": "void(uint32_t trigger)",
+      "bytes": "55 8b ec 8b 4d 08 e8 35 1c ff ff 85 c0 74 08 8b"
+    },
+    "Native.Condition": {
+      "kind": "function", "rva": "0x001f9000", "conv": "cdecl", "sig": "uint32_t(uint32_t code)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 51 53 56 57 a1 ?? ?? ?? ?? 33 c5 50 8d 45 f4 64 a3 00 00 00 00 8b 0d ?? ?? ?? ?? e8 3f",
+      "doc": "Returns the conditionfunc for a code value; the game keeps one per code (hash table at +0x1F4 of 0x1E0D70's object), so it isn't destroyed after use."
+    },
+    "Native.TriggerAddCondition": {
+      "kind": "function", "rva": "0x00216ce0", "conv": "cdecl", "sig": "uint32_t(uint32_t trigger, uint32_t boolexpr)",
+      "bytes": "55 8b ec 8b 4d 08 56 e8 64 81 fd ff 8b f0 85 f6"
+    },
+    "Native.TriggerAddAction": {
+      "kind": "function", "rva": "0x00216ca0", "conv": "cdecl", "sig": "uint32_t(uint32_t trigger, uint32_t code)",
+      "bytes": "55 8b ec 8b 4d 08 e8 a5 81 fd ff 85 c0 75 02 5d"
+    },
+    "Native.TriggerExecute": {
+      "kind": "function", "rva": "0x00216d90", "conv": "cdecl", "sig": "void(uint32_t trigger)",
+      "bytes": "55 8b ec 8b 4d 08 e8 b5 80 fd ff 85 c0 74 09 6a",
+      "doc": "Runs the trigger's actions on new threads (0x2979A0); returns once they finish or wait."
+    },
+    "Native.TriggerEvaluate": {
+      "kind": "function", "rva": "0x00216d70", "conv": "cdecl", "sig": "int32_t(uint32_t trigger)",
+      "bytes": "55 8b ec 8b 4d 08 e8 d5 80 fd ff 85 c0 75 02 5d"
+    },
+
+    "LoadFrameDefToc": {
+      "kind": "function", "rva": "0x000e48f0", "conv": "fastcall",
+      "sig": "void(const char* toc_path, void* context)",
+      "bytes": "56 57 85 d2 8b f9 be ?? ?? ?? ?? b9 ?? ?? ?? ??",
+      "doc": "Clears the frame definition tables, then calls LoadTocFiles."
+    },
+    "LoadFrameDefToc.call.startup": {
+      "kind": "call", "rva": "0x00045426", "target": "LoadFrameDefToc",
+      "doc": "Loads UI\\FrameDef\\FrameDef.toc."
+    },
+    "LoadTocFiles": {
+      "kind": "function", "rva": "0x000ba580", "conv": "fastcall",
+      "sig": "int(const char* toc_path, void* table_a, void* table_b, void* status)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 64 53 56 57 a1 ?? ?? ?? ?? 33 c5 50 8d 45 f4 64 a3 00 00 00 00 89 55",
+      "doc": "Parses every FDF a TOC lists into the tables, without clearing them."
+    },
+    "FrameDefTableA": { "kind": "data", "rva": "0x00d47744", "doc": "First table LoadFrameDefToc passes to LoadTocFiles." },
+    "FrameDefTableB": { "kind": "data", "rva": "0x00d47794", "doc": "Second table LoadFrameDefToc passes to LoadTocFiles." },
+    "FrameDefStatus": { "kind": "data", "rva": "0x00ce3a4c", "doc": "Default status argument of LoadTocFiles." },
+
+    "CreateFrame": {
+      "kind": "function", "rva": "0x000e4740", "conv": "fastcall",
+      "sig": "CFrame*(const char* template_name, CFrame* parent, int, int, int)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 0c 56 a1 ?? ?? ?? ?? 33 c5 50 8d 45 f4 64 a3 00 00 00 00 8b f2"
+    },
+    "GetFrameByName": {
+      "kind": "function", "rva": "0x000f2ca0", "conv": "fastcall",
+      "sig": "CFrame*(const char* name, int context)",
+      "bytes": "55 8b ec 51 8d 45 fc 50 6a 00 e8 b1 00 00 00 85"
+    },
+    "CFrame.layout": {
+      "kind": "offset", "value": "0xb4",
+      "doc": "The CLayoutFrame base inside every CFrame."
+    },
+    "CFrame.vtable.Hide": {
+      "kind": "offset", "value": "0xd0",
+      "doc": "void __thiscall Hide(void). Sets bit 0 of the flags at +0xB0 and marks children hidden by parent."
+    },
+    "CFrame.vtable.Show": {
+      "kind": "offset", "value": "0xd4",
+      "doc": "void __thiscall Show(void). Also shows every child."
+    },
+    "CLayoutFrame::SetPoint": {
+      "kind": "function", "rva": "0x00111600", "conv": "thiscall",
+      "sig": "void(CLayoutFrame* this, int point, CLayoutFrame* relative, int relative_point, float x, float y, int update)",
+      "bytes": "55 8b ec 53 8b 5d 08 56 57 8b f9 8b 74 9f 08 85",
+      "doc": "Call on frame + CFrame.layout. Points follow 1.31's FRAMEPOINT numbering: TOPLEFT=0 ... CENTER=4 ... BOTTOMRIGHT=8."
+    },
+    "CTextFrame::SetText": {
+      "kind": "function", "rva": "0x000fde90", "conv": "thiscall",
+      "sig": "void(CTextFrame* this, const char* text)",
+      "bytes": "55 8b ec 53 56 57 8b 7d 08 8b f1 85 ff 74 5f 57"
+    },
+    "CSpriteFrame::GetInstance": {
+      "kind": "function", "rva": "0x000f7060", "conv": "thiscall",
+      "sig": "CModelInstance*(CSpriteFrame* this)",
+      "bytes": "83 b9 74 01 00 00 00 74 09 8b 81 78 01 00 00 8b"
+    },
+    "SetAnimation": {
+      "kind": "function", "rva": "0x001a42b0", "conv": "fastcall",
+      "sig": "void(CModelInstance* instance, const int* tags, int count, int flags)",
+      "bytes": "55 8b ec 83 ec 10 53 8b d9 89 55 fc 56 8b 73 30",
+      "doc": "Picks the sequence whose name matches the tags, e.g. {stand, options, alternate}."
+    },
+    "AnimTag.stand": { "kind": "constant", "value": 2 },
+    "AnimTag.morph": { "kind": "constant", "value": 3 },
+    "AnimTag.alternate": { "kind": "constant", "value": 4 },
+    "AnimTag.options": { "kind": "constant", "value": 23 },
+
+    "CGlueMenu::BindControl": {
+      "kind": "function", "rva": "0x002e1460", "conv": "thiscall",
+      "sig": "CFrame*(CGlueMenu* this, const char* name, int command, int enable)",
+      "bytes": "55 8b ec 56 57 8b f9 33 d2 8b 4d 08 e8 2f 18 e1",
+      "doc": "Looks the frame up and makes the menu receive its clicks as `command`. Crashes if the frame doesn't exist."
+    },
+    "CMainMenu.vtable": { "kind": "data", "rva": "0x00ab1894" },
+    "CMainMenu.vtable.OnEvent": { "kind": "offset", "value": "0x0c", "doc": "Slot 3." },
+    "CMainMenu.vtable.Setup": { "kind": "offset", "value": "0xdc", "doc": "Slot 55." },
+    "CMainMenu::OnEvent": {
+      "kind": "function", "rva": "0x002efb70", "conv": "thiscall",
+      "sig": "int(CMainMenu* this, CEvent* event)",
+      "bytes": "55 8b ec 8b 45 08 57 8b f9 8b 48 08 83 f9 21 77",
+      "doc": "The command id is at event + 8."
+    },
+    "CMainMenu::Setup": {
+      "kind": "function", "rva": "0x002dbe90", "conv": "thiscall",
+      "sig": "int(CMainMenu* this, int, int)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 81 ec 08 01",
+      "doc": "Binds the menu buttons."
+    },
+
+    "CGlueMgr::Get": {
+      "kind": "function", "rva": "0x002de540", "conv": "cdecl", "sig": "CGlueMgr*(void)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 08 a1 ?? ?? ?? ?? 33 c5 50 8d 45 f4 64 a3 00 00 00 00 a1 ?? ?? ?? ?? 85 c0 75 3d",
+      "doc": "The glue (menu) manager singleton, created on first use."
+    },
+    "CGlueMgr::SetScreen": {
+      "kind": "function", "rva": "0x00303c90", "conv": "fastcall", "sig": "void(int screen, int force)",
+      "bytes": "55 8b ec 81 ec 8c 02 00 00 a1 ?? ?? ?? ?? 33 c5 89 45 fc 53 56",
+      "doc": "Destroys the current glue screen and creates `screen` (a GlueScreen.* id) from the screen table at .data 0xCE50B8 ({FDF name, factory, id}). Afterwards CGlueMgr.screen is the new screen's frame."
+    },
+    "CGlueMgr::EnterGame": {
+      "kind": "function", "rva": "0x0030be20", "conv": "fastcall", "sig": "void(int)",
+      "bytes": "56 57 8b f9 e8 17 27 fd ff 83 0d ?? ?? ?? ?? 01",
+      "doc": "Loading finished: destroys the glue screen (CGlueMgr.screen_id becomes GlueScreen.none) and shows the game. CGameUI exists by now."
+    },
+    "CGlueMgr.screen_id": { "kind": "offset", "value": "0x180", "doc": "The current GlueScreen.* id." },
+    "CGlueMgr.screen": { "kind": "offset", "value": "0x184", "doc": "The current glue screen's frame (CMainMenu, CSinglePlayerMenu, ...), or null." },
+    "GlueScreen.loading": { "kind": "constant", "value": 1 },
+    "GlueScreen.main_menu": { "kind": "constant", "value": 2 },
+    "GlueScreen.options": { "kind": "constant", "value": 3 },
+    "GlueScreen.single_player": { "kind": "constant", "value": 4 },
+    "GlueScreen.custom_game": { "kind": "constant", "value": 5, "doc": "\"Skirmish\" in the screen table." },
+    "GlueScreen.custom_campaign": { "kind": "constant", "value": 6 },
+    "GlueScreen.campaign": { "kind": "constant", "value": 7 },
+    "GlueScreen.lan": { "kind": "constant", "value": 8, "doc": "LocalMultiplayerJoin." },
+    "GlueScreen.score_screen": { "kind": "constant", "value": 12 },
+    "GlueScreen.view_replay": { "kind": "constant", "value": 13 },
+    "GlueScreen.load_saved_game": { "kind": "constant", "value": 14 },
+    "GlueScreen.battle_net": { "kind": "constant", "value": 15 },
+    "GlueScreen.none": { "kind": "constant", "value": 17 },
+
+    "CGameWar3::Reset": {
+      "kind": "function", "rva": "0x001dfaf0", "conv": "thiscall", "sig": "void(CGameWar3* this, int leaving, int)",
+      "bytes": "55 8b ec 56 8b f1 33 c9 57 c7 86 e0 03 00 00 00",
+      "doc": "Tears down the previous game's state and re-registers the natives (InitNatives.call.map_load_1). Runs with leaving = 0 when a map starts loading (before its files are read) and with leaving = 1 when the player leaves a game."
+    },
+    "Game.expansion": { "kind": "data", "rva": "0x00cd52f0", "doc": "int: 1 when the game runs as The Frozen Throne, 0 for Reign of Chaos. The function at 0x2DF4A0 returns the product code from it ('W3XP' for 1, 'WAR3'); 0x2DF470 (fastcall, ecx = this value) writes the game's name from the table at 0xAA9874." },
+    "CGameWar3.instance": { "kind": "data", "rva": "0x00d687a8", "doc": "CGameWar3*: the current game, or null." },
+    "CGameWar3.map_info": { "kind": "offset", "value": "0x30", "doc": "The map's info record (see MapInfo.*)." },
+    "MapInfo.name": { "kind": "offset", "value": "0x4", "doc": "RCString: the map's name, e.g. \"Dustwallow Keys\"." },
+    "MapInfo.path": { "kind": "offset", "value": "0x24", "doc": "RCString: the map's archive path, e.g. \"Maps\\(10)DustwallowKeys.w3m\"." },
+    "MapInfo.description": { "kind": "offset", "value": "0x10", "doc": "RCString: the map's description from its war3map.w3i, trigger strings resolved." },
+    "CGameWar3.local_player": { "kind": "offset", "value": "0x28", "doc": "uint16_t: the local player's slot. GetLocalPlayer reads +0x2A instead while the net client says so (0x32C110)." },
+    "CGameWar3.player_count": { "kind": "offset", "value": "0x54", "doc": "uint32_t: the length of the player array behind CGameWar3::GetPlayer (at +0x58); slots without a player are null." },
+    "CGameWar3.load_path": { "kind": "offset", "value": "0x2f0", "doc": "RCString: the map or saved game a load request (0x1E7630: LoadGame, ChangeLevel, the in-game Load Game) asked for, e.g. \"Save\\Profile1\\CustomSaves\\<map>\\<name>.w3z\"; still there in the next game while it loads." },
+    "CGameWar3.load_is_save": { "kind": "offset", "value": "0x32c", "doc": "int: 1 if CGameWar3.load_path names a saved game (it ends in .w3z)." },
+    "CGameWar3.handles": { "kind": "offset", "value": "0x1c", "doc": "The handle manager (what 0x1E0D70 returns, creating it if missing): JASS handle ids for agents. See HandleManager.*." },
+    "CGameWar3::GetPlayer": {
+      "kind": "function", "rva": "0x001e0ea0", "conv": "thiscall", "sig": "CPlayerWar3*(CGameWar3* this, int slot)",
+      "bytes": "55 8b ec 8b 45 08 85 c0 78 0d 3b 41 54 73 08 8b",
+      "doc": "The player in a slot ([game+0x58+slot*4], count at +0x54), or null. ret 4."
+    },
+    "CPlayerWar3.name": { "kind": "offset", "value": "0x24", "doc": "RCString: the player's name. CPlayerWar3::GetName (0x2684B0) with 1, as GetPlayerName uses it, writes \"Player N\" into it when it's empty; Tome only reads it." },
+    "CPlayerWar3.slot": { "kind": "offset", "value": "0x30", "doc": "uint8_t: the player's slot (GetPlayerId)." },
+    "CPlayerWar3.game_state": { "kind": "offset", "value": "0x270", "doc": "int: 1 while the player is in the game, 2 once removed with a result (CPlayerWar3::RemovePlayer)." },
+    "CPlayerWar3.selection": { "kind": "offset", "value": "0x34", "doc": "The player's CSelectionWar3 (vtable 0xAA29D4)." },
+    "CSelectionWar3.local_leader": { "kind": "offset", "value": "0x1e0", "doc": "CUnit*: the local player's active unit, whose portrait and commands show (Tab cycles it); set by 0x293110 (\"Async set local leader\"), read by 0x28FFE0." },
+    "CSelectionWar3.local_units": { "kind": "offset", "value": "0x1e8", "doc": "The local selection, a unit group (UnitGroup.*); its count is at +0x10 (0x290270 reads +0x1F8). SelectUnit adds to it through 0x28DBE0 (\"Add local\"), at most 12." },
+    "UnitGroup.first": { "kind": "offset", "value": "0xc", "doc": "The group's first node; a value <= 0 ends the list. Node: next at +4, CUnit* at +8 (0x290820)." },
+    "UnitGroup.count": { "kind": "offset", "value": "0x10", "doc": "uint32_t: the number of units in the group." },
+    "CAgent.id": { "kind": "offset", "value": "0xc", "doc": "Two uint32_t: the agent's id. Lookups in the agent table take both (0x054530, then the record's tag '+agl' and +0x20 = 0 for a live one); the handle hash keys on the second." },
+    "CItem.type_id": { "kind": "offset", "value": "0x30", "doc": "uint32_t: the item type, e.g. 'pinv' (GetItemTypeId); GetUnitTypeName names it too (GetItemName)." },
+    "COrder.id": { "kind": "offset", "value": "0x24", "doc": "uint32_t: the order id, e.g. 851986 (move); GetIssuedOrderId reads it from the unit's current order (0x685CD0)." },
+    "COrder.x": { "kind": "offset", "value": "0x48", "doc": "float: the order's target point, x (the point and target orders copy +0x48 and +0x50)." },
+    "COrder.y": { "kind": "offset", "value": "0x50", "doc": "float: the order's target point, y." },
+    "CUnit.vtable": { "kind": "data", "rva": "0x00b77eb0", "doc": "CUnit's vtable (RTTI), to tell a unit from other widgets." },
+    "CItem.vtable": { "kind": "data", "rva": "0x00b77aa8", "doc": "CItem's vtable (RTTI)." },
+    "CUnit.type_id": { "kind": "offset", "value": "0x30", "doc": "uint32_t: the unit type, e.g. 'hpea' (GetUnitTypeId)." },
+    "CUnit.owner": { "kind": "offset", "value": "0x58", "doc": "int: the owner's player slot (the unit's vtable +0xEC returns it; GetOwningPlayer)." },
+    "CUnit.flags": { "kind": "offset", "value": "0x5c", "doc": "uint32_t flags; see UnitFlag.*." },
+    "UnitFlag.dead": { "kind": "constant", "value": "0x100", "doc": "CUnit.flags: dead (vtable +0x13C, IsUnitType DEAD)." },
+    "UnitFlag.structure": { "kind": "constant", "value": "0x10000", "doc": "CUnit.flags: a building (0x68C190, IsUnitType STRUCTURE)." },
+    "UnitFlag.not_hero": { "kind": "constant", "value": "0x40000000", "doc": "CUnit.flags: never a hero. IsUnitType HERO (0x205540) is: the type id's first character is A-Z and this flag is clear." },
+    "GetUnitTypeName": {
+      "kind": "function", "rva": "0x003442f0", "conv": "fastcall", "sig": "const char*(uint32_t type_id, uint32_t index)",
+      "bytes": "56 8b f2 ba ?? ?? ?? ?? e8 63 04 00 00 85 c0 74",
+      "doc": "A unit type's localized name (the Name field; index picks one of several, clamped), or a placeholder for an unknown type. What GetUnitName (0x203D90) shows."
+    },
+    "HandleManager.hash_buckets": { "kind": "offset", "value": "0x1c0", "doc": "Buckets (12 bytes each: link offset at +0, first node at +8, <= 0 for none) of the agent-to-handle hash, keyed by the agent's id at +0x10. Node: key at +0, next at [node + link offset + 4], handle id at +0x18. 0x282E30 looks agents up there, and creates a handle if there's none." },
+    "HandleManager.hash_mask": { "kind": "offset", "value": "0x1c8", "doc": "The hash's bucket mask; 0xFFFFFFFF while it's empty." },
+    "HandleManager.entries": { "kind": "offset", "value": "0x19c", "doc": "The handle table: 12 bytes per handle id from HandleId.first, the object at +4." },
+    "HandleId.first": { "kind": "constant", "value": "0x100000", "doc": "The first JASS handle id." },
+
+    "OnNetGameTick": {
+      "kind": "function", "rva": "0x0036aba0", "conv": "fastcall", "sig": "int(CNetEventGameTick* event)",
+      "bytes": "83 c1 14 e8 f8 15 ce ff b8 01 00 00 00 c3 cc cc",
+      "doc": "Handler of the network client's game tick (event 0x40090092, registered by 0x372920): advances the game's schedulers and timers (0x04C1A0) by the step at CNetEventGameTick.step. The client (0x32D670) dispatches it as game time accrues at the game speed, so it stops while the game is paused."
+    },
+    "CNetEventGameTick.step": { "kind": "offset", "value": "0x14", "doc": "float: the game time one tick advances, in seconds (0.005 in 1.27b, from .data 0xD69C48)." },
+    "GameShutdown": {
+      "kind": "function", "rva": "0x00044740", "conv": "cdecl", "sig": "void(void)",
+      "bytes": "e8 8b c7 ff ff e8 e6 c5 ff ff e8 f1 f2 14 00 6a",
+      "doc": "GameMain calls it once the main loop has ended (the player exited), before the game's systems are torn down. Main thread."
+    },
+    "CGameUI::Get": {
+      "kind": "function", "rva": "0x0036cb20", "conv": "fastcall", "sig": "CGameUI*(int create, int forget)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 08 56 a1 ?? ?? ?? ?? 33 c5 50 8d 45 f4 64 a3 00 00 00 00 8b f2 a1",
+      "doc": "The in-game UI singleton (global 0xD6A8B8). create = 1 constructs it if there is none; forget = 1 clears the global."
+    },
+    "CGameUI::HandleSlashCommand": {
+      "kind": "function", "rva": "0x00371e80", "conv": "thiscall", "sig": "int(CGameUI* this, const char* text)",
+      "bytes": "55 8b ec 81 ec 4c 01 00 00 a1 ?? ?? ?? ?? 33 c5 89 45 fc 53 8b",
+      "doc": "Called with every line sent from the in-game chat box. Handles the local commands (/mapname, /fps, /squelch, ...) and returns 1 for them; the line is then not sent and the chat box closes."
+    },
+    "CGameUI::DisplayText": {
+      "kind": "function", "rva": "0x00374de0", "conv": "thiscall",
+      "sig": "void(CGameUI* this, float x, float y, const char* text, float duration, uint32_t color)",
+      "bytes": "55 8b ec f3 0f 10 45 0c 56 83 ec 08 8b f1 f3 0f",
+      "doc": "Shows a message in the game's message area, like DisplayTimedTextToPlayer (which passes color 0xFFFFFFFF)."
+    },
+    "CPlayerWar3::OnUnitDeath": {
+      "kind": "function", "rva": "0x00260ab0", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* unit, CUnit* killer)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 3c a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b d9 8b 45 08 68 14",
+      "doc": "A unit of this player died; killer may be null. Fires the JASS EVENT_PLAYER_UNIT_DEATH (0x80214) for the player (registration checked inside, at 0x072190), so it runs whether or not a trigger listens. One caller, CUnit 0x67B8A0. ret 8."
+    },
+    "CPlayerWar3::OnConstructFinish": {
+      "kind": "function", "rva": "0x002608b0", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* building)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 3c a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b d9 8b 45 08 68 1c",
+      "doc": "A building of this player was finished. Fires the JASS EVENT_PLAYER_UNIT_CONSTRUCT_FINISH (0x8021C) for the player (registration checked inside, at 0x072190), so it runs whether or not a trigger listens. One caller, CUnit 0x67B630. ret 4."
+    },
+    "CPlayerWar3::OnTrainFinish": {
+      "kind": "function", "rva": "0x00262580", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* building, CUnit* trained)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 38 a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b d9 68 22",
+      "doc": "A unit finished training: the building (GetTriggerUnit) and the new unit (GetTrainedUnit). Fires the JASS EVENT_PLAYER_UNIT_TRAIN_FINISH (0x80222) for the player (registration checked inside, at 0x072190), so it runs whether or not a trigger listens. One caller, CUnit 0x67D600. ret 8."
+    },
+    "CPlayerWar3::OnUpgradeFinish": {
+      "kind": "function", "rva": "0x002628a0", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* unit, uint32_t value)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 3c a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b d9 8b 45 08 68 1f",
+      "doc": "A building finished upgrading (e.g. Town Hall to Keep; the unit has its new type). value goes to the event data's +0x44. Fires the JASS EVENT_PLAYER_UNIT_UPGRADE_FINISH (0x8021F) for the player (registration checked inside, at 0x072190), so it runs whether or not a trigger listens. One caller, CUnit 0x67D960. ret 8."
+    },
+    "CPlayerWar3::OnResearchFinish": {
+      "kind": "function", "rva": "0x002617f0", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* unit, uint32_t research)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 38 a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b d9 68 25",
+      "doc": "A research finished: the unit that researched it and the research id (GetResearched, event data +0x44). Fires the JASS EVENT_PLAYER_UNIT_RESEARCH_FINISH (0x80225) for the player (registration checked inside, at 0x072190), so it runs whether or not a trigger listens. One caller, CUnit 0x67C690. ret 8."
+    },
+    "CPlayerWar3::OnHeroLevel": {
+      "kind": "function", "rva": "0x0025fe60", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* hero)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 38 a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b d9 68 29",
+      "doc": "A hero gained a level. Fires the JASS EVENT_PLAYER_HERO_LEVEL (0x80229) for the player (registration checked inside, at 0x072190), so it runs whether or not a trigger listens. One caller, CUnit 0x67A230. ret 4."
+    },
+    "CPlayerWar3::OnSummon": {
+      "kind": "function", "rva": "0x00262260", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* summoner, CUnit* summoned)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 38 a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b d9 68 2f",
+      "doc": "A unit was summoned: the summoner (GetSummoningUnit) and the summoned unit (GetTriggerUnit, GetSummonedUnit). Fires the JASS EVENT_PLAYER_UNIT_SUMMON (0x8022F) for the player (registration checked inside, at 0x072190), so it runs whether or not a trigger listens. One caller, CUnit 0x67B0B0. ret 8."
+    },
+    "CPlayerWar3::OnPickupItem": {
+      "kind": "function", "rva": "0x002613e0", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* unit, CItem* item)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 38 a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b d9 68 31",
+      "doc": "A unit picked up (or was given) an item. Fires the JASS EVENT_PLAYER_UNIT_PICKUP_ITEM (0x80231) for the player (registration checked inside, at 0x072190), so it runs whether or not a trigger listens. One caller, CUnit 0x67ACF0. ret 8."
+    },
+    "CPlayerWar3::OnDropItem": {
+      "kind": "function", "rva": "0x00260ec0", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* unit, CItem* item)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 38 a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b d9 68 30",
+      "doc": "A unit dropped (or lost) an item. Fires the JASS EVENT_PLAYER_UNIT_DROP_ITEM (0x80230) for the player (registration checked inside, at 0x072190), so it runs whether or not a trigger listens. One caller, CUnit 0x679FE0. ret 8."
+    },
+    "CPlayerWar3::OnUseItem": {
+      "kind": "function", "rva": "0x00262ac0", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* unit, CItem* item)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 38 a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b d9 68 32",
+      "doc": "A unit used an item. Fires the JASS EVENT_PLAYER_UNIT_USE_ITEM (0x80232) for the player (registration checked inside, at 0x072190), so it runs whether or not a trigger listens. One caller, CUnit 0x67DBA0. ret 8."
+    },
+    "CPlayerWar3::OnVictory": {
+      "kind": "function", "rva": "0x00262bc0", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 38 a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b d9 68 0e 02",
+      "doc": "The player won: fires EVENT_PLAYER_VICTORY (0x8020E), registration checked inside. Callers: the result setter 0x269BB0 (switch: 0 victory, 1 defeat) and the game UI (0x37A77C)."
+    },
+    "CPlayerWar3::OnDefeat": {
+      "kind": "function", "rva": "0x0025fc80", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 38 a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b d9 68 0d 02",
+      "doc": "The player lost: fires EVENT_PLAYER_DEFEAT (0x8020D). Callers: 0x269BB0 and the game UI (0x379FAC)."
+    },
+    "CPlayerWar3::OnLeave": {
+      "kind": "function", "rva": "0x00260460", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 38 a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b d9 68 0f 02",
+      "doc": "The player left the game: fires EVENT_PLAYER_LEAVE (0x8020F). Four callers in the network code (0x2A0F66, 0x2A0F8F, 0x2A27FC, 0x2A2953)."
+    },
+    "HandleManager::FireGameSave": {
+      "kind": "function", "rva": "0x00284760", "conv": "thiscall",
+      "sig": "void(HandleManager* this, const char* name)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 53 56 57 a1 ?? ?? ?? ?? 33 c5 50 8d 45 f4 64 a3 00 00 00 00 8b d9 8b 7d 08 85",
+      "doc": "Fires EVENT_GAME_SAVE (0x80303) with the save's name. Called by the network save handler (0x26F4F6) after it pauses the game (SetPaused(1, 0xFF, 1, 0, 0)) and before the game is written. ret 4."
+    },
+    "HandleManager::FireGameLoaded": {
+      "kind": "function", "rva": "0x00284740", "conv": "thiscall",
+      "sig": "void(HandleManager* this)",
+      "bytes": "a1 ?? ?? ?? ?? 6a 00 68 00 03 08 00 c7 80 e8 03",
+      "doc": "Fires EVENT_GAME_LOADED (0x80300). Called by the saved game loader (0x1E3730, at 0x1E3C0F) once the saved state is read, before CGlueMgr::EnterGame."
+    },
+    "CUnit::GetHeroLevel": {
+      "kind": "function", "rva": "0x00685150", "conv": "thiscall",
+      "sig": "int(CUnit* this)",
+      "bytes": "8b 81 f0 01 00 00 85 c0 74 0a 8d 48 6c e8 de 18",
+      "doc": "A hero's level (GetHeroLevel calls it for heroes only)."
+    },
+    "CGameWar3::SaveGame": {
+      "kind": "function", "rva": "0x001e8630", "conv": "fastcall", "sig": "int(const char* path, int flag)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 81 ec f8 08",
+      "doc": "Writes the saved game (a CSaveGame, 0x1D8DD0) to path, e.g. \"Save\\Profile1\\CustomSaves\\<map>\\<name>\". Both ways to save call it: the SaveGame native (0x2113F0, path from 0x1FFFD0) and the network save handler for the Esc menu's Save Game (0x26F51F, path from 0x2BFC90, after HandleManager::FireGameSave). Returns early in replays (0x32C110)."
+    },
+    "CPlayerWar3::RemovePlayer": {
+      "kind": "function", "rva": "0x00269b00", "conv": "thiscall", "sig": "void(CPlayerWar3* this, int result)",
+      "bytes": "55 8b ec 57 8b f9 6a 00 0f b6 47 30 8b 4f 34 50",
+      "doc": "What RemovePlayer (0x210A40) does: result is a playergameresult (0 victory, 1 defeat, 2 tie, 3 neutral). Only while CPlayerWar3.game_state is 1: stores the result, sets the state to 2, and reports it to the net client (0x32CF60: victory 4, defeat 3, tie 5), or, while +0x268 is set, calls OnVictory or OnDefeat instead. Melee's victory and defeat (MeleeDoVictoryEnum, MeleeDoDefeat) end here. ret 4."
+    },
+    "CPlayerWar3::OnUnitAttacked": {
+      "kind": "function", "rva": "0x002605b0", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* attacker, CUnit* attacked)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 38 a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b d9 68 12",
+      "doc": "A unit of this player is being attacked (GetTriggerUnit: attacked, GetAttacker). Fires the JASS EVENT_PLAYER_UNIT_ATTACKED (0x80212) for the player, registration checked inside (0x072190); called unconditionally by CUnit 0x67B2E0. ret 8."
+    },
+    "CPlayerWar3::OnUnitRescued": {
+      "kind": "function", "rva": "0x002615f0", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* rescuer, CUnit* rescued)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 38 a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b d9 68 13",
+      "doc": "A unit was rescued (GetRescuer). Fires the JASS EVENT_PLAYER_UNIT_RESCUED (0x80213) for the player, registration checked inside (0x072190); called unconditionally by CUnit 0x67C450. ret 8."
+    },
+    "CPlayerWar3::OnConstructStart": {
+      "kind": "function", "rva": "0x002609b0", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* building)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 3c a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b d9 8b 45 08 68 1a",
+      "doc": "Construction of a building began (GetConstructingStructure). Fires the JASS EVENT_PLAYER_UNIT_CONSTRUCT_START (0x8021A) for the player, registration checked inside (0x072190); called unconditionally by three build paths (0x54A5B0, 0x54D0F0, 0x54D9D0). ret 4."
+    },
+    "CPlayerWar3::OnConstructCancel": {
+      "kind": "function", "rva": "0x002607b0", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* building)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 3c a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b d9 8b 45 08 68 1b",
+      "doc": "A building under construction was cancelled (GetCancelledStructure). Fires the JASS EVENT_PLAYER_UNIT_CONSTRUCT_CANCEL (0x8021B) for the player, registration checked inside (0x072190); called unconditionally by CUnit 0x67B520. ret 4."
+    },
+    "CPlayerWar3::OnUpgradeStart": {
+      "kind": "function", "rva": "0x002629b0", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* unit, uint32_t type)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 3c a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b d9 8b 45 08 68 1d",
+      "doc": "A building began upgrading to type (event data +0x44). Fires the JASS EVENT_PLAYER_UNIT_UPGRADE_START (0x8021D) for the player, registration checked inside (0x072190); called unconditionally by CUnit 0x67DA80. ret 8."
+    },
+    "CPlayerWar3::OnUpgradeCancel": {
+      "kind": "function", "rva": "0x00262790", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* unit, uint32_t type)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 3c a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b d9 8b 45 08 68 1e",
+      "doc": "An upgrade was cancelled. Fires the JASS EVENT_PLAYER_UNIT_UPGRADE_CANCEL (0x8021E) for the player, registration checked inside (0x072190); called unconditionally by CUnit 0x67D840. ret 8."
+    },
+    "CPlayerWar3::OnTrainStart": {
+      "kind": "function", "rva": "0x00262680", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* building, uint32_t type)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 3c a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b d9 8b 45 08 68 20",
+      "doc": "A building began training a unit type (GetTrainedUnitType, event data +0x44). Fires the JASS EVENT_PLAYER_UNIT_TRAIN_START (0x80220) for the player, registration checked inside (0x072190); called unconditionally by CUnit 0x67D720. ret 8."
+    },
+    "CPlayerWar3::OnTrainCancel": {
+      "kind": "function", "rva": "0x00262470", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* building, uint32_t type)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 3c a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b d9 8b 45 08 68 21",
+      "doc": "Training was cancelled. Fires the JASS EVENT_PLAYER_UNIT_TRAIN_CANCEL (0x80221) for the player, registration checked inside (0x072190); called unconditionally by CUnit 0x67D4E0. ret 8."
+    },
+    "CPlayerWar3::OnResearchStart": {
+      "kind": "function", "rva": "0x002618f0", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* unit, uint32_t research)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 38 a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b d9 68 23",
+      "doc": "A research began (GetResearched). Fires the JASS EVENT_PLAYER_UNIT_RESEARCH_START (0x80223) for the player, registration checked inside (0x072190); called unconditionally by CUnit 0x67C7B0. ret 8."
+    },
+    "CPlayerWar3::OnResearchCancel": {
+      "kind": "function", "rva": "0x002616f0", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* unit, uint32_t research)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 38 a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b d9 68 24",
+      "doc": "A research was cancelled. Fires the JASS EVENT_PLAYER_UNIT_RESEARCH_CANCEL (0x80224) for the player, registration checked inside (0x072190); called unconditionally by CUnit 0x67C570. ret 8."
+    },
+    "CPlayerWar3::OnHeroSkill": {
+      "kind": "function", "rva": "0x00260360", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* hero, uint32_t ability, int level)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 38 a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b d9 68 2a",
+      "doc": "A hero learned a skill (GetLearnedSkill +0x44, GetLearnedSkillLevel +0x48). Fires the JASS EVENT_PLAYER_HERO_SKILL (0x8022A) for the player, registration checked inside (0x072190); called unconditionally by CUnit 0x67A770. ret 0xC."
+    },
+    "CPlayerWar3::OnHeroRevivable": {
+      "kind": "function", "rva": "0x0025ff60", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* hero)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 38 a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b d9 68 2b",
+      "doc": "A dead hero became revivable. Fires the JASS EVENT_PLAYER_HERO_REVIVABLE (0x8022B) for the player, registration checked inside (0x072190); called unconditionally by 0x26AD96. ret 4."
+    },
+    "CPlayerWar3::OnHeroReviveStart": {
+      "kind": "function", "rva": "0x00260260", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* hero)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 38 a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b d9 68 2c",
+      "doc": "A hero's revival began at an altar (GetRevivingUnit). Fires the JASS EVENT_PLAYER_HERO_REVIVE_START (0x8022C) for the player, registration checked inside (0x072190); called unconditionally by CUnit 0x67A660. ret 4."
+    },
+    "CPlayerWar3::OnHeroReviveCancel": {
+      "kind": "function", "rva": "0x00260060", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* hero)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 38 a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b d9 68 2d",
+      "doc": "A hero's revival was cancelled. Fires the JASS EVENT_PLAYER_HERO_REVIVE_CANCEL (0x8022D) for the player, registration checked inside (0x072190); called unconditionally by CUnit 0x67A440. ret 4."
+    },
+    "CPlayerWar3::OnHeroReviveFinish": {
+      "kind": "function", "rva": "0x00260160", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* hero)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 38 a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b d9 68 2e",
+      "doc": "A hero was revived. Fires the JASS EVENT_PLAYER_HERO_REVIVE_FINISH (0x8022E) for the player, registration checked inside (0x072190); called unconditionally by CUnit 0x67A550. ret 4."
+    },
+    "CPlayerWar3::OnUnitSell": {
+      "kind": "function", "rva": "0x00261af0", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* shop, CUnit* sold, CUnit* buyer)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 38 a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b d9 68 0d 03",
+      "doc": "A shop sold a unit (GetSellingUnit +0x30, GetSoldUnit +0x3C, GetBuyingUnit +0x48). Fires the JASS EVENT_PLAYER_UNIT_SELL (0x8030D) for the player, registration checked inside (0x072190); called unconditionally by CUnit 0x67C8D0. ret 0xC."
+    },
+    "CPlayerWar3::OnItemSell": {
+      "kind": "function", "rva": "0x00261c00", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* shop, CUnit* buyer, CItem* item)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 38 a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b d9 68 0f 03",
+      "doc": "A shop sold an item (GetSellingUnit, GetBuyingUnit, GetSoldItem). Fires the JASS EVENT_PLAYER_UNIT_SELL_ITEM (0x8030F) for the player, registration checked inside (0x072190); called unconditionally by CUnit 0x67CA00. ret 0xC."
+    },
+    "CPlayerWar3::OnItemPawn": {
+      "kind": "function", "rva": "0x002612d0", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* seller, CUnit* shop, CItem* item)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 38 a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b d9 68 15",
+      "doc": "A unit sold (pawned) an item to a shop. Fires the JASS EVENT_PLAYER_UNIT_PAWN_ITEM (0x80315) for the player, registration checked inside (0x072190); called unconditionally by CUnit 0x67C100. ret 0xC."
+    },
+    "CPlayerWar3::OnUnitChangeOwner": {
+      "kind": "function", "rva": "0x002606b0", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* unit, int previous_owner)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 38 a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b d9 68 0e 03",
+      "doc": "A unit changed owner (GetChangingUnitPrevOwner, the low 16 bits at event data +0x44). Fires the JASS EVENT_PLAYER_UNIT_CHANGE_OWNER (0x8030E) for the player, registration checked inside (0x072190); called unconditionally by CUnit 0x67B400. ret 8."
+    },
+    "CUnit::OnOrder": {
+      "kind": "function", "rva": "0x0067bd10", "conv": "thiscall",
+      "sig": "void(CUnit* this, COrder* order)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 4c a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b f1 89 75 ac",
+      "doc": "A unit was given an order with no target (stop, hold, train...). Fires EVENT_UNIT_ISSUED_ORDER (0x8024B) and the owner's EVENT_PLAYER_UNIT_ISSUED_ORDER (0x80226, CPlayerWar3 0x2610C0), but returns early unless a trigger listens for one of them. The order dispatchers 0x67ABE0 and 0x688790 pick it, OnPointOrder or OnTargetOrder by the order's class. ret 4."
+    },
+    "CUnit::OnPointOrder": {
+      "kind": "function", "rva": "0x0067c230", "conv": "thiscall",
+      "sig": "void(CUnit* this, COrder* order)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 54 a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b d9 89 5d c0",
+      "doc": "A unit was given an order with a target point (move, attack-move, build): EVENT_UNIT_ISSUED_POINT_ORDER and the player's (0x80227, 0x2614E0), with the same early return. ret 4."
+    },
+    "CUnit::OnTargetOrder": {
+      "kind": "function", "rva": "0x0067d2b0", "conv": "thiscall",
+      "sig": "void(CUnit* this, COrder* order)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 50 a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b d9 89",
+      "doc": "A unit was given an order with a target widget (attack, smart on a unit, pick up an item): EVENT_UNIT_ISSUED_TARGET_ORDER and the player's (0x80228, 0x262360), same early return. Callers: both dispatchers and 0x423EA9. ret 4."
+    },
+    "CUnit::OnLoaded": {
+      "kind": "function", "rva": "0x0067a950", "conv": "thiscall",
+      "sig": "void(CUnit* this, CUnit* transport)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 44 a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b f9 8b 45 08",
+      "doc": "A unit was loaded into a transport (GetLoadedUnit: this, GetTransportUnit): EVENT_UNIT_LOADED (0x80258) and the owner's EVENT_PLAYER_UNIT_LOADED (0x80233, CPlayerWar3 0x2611D0), but only if a trigger listens for one of them. One caller, 0x59FCE4. ret 4."
+    },
+    "COrder::GetTarget": {
+      "kind": "function", "rva": "0x00686810", "conv": "thiscall",
+      "sig": "CWidget*(COrder* this)",
+      "bytes": "8b 41 5c 83 c1 58 23 01 83 f8 ff 75 03 33 c0 c3",
+      "doc": "The order's target widget (unit, item or destructable) from the agent id at +0x58, or null."
+    },
+    "CGameUI::DisplayChatMessage": {
+      "kind": "function", "rva": "0x00373470", "conv": "thiscall",
+      "sig": "void(CGameUI* this, int player, const char* text, int recipient, float duration)",
+      "bytes": "55 8b ec 81 ec a8 02 00 00 a1 ?? ?? ?? ?? 33 c5 89 45 fc 53",
+      "doc": "Shows a player's chat message in the message area, with the recipient prefix (CHAT_RECIPIENT_*: 0 all, 1 allies, 2 observers or referees, else private) and the player's colored name. Returns at once without a message frame (+0x3EC). ret 0x10, two callers in CGameUI's chat handling."
+    },
+    "CGameUI::SetPaused": {
+      "kind": "function", "rva": "0x003719c0", "conv": "thiscall",
+      "sig": "void(CGameUI* this, int pause, int player, int a3, int a4, int a5)",
+      "bytes": "55 8b ec 81 ec 6c 01 00 00 a1 ?? ?? ?? ?? 33 c5",
+      "doc": "Pauses or resumes the game for a player (0xFF: none): PauseGame (0x20F4F0) passes (pause, local player, 0, 1, 1); the network pause and resume handlers 0x370900 and 0x370CB0 (pause, the event's player at +0x15, 1, 0, 0). Asks the net client (0x32AFF0 pause, 0x32B080 resume) and shows PAUSE_GAME_NOTIFY / RESUME_GAME_NOTIFY. ret 0x14."
+    },
+    "PresentFrame": {
+      "kind": "function", "rva": "0x00136fe0", "conv": "fastcall", "sig": "void(int flags)",
+      "bytes": "51 8b 0d ?? ?? ?? ?? 8b 01 ff 50 48 b9 01 00 00",
+      "doc": "Presents a rendered frame (graphics device vtable +0x48, D3D or OpenGL). Called once per frame on the main thread, in menus, loading screens and games."
+    },
+
+    "CObserver.vtable": { "kind": "data", "rva": "0x00a84314", "doc": "6 slots: 1 deleting destructor, 2 subscribe, 3 OnEvent(CEvent*)." },
+    "CObserver.vtable.OnEvent": { "kind": "offset", "value": "0x0c", "doc": "int __thiscall(CEvent*), ret 4. For a control's click, the command id is at event + 8." },
+    "CFrame::SetFocus": {
+      "kind": "function", "rva": "0x000f0a00", "conv": "thiscall", "sig": "void(CFrame* this, int focus, int, CFrame* other)",
+      "bytes": "55 8b ec 83 3d ?? ?? ?? ?? 00 56 8b f1 75 4d 8b",
+      "doc": "focus = 1 gives the frame the keyboard focus (vtable +0xAC decides), focus = 0 takes it from whichever frame has it (vtable +0xB0 on that one). The focused frame is FocusedFrame."
+    },
+    "FocusedFrame": { "kind": "data", "rva": "0x00d47830", "doc": "CFrame*: the frame with the keyboard focus, or null." },
+    "CControl::SetListener": {
+      "kind": "function", "rva": "0x00112d80", "conv": "thiscall",
+      "sig": "void(CControl* this, int command, CObserver* listener, int enable)",
+      "bytes": "55 8b ec 83 7d 10 00 8b 55 0c 74 16 85 d2 74 12 8b 01 52 ff 75 08 68 64 00 09",
+      "doc": "Makes clicks on the control reach listener->OnEvent with `command` (event 0x40090064). The registration holds a reference to the listener (refcount at +4)."
+    },
+    "CControl::Click": {
+      "kind": "function", "rva": "0x00112100", "conv": "thiscall", "sig": "void(CControl* this, int button)",
+      "bytes": "55 8b ec 56 68 64 00 09 40 8b f1 e8 80 00 f6 ff",
+      "doc": "Clicks the control as the player would: if it's enabled (0x072190 with 0x40090064), fills the event at 0xCE3BA8 (button at +0x10, the control at +0x14) and dispatches it through its vtable +0x10, which notifies its listeners. ret 4. Mouse paths pass the mouse event's button; a shortcut path (0x0FEA8F) passes 1."
+    },
+    "CLayoutFrame::SetWidth": {
+      "kind": "function", "rva": "0x001116c0", "conv": "thiscall", "sig": "void(CLayoutFrame* this, float width)",
+      "bytes": "55 8b ec f3 0f 10 45 08 f3 0f 11 41 58 c7 45 08",
+      "doc": "Stores the width at +0x58, then updates the layout (tail call to 0x111390, ret 4). Call on frame + CFrame.layout. SetHeight is 0x111520 (+0x5C)."
+    },
+
+    "CEscMenuMainPanel::Setup": {
+      "kind": "function", "rva": "0x003b1890", "conv": "thiscall", "sig": "int(CEscMenuMainPanel* this, int, int)",
+      "bytes": "55 8b ec 83 ec 08 33 d2 56 57 8b f9 b9 ?? ?? ??",
+      "doc": "vtable slot 55 (CEscMenuMainPanel vtable 0xABDAEC). Finds MainPanel, EndGamePanel, ConfirmQuitPanel, HelpPanel and TipsPanel, stores their sizes, and binds the buttons (commands 0-0x12: Pause 0, Save 1, Load 2, Options 3, Help 4, Tips 5, End Game 7, Return 8, ...). ret 8."
+    },
+    "CEscMenuMainPanel::SetPanel": {
+      "kind": "function", "rva": "0x003cf5c0", "conv": "thiscall", "sig": "void(CEscMenuMainPanel* this, int panel)",
+      "bytes": "55 8b ec 81 ec 04 04 00 00 a1 ?? ?? ?? ?? 33 c5 89 45 fc 56 8b f1 57 8b 7d",
+      "doc": "Switches the Esc menu's main panel (EscMenuPanel.*: 0 none, 1 main, 2 and 6 End Game, 3 and 7 Confirm Quit, 4 Help, 5 Tips): hides all five panels, resizes the backdrop to the new one's size and shows it; the current one is at +0x168. ret 4."
+    },
+    "EscMenuPanel.main": { "kind": "constant", "value": 1, "doc": "CEscMenuMainPanel::SetPanel: the main panel (MainPanel), as the menu opens and as Help's OK goes back. 0 shows no panel." },
+    "CEditBox::GetText": {
+      "kind": "function", "rva": "0x00102b50", "conv": "thiscall", "sig": "const char*(CEditBox* this)",
+      "bytes": "8b 81 e4 01 00 00 c3 cc cc cc cc cc cc cc cc cc 55",
+      "doc": "The edit box's text buffer (+0x1E4), UTF-8. 57 callers (CChatEditBar reads its edit box through it)."
+    },
+    "CEditBox::SetText": {
+      "kind": "function", "rva": "0x001041b0", "conv": "thiscall", "sig": "void(CEditBox* this, const char* text, int notify)",
+      "bytes": "55 8b ec 53 8b 5d 08 56 8b f1 57 53 8b be f0 01",
+      "doc": "Replaces the text (cut to the box's maximum length, +0x1F0), puts the cursor at the end and redraws; notify = 1 also sends the change event 0x400B0065 (0x102A40). ret 8, 72 callers."
+    },
+    "CGameUI::SetMode": {
+      "kind": "function", "rva": "0x00374260", "conv": "thiscall", "sig": "void(CGameUI* this, void* mode, int push)",
+      "bytes": "55 8b ec 53 56 8b f1 57 8b 86 fc 03 00 00 83 b8",
+      "doc": "Switches the in-game UI's mode (the current one at +0x1B4; push = 1 keeps the old one on the stack at +0x1B8 for 0x3745F0 to go back to). The Esc menu opens with SetMode(CGameUI.esc_menu, 1) after CEscMenu::Reset. ret 8."
+    },
+    "CGameUI.paused_by_player": { "kind": "offset", "value": "0x258", "doc": "int: set by CGameUI::SetPaused from a player's pause or resume (a3 = 1): 1 while a player has the game paused." },
+    "CGameUI.paused_by_trigger": { "kind": "offset", "value": "0x260", "doc": "int: set by CGameUI::SetPaused when a5 = 1 (PauseGame): 1 while a trigger has the game paused; a player's resume can't end that." },
+    "CGameUI.mode": { "kind": "offset", "value": "0x1b4", "doc": "The current mode object (CEscMenu while the Esc menu is open)." },
+    "CGameUI.esc_menu": { "kind": "offset", "value": "0x228", "doc": "The CEscMenu (vtable 0xABDF34), made once per game." },
+    "CEscMenu::Reset": {
+      "kind": "function", "rva": "0x003cdd10", "conv": "thiscall", "sig": "void(CEscMenu* this)",
+      "bytes": "56 6a 00 8b f1 e8 16 15 00 00 8b 4e 18 6a 01 e8",
+      "doc": "What F10 and the Menu button do before opening the menu: the options panel to its first state (0x3CF230(0)) and the main panel to EscMenuPanel.main."
+    },
+    "CEscMenu.main_panel": { "kind": "offset", "value": "0x18", "doc": "Its CEscMenuMainPanel." },
+    "EscMenuPanel.help": { "kind": "constant", "value": 4, "doc": "CEscMenuMainPanel::SetPanel: the Help panel (HelpPanel, 0.432 x 0.384). Tome's in-game mod menu takes its place." },
+    "GlueScreen.game_chatroom": { "kind": "constant", "value": 11, "doc": "The game lobby (CGameChatroom): LAN and Battle.net games before they start." },
+    "CGameChatroom::OnChatReceived": {
+      "kind": "function", "rva": "0x002e6ec0", "conv": "thiscall", "sig": "void(CGameChatroom* this, CNetEventLobby* event)",
+      "bytes": "55 8b ec 81 ec 54 02 00 00 a1 ?? ?? ?? ?? 33 c5 89 45 fc 53 56 57 8b 7d 08 8d 85 fc fe ff ff 68 ff 00 00 00 50 8b d9 8d 77 18 56 e8 48",
+      "doc": "A lobby chat line arrived (lobby event 0x10, delivered to the chatroom's OnEvent 0x2EF2D0 as code 9; registered by 0x2FF2AC): prefixes the sender's name (NetGetPlayerName) and adds the line to the chat area with CTextArea::AddText. The sender doesn't get its own line back; the send handler (0x2F9B50) adds it locally. ret 4."
+    },
+    "CGameChatroom::StartGame": {
+      "kind": "function", "rva": "0x002f9ce0", "conv": "thiscall", "sig": "void(CGameChatroom* this)",
+      "bytes": "55 8b ec 81 ec 18 02 00 00 a1 ?? ?? ?? ?? 33 c5 89 45 fc 8b c1",
+      "doc": "The lobby's Start Game button (command 0 of the chatroom's OnEvent): host only (NetIsHost), checks the slots (0x29FEA0; a dialog through 0x2BC510 if the teams don't allow a start), then starts the countdown (0x32AD30). Plain ret."
+    },
+    "CGameChatroom.net_index": { "kind": "offset", "value": "0x168", "doc": "int: the local client's index in the net client, passed to every net call the lobby makes (NetIsHost, NetGetLocalPlayer, NetGetPlayerName, NetSendLobbyEvent)." },
+    "CGameChatroom.chat_area": { "kind": "offset", "value": "0x1fc", "doc": "CTextArea*: the lobby's chat (ChatTextArea)." },
+    "CTextArea::AddText": {
+      "kind": "function", "rva": "0x001097a0", "conv": "thiscall", "sig": "void(CTextArea* this, const char* text)",
+      "bytes": "55 8b ec 53 8b 5d 08 57 8b f9 85 db 0f 84 82 00",
+      "doc": "Appends a line to a text area (the lobby chat, the Battle.net chat). Color codes work. ret 4."
+    },
+    "CNetEventLobby::Init": {
+      "kind": "function", "rva": "0x002c5ef0", "conv": "thiscall", "sig": "void(CNetEventLobby* this, int type)",
+      "bytes": "55 8b ec 8a 55 08 0f b6 c2 25 ff ff 00 00 c7 41 04 00 00 00 00 0d 00 00 0b 00 c7 41 0c 00 00 00 00 89 41 08 8b c1 c7 41 10 02 00 00 00 88 51 14 c6 41 15 00 c7 01 ?? ?? ?? ?? c6 41 18 00 5d c2",
+      "doc": "Constructs a lobby event in place: vtable 0xAAA270, id 0xB0000 | type at +8, the type byte at +0x14, the sender at +0x15 (0 until it's received), an empty text at +0x18. Type 0x10 is chat (LobbyEvent.chat). ret 4."
+    },
+    "CNetEventLobby.sender": { "kind": "offset", "value": "0x15", "doc": "uint8_t: the net player id of the sender, as the receiver sees it." },
+    "CNetEventLobby.text": { "kind": "offset", "value": "0x18", "doc": "char[0x100]: a chat line (the send handler copies at most 0xFF bytes)." },
+    "CNetEventLobby.size": { "kind": "constant", "value": "0x118", "doc": "Bytes from the start of a chat event to the end of its text." },
+    "LobbyEvent.chat": { "kind": "constant", "value": "0x10", "doc": "The lobby event type of chat lines (CNetEventLobby::Init)." },
+    "NetSendLobbyEvent": {
+      "kind": "function", "rva": "0x002c2610", "conv": "fastcall", "sig": "void(int recipient, CNetEventLobby* event, int net_index)",
+      "bytes": "55 8b ec 51 ff 75 08 88 4d fc 8d 4d fc 52 ba 01 00 00 00 e8 08 00 00 00 8b e5 5d c2 04 00 cc cc 55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 81 ec d4 05 00 00 a1 ?? ?? ?? ?? 33 c5 89 45",
+      "doc": "Sends a lobby event to one net player id (0xFD: every player; the lobby chat uses that). Wraps 0x2C2630 (a list of ids) and the net client's 0x32CA60, which serializes the event and sends it through the host. ret 4."
+    },
+    "NetGetPlayerName": {
+      "kind": "function", "rva": "0x0032b870", "conv": "fastcall", "sig": "const char*(int player, int net_index)",
+      "bytes": "53 56 8b d9 b9 0d 00 00 00 57 8b fa e8 ff 08 d4",
+      "doc": "The name of a net player id, NULL for an id with no player. Looks the id up with 0x3299A0 in the net client's player lists (ids below 0x80 in one, the others in a second). Plain ret."
+    },
+    "NetGetLocalPlayer": {
+      "kind": "function", "rva": "0x0032b2b0", "conv": "fastcall", "sig": "int(int net_index)",
+      "bytes": "56 8b f1 b9 0d 00 00 00 e8 c3 0e d4 ff 8b 40 10",
+      "doc": "The local player's net id (a byte in al; 0xFF without a net client): the byte at +0x2DC of the client's block (net client + index * 0x304). Plain ret."
+    },
+    "NetIsHost": {
+      "kind": "function", "rva": "0x0032c000", "conv": "fastcall", "sig": "int(int net_index)",
+      "bytes": "56 57 8b f9 b9 0d 00 00 00 e8 72 01 d4 ff 8b 40",
+      "doc": "Whether this client hosts the game: 1 for game type 'NONE', 0 once the client's state (+0x278 of its block) is 3 or more (the game started), otherwise the flag at +0x28C of its block. The Start button checks it. Plain ret."
+    },
+    "NetIsReplay": {
+      "kind": "function", "rva": "0x0032c110", "conv": "cdecl", "sig": "int(void)",
+      "bytes": "b9 0d 00 00 00 e8 66 00 d4 ff 8b 40 10 8b 48 08",
+      "doc": "1 while a replay plays (the net client's +0x610 is 1). The SyncStored* natives send nothing then. Plain ret."
+    },
+    "CNetEventSyncStoredInteger::Init": {
+      "kind": "function", "rva": "0x0026ddb0", "conv": "thiscall", "sig": "void(CNetEventSyncStoredInteger* this)",
+      "bytes": "c7 41 04 00 00 00 00 8b c1 c7 41 08 6b 00 0a 00",
+      "doc": "Constructs action 0x6B (SyncStoredInteger) in place: vtable 0xAA131C, id 0xA006B at +8, 0x6B at +0x14, empty names, a zeroed value object at +0x318. The native's builder (0x270C20) copies the cache's file name, the mission key and the key (at most 0x100 bytes each), sets the value and sends it with NetSendAction. Plain ret."
+    },
+    "CNetEventSyncStoredInteger.sender": { "kind": "offset", "value": "0x15", "doc": "uint8_t: the player slot that sent the action, as received." },
+    "CNetEventSyncStoredInteger.file": { "kind": "offset", "value": "0x18", "doc": "char[0x100]: the game cache's file name." },
+    "CNetEventSyncStoredInteger.mission": { "kind": "offset", "value": "0x118", "doc": "char[0x100]: the mission key." },
+    "CNetEventSyncStoredInteger.key": { "kind": "offset", "value": "0x218", "doc": "char[0x100]: the key." },
+    "CNetEventSyncStoredInteger.value_object": { "kind": "offset", "value": "0x318", "doc": "The value object the receiver stores (0x24A420); its integer is at +0x18 (CNetEventSyncStoredInteger.value)." },
+    "CNetEventSyncStoredInteger.value": { "kind": "offset", "value": "0x330", "doc": "int: the value." },
+    "CNetEventSyncStoredInteger.size": { "kind": "constant", "value": "0x334", "doc": "The action's size." },
+    "SyncValue::Destroy": {
+      "kind": "function", "rva": "0x00221080", "conv": "thiscall", "sig": "void(SyncValue* this)",
+      "bytes": "56 8b f1 8b 46 14 85 c0 74 12 6a 00 68 c8 0a 00 00 68 ?? ?? ?? ?? 50 e8 dc b5",
+      "doc": "Frees what a sync action's value object (CNetEventSyncStoredInteger.value_object) holds; the native's builder calls it after sending. Plain ret."
+    },
+    "NetSendAction": {
+      "kind": "function", "rva": "0x0026ce10", "conv": "fastcall", "sig": "void(CNetEvent* action, int flags)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 81 ec d4 05 00 00 a1 ?? ?? ?? ?? 33 c5 89 45 f0 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b fa 8b f1 c7 85 28 fa ff ff 00 00 00 00 c7 85 2c fa ff",
+      "doc": "Sends a player action: writes the action byte (+0x14) and the action's data into a data store and hands it to the net client (0x32C920), which schedules it for every player and the replay. The SyncStored* builders pass flags = 0. Plain ret."
+    },
+    "OnNetSyncStoredInteger": {
+      "kind": "function", "rva": "0x0026f7d0", "conv": "fastcall", "sig": "int(CNetEventSyncStoredInteger* event)",
+      "bytes": "56 8b f1 8b 0d ?? ?? ?? ?? e8 02 15 f7 ff 8d 96",
+      "doc": "Handler of action 0x6B on every client and in replays (registered with 0x32C4D0 by 0x271400, the table of action handlers 0x50-0x75): stores the value in the named game cache through 0x24A420, which creates the cache if none has that name. Plain ret."
+    },
+    "CPlayerWar3.controller": { "kind": "offset", "value": "0x268", "doc": "int: the mapcontrol (0 user, 1 computer, ...), as GetPlayerController (0x201710) reads it." },
+    "CPlayerWar3.race": { "kind": "offset", "value": "0x260", "doc": "int: the player's race as GetPlayerRace (0x2017C0) reads it: 1 human, 2 orc, 3 undead, 4 night elf. 1 is also what the native returns for a player that doesn't exist." },
+
+    "Import.GetTickCount": {
+      "kind": "import", "rva": "0x00a7c148", "conv": "stdcall", "sig": "uint32_t(void)", "target": "kernel32.dll!GetTickCount",
+      "doc": "game.dll's clock for nearly everything: the main loop's scheduler (0x07B1C0) runs its tasks, the frame among them, by it, and frames take their time from it (0x092620). Mostly called through the thunk 0x092A10 (jmp [slot]). Windows advances it in 15.6 ms steps, which holds the frame rate near 64 whatever maxfps says."
+    },
+    "Options::Get": {
+      "kind": "function", "rva": "0x00040ed0", "conv": "cdecl", "sig": "void*(void)",
+      "bytes": "a1 ?? ?? ?? ?? 85 c0 75 2a 50 68 e1 00 00 00 68",
+      "doc": "The game's options (the registry's Video, Gameplay, Sound ... values), created on first use and kept at .data 0xD3C5F0. Plain ret."
+    },
+    "Options::Apply": {
+      "kind": "function", "rva": "0x00040310", "conv": "thiscall", "sig": "int(void* this, int option)",
+      "bytes": "55 8b ec b8 08 10 00 00 e8 c3 e6 74 00 a1 ?? ??",
+      "doc": "Applies the stored value of one option (an Option.* id) to the running game, through the switch at 0x0403E0. Doesn't save it. ret 4."
+    },
+    "Option.maxfps": {
+      "kind": "constant", "value": "0x16",
+      "doc": "Video\\maxfps (default 200). Applying it sets the main loop's period to (int)(1000.0 / maxfps) ms with Scheduler::SetPeriod."
+    },
+    "Scheduler::SetPeriod": {
+      "kind": "function", "rva": "0x00073630", "conv": "fastcall", "sig": "void(int period_ms, void* context)",
+      "bytes": "55 8b ec 51 57 8b fa 89 4d fc 85 ff 75 0d 33 c9",
+      "doc": "Sets how often a thread's scheduler loop (0x07B1C0) runs its frame: the main thread's draws a frame at most every period_ms milliseconds of GetTickCount. context 0 means the calling thread's. Stores the period at +0x48 of the loop's record. Plain ret."
+    },
+    "CGxDeviceD3d::BuildPresentParams": {
+      "kind": "function", "rva": "0x0013fed0", "conv": "thiscall", "sig": "void(CGxDeviceD3d* this, D3DPRESENT_PARAMETERS* params)",
+      "bytes": "55 8b ec 83 ec 14 a1 ?? ?? ?? ?? 33 c5 89 45 fc 56 8b 75 08 57 6a",
+      "doc": "Fills the D3DPRESENT_PARAMETERS for CreateDevice (call at 0x13FC2E) and for Reset after a lost device (0x1404DD). PresentationInterval (+0x34) is always 0, D3DPRESENT_INTERVAL_DEFAULT: vsync on. ret 4."
+    },
+    "CGxDeviceOpenGl::CanDraw": {
+      "kind": "function", "rva": "0x001442f0", "conv": "thiscall", "sig": "bool(CGxDeviceOpenGl* this)",
+      "bytes": "f3 0f 10 89 f0 0b 00 00 33 c0 f3 0f 10 81 ec 0b",
+      "doc": "Device vtable +0x3C, called by 0x1365C0 before every frame: true if the viewport (+0xBE4..+0xBF0) has an area. False while minimized. Unlike the Direct3D one (0x140410) it never recovers anything. Plain ret."
+    },
+    "CGxDeviceOpenGl::ReleaseTextures": {
+      "kind": "function", "rva": "0x0013ed30", "conv": "thiscall", "sig": "void(CGxDeviceOpenGl* this)",
+      "bytes": "55 8b ec 51 8b c1 56 89 45 fc 8b b0 40 05 00 00",
+      "doc": "glDeleteTextures for every texture of the device (count at +0x540, array at +0x544), clears each texture's GL name (+0x30) and marks it dirty (0x13A1E0), so the upload (vtable +0x00, 0x13EDB0) makes a new one on next use. The game calls it when the window or mode changes (vtable +0x18, +0x20) and when the context is destroyed (0x13AFA0). Plain ret."
+    },
+    "CGxDeviceOpenGl::DestroyContext": {
+      "kind": "function", "rva": "0x0013afa0", "conv": "thiscall", "sig": "void(CGxDeviceOpenGl* this)",
+      "bytes": "56 8b f1 83 be 80 05 00 00 00 74 1f e8 7f 3d 00",
+      "doc": "Ends the GL context: ReleaseTextures, then wglMakeCurrent(0) and wglDeleteContext of the one at +0x580, and releases the window's DC (+0x57C). Called by the mode/window changes (0x13ACB2 and others). Plain ret."
+    },
+    "CGxDeviceOpenGl::CreateContext": {
+      "kind": "function", "rva": "0x0013af40", "conv": "thiscall", "sig": "bool(CGxDeviceOpenGl* this)",
+      "bytes": "56 8b f1 ff b6 78 05 00 00 ff 15 ?? ?? ?? ?? 89",
+      "doc": "Makes a GL context for the window at +0x578 (GetDC, wglCreateContext in 0x13F5C0), makes it current, queries the driver (0x13F2E0) and sets up the device's GL state (0x13DCC0). Returns 0 and destroys it on failure. Plain ret."
+    }
+  }
+}

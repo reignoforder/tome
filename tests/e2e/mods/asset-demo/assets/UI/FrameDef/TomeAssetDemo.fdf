@@ -1,0 +1,6 @@
+// Loaded by the e2e test map with BlzLoadTOCFile("UI\FrameDef\TomeAssetDemo.toc").
+Frame "BACKDROP" "TomeAssetDemoBackdrop" {
+    Width 0.1,
+    Height 0.1,
+    BackdropBackground "UI\Widgets\Glues\GlueScreen-Button1-BackdropBackground.blp",
+}

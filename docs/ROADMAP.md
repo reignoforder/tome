@@ -1,0 +1,78 @@
+# Tome roadmap
+
+Status as of 2026-10-27. Design rationale: `research.md`. How it works:
+`architecture.md`. Game internals: `reverse-engineering.md`.
+
+## Done
+
+| Milestone | Notes |
+|-----------|-------|
+| 1. Loader | `tome.mix` via Miles; build identification by SHA-256; idle on unknown builds |
+| 2. Mod loading | `tome.mod.json` schema, dependency resolution, `state.json`, shadow-copied DLLs |
+| 3. JASS natives | Mods add natives; disabled mods' natives return 0; real/integer ABI verified |
+| 4 (part). Safe point | Lifecycle on the main thread via a window-message dispatcher; live toggling, hot reload |
+| Mapping database | `mappings/1.27b.json` embedded in `tome.mix`; `resolve` in the mod API (version 2); `requires` checked before loading |
+| Byte signatures | `bytes` on every function (mapping schema 2) plus call-site checks, verified before patching and in unit and e2e tests; a mismatch idles Tome and logs the symbol |
+| 8 (part). Mod menu | Native Mods button sharing the bottom box with Quit; chained panel with Enable/Disable and paging |
+| Frame API for mods | API version 3: `on_ui` (main menu built), `load_fdf` (from the mod folder), `load_toc`, get/create, SetPoint, SetText, Show/Hide, sprite animation, click callbacks on main menu buttons. JASS: `BlzGetFrameByName`, `BlzCreateFrame`, `BlzFrameSetPoint`, `BlzFrameSetText`, `BlzFrameSetVisible`, `BlzLoadTOCFile` (integer frame ids, not `framehandle`). Reads JASS string arguments. The hello example adds a main menu button |
+| 5. Asset overlay | Enabled mods' `assets/` folders merged in load order into one archive at Storm priority 12 (above War3Patch.mpq, below maps), mounted from DllMain and swapped live; `reload` live/map/restart decides when changes apply. `load_fdf` goes into Tome's generated overlay. e2e: texture and `Blizzard.j` overrides, TOC/FDF from assets, live toggle, a menu → game → menu cycle for `map`/`restart` |
+| General hook manager (§3.2) | API version 4: `hook`/`unhook`/`hook_call_next` on mapped functions. One inline patch per function (prologue moved by a small x86 decoder, bytes checked first), one chain per function: before/replace/after with priorities, revoked on disable, and a mod's DLL is freed only once none of its handlers runs. Layouts from the mapping's `conv` and `sig`, including float/double results, 64-bit and variadic arguments; short branches in the moved bytes are widened. Unit tests on real asm functions in every convention; e2e: two mods hook `RCString::GetText` and both run |
+| Events (§3.2, §5.8) | API version 5: `on_event` for map load, game start (also for mods enabled mid-game), game end (also when the program exits, followed by every mod's disable and unload), a per-frame tick and a game-time tick (simulation steps; follows game speed and pause), with the map's name and path; `on_ui` for every menu screen, the loading and score screens and the in-game UI, with `ui_root`; `frame_on_click` on any screen and in games (through a `CObserver` of Tome's own); chat commands (`register_command`, `display_text`) and `/tome list\|enable\|disable\|reload`; `reload: map` assets also apply when the next map loads. All from Tome's own handlers on mapped functions through the hook manager. e2e: events on both start paths and in a LAN game, clicks on three screens, chat commands in a game; in-game clicks hand the keyboard back to the chat box |
+| Native strings and code | API version 6: `jass_string` reads string arguments, `jass_string_create` makes string results (ids in the script's string table, through the game's own `CreateJassString`; invalid UTF-8 becomes U+FFFD), `jass_code_call` runs `code` arguments synchronously and returns their boolean (through `Condition`/`TriggerEvaluate`), `jass_code_execute` runs them as action threads that may wait (`TriggerExecute`, one trigger per code value), from natives and later from events; only code values the current map script passed to a Tome native are accepted (the thunks record them). `tome/utf8.h`: decode/encode, validate, length and offsets by code point, sanitize, UTF-16 conversion. Built-in `TomeLogString`; the hello example adds `HelloGreet`, `HelloCall`, `HelloRun`, `HelloOnGameStart`. e2e: string arguments and results (UTF-8, null), callbacks inside a native and at game start, waiting threads, an unknown code value refused |
+| Crash isolation and safe mode (§5.7, §9) | Every call into a mod (lifecycle, natives, hooks, events, commands, UI callbacks, clicks) runs inside an SEH frame of Tome's own (MinGW has no `__try`): a fault unwinds the frames above it, the call is abandoned (natives return 0, a crashed REPLACE handler passes on), the log names the module and offset, and the mod is disabled with its dependents, its DLL kept loaded, until its DLL changes or it's turned off and on. Safe mode: `-tomesafe`, Shift held at launch or `tome/safe` start with no mods; mods can still be enabled one at a time. e2e: crashes in a native, a tick handler, a REPLACE hook, enable and load, with the game running on; a safe-mode launch |
+| 8. Mod menu, part 2 | API version 7. A Details page per mod (metadata, status, every problem in full: metadata errors, a crash's log line and "called from" line, schema errors, warnings); per-mod Settings pages generated from `config.schema.json` (boolean, integer, number with range and step, choices, free text in a text box), saved in `<mod>/config/settings.json`, read and changed through `setting_*`/`set_setting_*`, `on_setting_changed`; Keybinds from `tome.mod.json` `"keybinds"`, one page for all mods with conflicts (each other and the game's known keys), saved in `tome/keybinds.json`, `on_keybind` (not while typing in chat), checked against `CustomKeys.txt` too; mod icons (`.blp`/`.tga`) on the list; Esc goes back a page; Tome's own keybind (Ctrl+F10) opens the menu, in games the Esc menu with Mods; a Tome page with versions, mods folder and a live safe-mode switch; the same pages in the in-game Esc menu (a Mods button beside Options, the panel in the Help panel's place). e2e: a setting, a typed text setting, a keybind set with simulated keys and run, the icon, Esc navigation, Ctrl+F10 on the main menu and in a game, the Esc menu's Mods and Done |
+| More events | API version 8: `TOME_EVENT_SELECTION` (the local player's selection, compared each frame: every unit's type id, name, owner, building/hero/dead flags and its existing JASS handle id, which Tome looks up without ever making one, and the active unit), `TOME_EVENT_CHAT`, `TOME_EVENT_PAUSE`/`RESUME`; unit events for every unit whether or not the map listens (death with the killer, trained with the building, construction, upgrade, research, hero level, summon, item pickup/drop/use, attacked, rescued, construction/upgrade/training/research started and cancelled, hero skill, revivable and revival, orders of every kind with their target, loaded into a transport, units and items sold, items pawned, owner change), player victory/defeat/left, game save and saved game loaded with the path; `map_description`; `selection()`. e2e: a map script selects, pauses, levels a hero, uses items, kills, trains and cancels, orders, attacks, loads a transport, gives a unit away, revives, builds, upgrades, saves and loads, wins; the Esc menu's pause, LAN chat |
+| Multiplayer handshake (§4) | API unchanged. Required mods are identified by `id version #hash` (tome.mod.json, DLL, assets). Lobby: the host sends its set to each joining player as hidden chat lines, Tome clients answer, the host refuses Start while a set differs or is missing, and each side gets notes in the lobby chat. Games: each player sends its set as SyncStoredInteger actions, so replays carry it; after 2 s every client (and a replay viewer) says who differs. Unit tests for the protocol, comparisons and lobby state; verified by hand in LAN games between two instances (matching, a refused Start, the in-game report, a replay) |
+| Import hooks; FPS Unlock | API version 9: `import` symbols (an import address table slot of game.dll, checked against its import directory) can be hooked like functions. `fps-unlock`, a mod in its own repository next to Tome: a finer GetTickCount for game.dll (Windows' 15.6 ms steps held frames near 64), the frame limit through the game's own scheduler, vsync off for OpenGL and Direct3D, an FPS counter in a chosen corner; switching it on and off mid-game keeps the game's clock monotonic (checked: game speed stays 1.00) |
+| Popups and restarting | API version 10: `popup` (title, message, any number of buttons; Enter/Esc options), `popup_close`, `restart_game`. One at a time on any screen (main menu, menu screens, games), queued, moved to the next screen; three short options in a row, more in pages of six. Restart: the game closes as usual (in a game, through the Esc menu's own Exit), a rundll32 helper starts it again once it has exited. The mod menu offers a restart when a toggle leaves changes waiting for one. The hello example's Ctrl+Shift+P shows them. Unit tests for layout, keys, FDF and the prompt; verified by hand on the main menu, over the mod menu, in a game, and a full restart |
+| Inter-mod communication (§5.9 item 5) | API version 11: `service_register`/`service_get`/`on_service` (a mod offers a table of functions under a name and a version; others look it up, and hear when it appears or goes away in any load order; withdrawn on disable) and `subscribe`/`publish` (synchronous messages on named topics from the main thread; a subscriber that crashes is disabled and skipped; no loops on one topic). Registry in `core/intermod.*` with unit tests. Not yet in the e2e test or an example mod |
+| Tooling | Unit tests, e2e test in the real game, `tome-mpq`, `tools/re/*`, `tools/game.sh` |
+
+## Next, in order
+
+1. **The handshake in `tools/e2e-test.sh`:** a two-instance run (own Wine
+   prefix and network namespace for the second, `architecture.md`, "Testing
+   with two instances") with matching and mismatching `sync-test` mods, a
+   refused Start, the game report and the replay. Find the host's net id.
+2. **Lock `required` mods during multiplayer games** (§5.7).
+
+## Later
+
+- **More game builds** (§6): 1.26a first, then 1.27a, 1.24e, 1.28.x, and
+  1.29–1.31, each with its own mapping file and signatures.
+- **World Editor support:** load in `worldedit.exe`, expose Tome natives in GUI triggers.
+- **SDK polish:** docs site, mod template repo, `.tome` package format,
+  C headers generated from the mapping files (typed function pointers).
+- **Porting major existing mods** (§10): UjAPI, WFE, RenderEdge, w3l,
+  YDWE natives, DzAPI natives. Deferred by decision.
+- **Crash loops** (§9): count startups that never reach the main menu and
+  offer safe mode after a few in a row; guard threads mods start through
+  the API; a crash report for faults outside mod calls.
+- **1.31 feature parity** (§11, last phase).
+
+## Open questions
+
+See `research.md` §13. The most relevant now:
+- the asset archive is rebuilt whole on every change; per-mod archives need
+  Storm's order among equal priorities (unknown) or one priority per mod;
+- the second native table (`0x713450`);
+- handle arguments: resolving handle ids to game objects (the handle table);
+- the e2e test's occasional flaky check;
+- the host's net id as a client sees it (the handshake answers every player who sends a set instead);
+- whether the Options screen's own left panel still animates correctly after the Mods panel was used (not yet tested);
+- `framehandle` for the Blz frame natives: 1.27b has no such type, so they
+  use integer ids. Matching 1.31 sources exactly needs a handle type and
+  handle-table entries;
+- events: verified for single player (menus and `-loadfile`), hosted LAN
+  games, saved games and replays. Joining another host's game and
+  Battle.net games aren't tested (they need a second machine);
+- chat commands work in games only, not in Battle.net or lobby chat, and
+  chat in replays is untested;
+- more events: spells (their caller checks the registration itself),
+  damage, cinematic mode, hover; defeat, leaving, research, rescue, sales,
+  most cancels and the menus' save/load are mapped but not yet seen in a test;
+- popups: once, a frame set made right after a mod menu click stayed hidden
+  (1 in 13 tries, cause unknown); a shown popup is shown again every 250 ms.
+  Popups and restarting aren't in `tools/e2e-test.sh` yet;
+- destroying frames (vtable `+0xD8` looks like a deleting destructor); for now
+  a disabled mod's frames are hidden and go away with their screen.

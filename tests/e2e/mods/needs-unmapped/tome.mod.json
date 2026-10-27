@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "id": "needs-unmapped",
+  "version": "0.1.0",
+  "game": "1.27b",
+  "tome": "*",
+  "sync": "client",
+  "requires": ["GetFrameByName", "event:frame", "CUnit.armor"]
+}

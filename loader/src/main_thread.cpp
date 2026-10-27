@@ -1,0 +1,120 @@
+#include "main_thread.h"
+
+#include "log.h"
+#include "unwind.h"
+
+#include <deque>
+#include <utility>
+
+namespace tome::main_thread {
+namespace {
+
+HWND g_window = nullptr;
+WNDPROC g_original_proc = nullptr;
+bool g_unicode = false;
+UINT g_message = 0;
+KeyHook g_key_hook = nullptr;
+
+SRWLOCK g_lock = SRWLOCK_INIT;
+std::deque<std::function<void()>> g_queue;
+
+void drain() {
+    for (;;) {
+        std::function<void()> fn;
+        {
+            ExclusiveLock hold(g_lock);
+            if (g_queue.empty()) return;
+            fn = std::move(g_queue.front());
+            g_queue.pop_front();
+        }
+        fn();
+    }
+}
+
+LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
+    if (msg == g_message) {
+        drain();
+        return 0;
+    }
+    if ((msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) && g_key_hook && g_key_hook(msg, wparam, lparam)) return 0;
+    return g_unicode ? CallWindowProcW(g_original_proc, hwnd, msg, wparam, lparam)
+                     : CallWindowProcA(g_original_proc, hwnd, msg, wparam, lparam);
+}
+
+} // namespace
+
+bool install(HWND game_window) {
+    g_message = RegisterWindowMessageW(L"Tome.MainThreadCall");
+    if (!g_message) return false;
+
+    // Keep the window's character set: subclassing an ANSI window through the
+    // W function would make Windows translate its messages.
+    g_unicode = IsWindowUnicode(game_window);
+    LONG_PTR previous = g_unicode
+        ? SetWindowLongPtrW(game_window, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(&window_proc))
+        : SetWindowLongPtrA(game_window, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(&window_proc));
+    if (!previous) {
+        TOME_ERROR("Couldn't subclass the game window (error %lu)", GetLastError());
+        return false;
+    }
+    g_original_proc = reinterpret_cast<WNDPROC>(previous);
+    g_window = game_window;
+
+    // Run anything queued before the window existed.
+    PostMessageW(g_window, g_message, 0, 0);
+    return true;
+}
+
+bool installed() {
+    return g_window != nullptr;
+}
+
+HWND window() {
+    return g_window;
+}
+
+void set_key_hook(KeyHook hook) {
+    g_key_hook = hook;
+}
+
+void post(std::function<void()> fn) {
+    if (!g_window) {
+        fn();
+        return;
+    }
+    {
+        ExclusiveLock hold(g_lock);
+        g_queue.push_back(std::move(fn));
+    }
+    PostMessageW(g_window, g_message, 0, 0);
+}
+
+namespace {
+
+struct Delayed {
+    unsigned delay_ms;
+    std::function<void()> fn;
+};
+
+DWORD WINAPI delayed_thread(LPVOID param) {
+    auto delayed = static_cast<Delayed*>(param);
+    Sleep(delayed->delay_ms);
+    post(std::move(delayed->fn));
+    delete delayed;
+    return 0;
+}
+
+} // namespace
+
+void post_delayed(unsigned delay_ms, std::function<void()> fn) {
+    auto delayed = new Delayed{delay_ms, std::move(fn)};
+    HANDLE thread = CreateThread(nullptr, 0, delayed_thread, delayed, 0, nullptr);
+    if (thread) {
+        CloseHandle(thread);
+    } else {
+        post(std::move(delayed->fn));
+        delete delayed;
+    }
+}
+
+} // namespace tome::main_thread

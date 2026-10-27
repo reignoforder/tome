@@ -1,0 +1,47 @@
+#pragma once
+
+// One row of the mod list, as the mod manager reports it: for the log, the
+// /tome commands and the mod menu.
+
+#include "json.h"
+#include "keys.h"
+#include "settings.h"
+
+#include <string>
+#include <vector>
+
+namespace tome {
+
+struct ModStatus {
+    std::string folder;
+    std::string id;       // empty if tome.mod.json couldn't be read
+    std::string name;
+    std::string version;
+    bool user_enabled = false;
+    bool running = false; // enabled right now
+    std::string state;    // "active", "disabled", "error", ...
+    std::string reason;
+    std::vector<std::string> warnings;
+    std::string assets_pending;  // why the mod's asset changes are waiting; "" if they aren't
+    bool restart_pending = false;  // ...and they wait for a restart
+
+    // For the mod menu's details page.
+    std::string description;
+    std::string icon;  // tome.mod.json "icon", relative to the mod folder; "" if none
+    std::vector<std::string> authors;
+    std::string sync;    // "client" / "required"; "" if the metadata is invalid
+    std::string sync_hash;  // a running "required" mod: its identity in the multiplayer handshake (8 hex digits)
+    std::string reload;  // "live" / "map" / "restart"
+    std::vector<std::string> errors;  // every problem with tome.mod.json, in full
+    std::string crash_calls;  // after a crash: where it was called from (likely), as logged
+
+    // Settings (core/settings.h): the schema and the current values. A
+    // schema that failed to parse leaves `settings` empty and says why in
+    // `settings_error`.
+    settings::Schema settings;
+    json::Value settings_values;
+    std::string settings_error;
+    std::vector<keys::Declared> keybinds;
+};
+
+} // namespace tome

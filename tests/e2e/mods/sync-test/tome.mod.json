@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "id": "sync-test",
+  "version": "1.0.0",
+  "name": "Sync test",
+  "description": "Assets-only test mod that every player of a game needs (the multiplayer handshake).",
+  "game": "1.27b",
+  "tome": "*",
+  "sync": "required",
+  "reload": "live"
+}

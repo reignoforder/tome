@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "crash",
+  "version": "1.0.0",
+  "name": "Crash test",
+  "description": "e2e fixture: crashes on purpose, where mode.txt in its folder says.",
+  "game": "1.27b",
+  "tome": "*",
+  "entry": "crash.dll",
+  "sync": "client",
+  "reload": "live",
+  "natives": ["native CrashNative takes integer value returns integer"],
+  "requires": ["RCString::GetText"]
+}

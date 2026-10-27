@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "id": "asset-demo",
+  "version": "1.0.0",
+  "name": "Asset demo",
+  "description": "Assets-only test mod: recolors the main menu buttons and ships its own frame definitions.",
+  "game": "1.27b",
+  "tome": "*",
+  "sync": "client",
+  "reload": "live"
+}

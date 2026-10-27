@@ -1,0 +1,37 @@
+# Build output
+build/
+build-*/
+compile_commands.json
+.cache/
+__pycache__/
+
+# Local editor configuration (machine-specific toolchain paths)
+.clangd
+
+# The local Warcraft III install used for development and tests.
+# Game files are Blizzard's and must never be committed.
+WarCraft III/
+
+# Defensive: game data, binaries and generated archives, in case a game folder
+# or extracted files end up inside the repo under another name.
+*.mpq
+*.w3m
+*.w3x
+*.w3n
+*.w3g
+*.w3z
+*.blp
+*.mdx
+*.mdl
+*.tga
+*.exe
+*.dll
+*.mix
+*.ax
+common.j
+Blizzard.j
+war3map.j
+
+# Tome's runtime folders, if the repo root is ever used as a game folder
+/mods/
+/tome/
