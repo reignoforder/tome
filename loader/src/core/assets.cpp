@@ -53,11 +53,14 @@ std::string archive_path(std::string_view relative) {
     return out;
 }
 
-Plan plan(const std::vector<ModAssets>& mounted, const std::vector<ModAssets>& wanted, Moment moment) {
+Plan plan(const std::vector<ModAssets>& mounted, const std::vector<ModAssets>& wanted, Moment moment,
+          const std::set<std::string>& frozen) {
     Plan result;
     for (const ModAssets& w : wanted) {
         const ModAssets* current = find(mounted, w.id);
-        if (current && current->fingerprint == w.fingerprint) {
+        if (frozen.count(w.id)) {
+            if (current) result.mount.push_back(*current);
+        } else if (current && current->fingerprint == w.fingerprint) {
             result.mount.push_back(w);
         } else if (applies_now(w.reload, moment)) {
             result.mount.push_back(w);
@@ -70,7 +73,8 @@ Plan plan(const std::vector<ModAssets>& mounted, const std::vector<ModAssets>& w
     // place: right after the mod they followed before, if it's still there.
     for (size_t i = 0; i < mounted.size(); ++i) {
         const ModAssets& m = mounted[i];
-        if (find(wanted, m.id) || applies_now(m.reload, moment)) continue;
+        bool held = frozen.count(m.id) > 0;
+        if (find(wanted, m.id) || (!held && applies_now(m.reload, moment))) continue;
         auto at = result.mount.begin();
         for (size_t j = i; j-- > 0;) {
             auto previous = std::find_if(result.mount.begin(), result.mount.end(),
@@ -81,7 +85,7 @@ Plan plan(const std::vector<ModAssets>& mounted, const std::vector<ModAssets>& w
             }
         }
         result.mount.insert(at, m);
-        result.pending.push_back({m.id, m.reload});
+        if (!held) result.pending.push_back({m.id, m.reload});
     }
     result.changed = result.mount.size() != mounted.size();
     for (size_t i = 0; !result.changed && i < mounted.size(); ++i) {

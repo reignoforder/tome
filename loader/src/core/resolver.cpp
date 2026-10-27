@@ -272,4 +272,20 @@ ResolveResult resolve(const std::vector<ResolveInput>& inputs, const ResolveEnvi
     return result;
 }
 
+std::vector<size_t> dependents_of(const std::vector<ResolveInput>& inputs, const ResolveEnvironment& env,
+                                  size_t target) {
+    std::vector<ResolveInput> without = inputs;
+    without[target].user_enabled = false;
+    ResolveResult before = resolve(inputs, env);
+    ResolveResult after = resolve(without, env);
+    std::vector<size_t> result;
+    for (size_t i = 0; i < inputs.size(); ++i) {
+        if (i != target && before.mods[i].state == ModState::Active &&
+            after.mods[i].state == ModState::DependencyInactive) {
+            result.push_back(i);
+        }
+    }
+    return result;
+}
+
 } // namespace tome

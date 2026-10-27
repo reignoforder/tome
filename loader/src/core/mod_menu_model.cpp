@@ -72,12 +72,15 @@ std::string status_line(const ModStatus& m) {
         info = colored(kGreen, "Active");
     } else if (m.state == "disabled") {
         info = colored("|cffa0a0a0", m.reason.empty() ? "Disabled" : "Disabled (" + m.reason + ")");
+    } else if (m.state == "waiting") {
+        info = colored(kYellow, "Waiting (" + m.reason + ")");
     } else {
         info = colored(kRed, ellipsize(first_line(m.reason.empty() ? m.state : m.reason), 60));
     }
     if (!m.assets_pending.empty() && (m.running || m.state == "disabled")) {
         info += "  " + colored(kYellow, "(" + m.assets_pending + ")");
     }
+    if (m.running && !m.locked.empty()) info += "  " + colored(kYellow, "(" + m.locked + ")");
     return info;
 }
 

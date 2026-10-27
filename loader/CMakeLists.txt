@@ -9,6 +9,7 @@ add_library(tome_core STATIC
     src/core/command_line.cpp
     src/core/debug_script.cpp
     src/core/frames.cpp
+    src/core/game_lock.cpp
     src/core/handshake.cpp
     src/core/hooks.cpp
     src/core/intermod.cpp

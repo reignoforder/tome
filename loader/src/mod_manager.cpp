@@ -1,6 +1,7 @@
 #include "mod_manager.h"
 
 #include "api.h"
+#include "core/game_lock.h"
 #include "core/hash.h"
 #include "core/json.h"
 #include "frames.h"
@@ -13,6 +14,7 @@
 #include "natives.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdio>
 #include <set>
 
@@ -579,7 +581,7 @@ std::string ModManager::apply_assets(const std::vector<const Installed*>& runnin
         wanted.push_back({mod->meta.id, mod->meta.reload, mod->assets_fingerprint});
         by_id[mod->meta.id] = mod;
     }
-    assets::Plan plan = assets::plan(mounted_assets_, wanted, moment);
+    assets::Plan plan = assets::plan(mounted_assets_, wanted, moment, locked_);
     for (const assets::Pending& p : plan.pending) {
         bool known = std::any_of(pending_assets_.begin(), pending_assets_.end(), [&p](const assets::Pending& q) {
             return q.id == p.id && q.reload == p.reload;
@@ -761,25 +763,50 @@ void ModManager::reset_settings(const std::string& id) {
     notify_settings(std::move(changes));
 }
 
-void ModManager::set_enabled(const std::string& id, bool enabled) {
-    locked([&] { set_enabled_locked(id, enabled); });
+std::vector<std::string> ModManager::set_enabled(const std::string& id, bool enabled) {
+    std::vector<std::string> dependents;
+    locked([&] { dependents = set_enabled_locked(id, enabled); });
+    return dependents;
 }
 
-void ModManager::set_enabled_locked(const std::string& id, bool enabled) {
+std::vector<std::string> ModManager::set_enabled_locked(const std::string& id, bool enabled) {
     std::map<std::string, bool> state = read_state();
-    state[id] = enabled;
-    write_state(state);
-    if (!safe_mode_.empty()) {
-        if (enabled) {
-            safe_mode_enabled_.insert(id);
-        } else {
-            safe_mode_enabled_.erase(id);
+    std::vector<std::string> ids{id};
+    // Only a mod that goes off now takes its dependents along; disabling one
+    // that's already off leaves the rest as they are.
+    std::vector<Installed> installed = discover();
+    if (!enabled && wanted_by_user(state, id)) {
+        std::vector<ResolveInput> inputs;
+        size_t target = SIZE_MAX;
+        for (const Installed& mod : installed) {
+            if (!mod.valid) continue;
+            if (mod.meta.id == id) target = inputs.size();
+            inputs.push_back({&mod.meta, wanted_by_user(state, mod.meta.id)});
+        }
+        if (target != SIZE_MAX) {
+            for (size_t i : dependents_of(inputs, {tome_version_, game_version_}, target)) {
+                ids.push_back(inputs[i].meta->id);
+                TOME_INFO("%s: disabled, since it depends on %s", ids.back().c_str(), id.c_str());
+            }
         }
     }
+    for (const std::string& each : ids) {
+        state[each] = enabled;
+        if (!safe_mode_.empty()) {
+            if (enabled) {
+                safe_mode_enabled_.insert(each);
+            } else {
+                safe_mode_enabled_.erase(each);
+            }
+        }
+    }
+    write_state(state);
     // Asking for a crashed mod to run again retries it.
     auto failure = failures_.find(id);
     if (enabled && failure != failures_.end() && failure->second.crashed) failures_.erase(failure);
-    refresh_locked();
+    refresh_locked(std::move(installed));
+    ids.erase(ids.begin());
+    return ids;
 }
 
 void ModManager::set_safe_mode(const std::string& reason) {
@@ -817,6 +844,40 @@ void ModManager::on_fault(tome_mod* mod) {
         mod_manager().refresh();
         mod_menu::on_mods_changed();
     });
+}
+
+void ModManager::set_game_lock(bool on) {
+    {
+        ExclusiveLock hold(lock_);
+        if (on == game_lock_) return;
+        game_lock_ = on;
+        locked_.clear();
+        if (on) {
+            std::vector<game_lock::RunningMod> running;
+            for (const auto& [id, rt] : runtime_) {
+                if (rt->enabled) running.push_back({id, rt->required, rt->depends, rt->provides});
+            }
+            locked_ = game_lock::locked_mods(running);
+            std::string list;
+            for (const std::string& id : locked_) list += (list.empty() ? "" : ", ") + id;
+            TOME_INFO("Multiplayer game: required mods are locked until it ends (%s)",
+                      list.empty() ? "none running" : list.c_str());
+        } else {
+            TOME_INFO("Multiplayer game ended: required mods are unlocked");
+        }
+    }
+    // Brings the mod list's notes up to date, and on the way out applies
+    // what waited for the game; from the message loop, outside the game's
+    // own calls (the mods being changed may have handlers on them).
+    main_thread::post([] {
+        mod_manager().refresh();
+        mod_menu::on_mods_changed();
+    });
+}
+
+bool ModManager::game_locked() const {
+    SharedLock hold(lock_);
+    return game_lock_;
 }
 
 bool ModManager::poll_changed() {
@@ -945,10 +1006,14 @@ std::vector<ModStatus> ModManager::status() const {
 }
 
 void ModManager::refresh_locked(assets::Moment moment_hint) {
+    if (shut_down_) return;
+    refresh_locked(discover(), moment_hint);
+}
+
+void ModManager::refresh_locked(std::vector<Installed> installed, assets::Moment moment_hint) {
     if (shut_down_) return;  // the watcher may still notice changes while the game exits
     TOME_DEBUG("Refreshing mods");
     InRefresh in_refresh;
-    std::vector<Installed> installed = discover();
 
     // Declare natives for every installed mod that targets this game build,
     // enabled or not: a map that declares them must still load (§5.5).
@@ -1000,7 +1065,7 @@ void ModManager::refresh_locked(assets::Moment moment_hint) {
 
     // Which running mods have to stop: no longer wanted, or their DLL changed
     // (hot reload) or crashed, or a mod they depend on is stopping.
-    std::set<std::string> stopping, reloading;
+    std::set<std::string> stopping, reloading, deferred;
     for (auto& [id, rt] : runtime_) {
         auto it = by_id.find(id);
         bool removed = it == by_id.end();
@@ -1012,6 +1077,12 @@ void ModManager::refresh_locked(assets::Moment moment_hint) {
             TOME_WARN("%s crashed; it stays off until its DLL changes, or until it's disabled and enabled again",
                       id.c_str());
         }
+        // Locked for a multiplayer game: whatever changed waits for its end.
+        // Nothing can keep a crashed mod running, though.
+        if (locked_.count(id) && !crashed) {
+            if (removed || code_changed) deferred.insert(id);
+            continue;
+        }
         if (removed || code_changed || crashed) reloading.insert(id);
         if (rt->enabled && (!wanted.count(id) || code_changed || crashed)) stopping.insert(id);
     }
@@ -1019,16 +1090,25 @@ void ModManager::refresh_locked(assets::Moment moment_hint) {
         grew = false;
         for (auto& [id, rt] : runtime_) {
             if (!rt->enabled || stopping.count(id)) continue;
-            auto it = by_id.find(id);
-            if (it == by_id.end()) continue;
-            for (const Dependency& dep : it->second->meta.depends) {
-                bool dep_stopping = stopping.count(dep.id) > 0;
+            // A locked mod runs the code it was enabled with: its own
+            // dependencies count, not what its tome.mod.json says now.
+            std::vector<std::string> depends = rt->depends;
+            if (!locked_.count(id)) {
+                auto it = by_id.find(id);
+                if (it == by_id.end()) continue;
+                depends.clear();
+                for (const Dependency& dep : it->second->meta.depends) depends.push_back(dep.id);
+            }
+            for (const std::string& dep : depends) {
+                bool dep_stopping = stopping.count(dep) > 0;
                 for (const std::string& s : stopping) {
                     auto other = by_id.find(s);
                     if (other != by_id.end()) {
                         const auto& p = other->second->meta.provides;
-                        if (std::find(p.begin(), p.end(), dep.id) != p.end()) dep_stopping = true;
+                        if (std::find(p.begin(), p.end(), dep) != p.end()) dep_stopping = true;
                     }
+                    const auto& p = runtime_[s]->provides;  // what it was enabled with
+                    if (std::find(p.begin(), p.end(), dep) != p.end()) dep_stopping = true;
                 }
                 if (dep_stopping) {
                     stopping.insert(id);
@@ -1037,6 +1117,12 @@ void ModManager::refresh_locked(assets::Moment moment_hint) {
                 }
             }
         }
+    }
+
+    // A crash (its own or a dependency's) stops even a locked mod; from
+    // then on it's like any required mod that isn't running.
+    for (const std::string& id : stopping) {
+        if (locked_.erase(id)) TOME_WARN("%s stops during a multiplayer game; the game may desync", id.c_str());
     }
 
     // Disable dependents before their dependencies: reverse enable order.
@@ -1127,25 +1213,27 @@ void ModManager::refresh_locked(assets::Moment moment_hint) {
     // A DLL that failed before and hasn't changed won't load below either,
     // and neither will its dependents: leave their assets out from the start
     // rather than mounting them and rebuilding the archive again without them.
-    std::set<std::string> known_failed;
-    std::vector<const Installed*> running;
+    // During a multiplayer game, required mods that weren't running when it
+    // started, and what depends on them, are held (core/game_lock.h).
+    std::vector<game_lock::Candidate> candidates;
     for (size_t i : resolved.load_order) {
         const Installed& mod = *input_mods[i];
-        bool fails = std::any_of(mod.meta.depends.begin(), mod.meta.depends.end(),
-                                 [&](const Dependency& dep) { return known_failed.count(dep.id) > 0; });
-        if (!fails && !mod.dll.empty()) {
-            auto failure = failures_.find(mod.meta.id);
-            auto rt = runtime_.find(mod.meta.id);
-            bool loaded = rt != runtime_.end() && rt->second->module;
-            fails = !loaded && failure != failures_.end() && failure->second.stamp == mod.dll_stamp;
-        }
-        if (fails) {
-            known_failed.insert(mod.meta.id);
-            for (const std::string& p : mod.meta.provides) known_failed.insert(p);
-            continue;
-        }
-        running.push_back(&mod);
+        auto rt = runtime_.find(mod.meta.id);
+        auto failure = failures_.find(mod.meta.id);
+        bool loaded = rt != runtime_.end() && rt->second->module;
+        game_lock::Candidate c;
+        c.id = mod.meta.id;
+        c.required = mod.meta.sync == SyncMode::Required;
+        for (const Dependency& dep : mod.meta.depends) c.depends.push_back(dep.id);
+        c.provides = mod.meta.provides;
+        c.fails = !mod.dll.empty() && !loaded && failure != failures_.end() && failure->second.stamp == mod.dll_stamp;
+        c.running = rt != runtime_.end() && rt->second->enabled;
+        candidates.push_back(std::move(c));
     }
+    game_lock::StartPlan plan = game_lock::plan_start(candidates, game_lock_, locked_);
+    const std::set<std::string>& held = plan.held;
+    std::vector<const Installed*> running;
+    for (size_t k : plan.start) running.push_back(input_mods[resolved.load_order[k]]);
     apply_assets(running, moment);
 
     // Start everything wanted, dependencies first. A mod whose DLL fails to
@@ -1154,6 +1242,8 @@ void ModManager::refresh_locked(assets::Moment moment_hint) {
     for (size_t i : resolved.load_order) {
         const Installed& mod = *input_mods[i];
         const std::string& id = mod.meta.id;
+        if (locked_.count(id)) continue;  // running, and stays as it is until the game ends
+        if (held.count(id)) continue;
 
         bool dep_failed = false;
         for (const Dependency& dep : mod.meta.depends) {
@@ -1206,6 +1296,10 @@ void ModManager::refresh_locked(assets::Moment moment_hint) {
                 continue;
             }
         }
+        rt.required = mod.meta.sync == SyncMode::Required;
+        rt.depends.clear();
+        for (const Dependency& dep : mod.meta.depends) rt.depends.push_back(dep.id);
+        rt.provides = mod.meta.provides;
         enable(rt);
     }
     if (!failed_now.empty()) {
@@ -1244,6 +1338,7 @@ void ModManager::refresh_locked(assets::Moment moment_hint) {
         }
         s.sync = to_string(mod.meta.sync);
         s.reload = to_string(mod.meta.reload);
+        bool required = mod.meta.sync == SyncMode::Required;
         s.settings = mod.settings;
         s.settings_error = mod.settings_error;
         s.keybinds = mod.meta.keybinds;
@@ -1257,10 +1352,32 @@ void ModManager::refresh_locked(assets::Moment moment_hint) {
         s.user_enabled = wanted_by_user(state, mod.meta.id);
         auto rt = runtime_.find(mod.meta.id);
         s.running = rt != runtime_.end() && rt->second->enabled;
+        bool locked = s.running && locked_.count(mod.meta.id) > 0;
+        bool held_off = !s.running && held.count(mod.meta.id) > 0;
+        bool changed = false;
+        if (locked) {
+            // What the game runs: the version and the handshake identity it
+            // started with, while newer files wait.
+            const std::string& running_version = rt->second->handle.version;
+            changed = deferred.count(mod.meta.id) > 0 || (!running_version.empty() && running_version != s.version);
+            if (!running_version.empty()) s.version = running_version;
+            auto mounted = std::find_if(mounted_assets_.begin(), mounted_assets_.end(),
+                                        [&](const assets::ModAssets& m) { return m.id == mod.meta.id; });
+            uint64_t mounted_fingerprint = mounted == mounted_assets_.end() ? 0 : mounted->fingerprint;
+            changed |= mounted_fingerprint != mod.assets_fingerprint;
+            // The handshake counts it as what it was enabled as, whatever
+            // tome.mod.json says now.
+            required = rt->second->required;
+            s.sync = required ? "required" : "client";
+            for (const ModStatus& before : status_) {
+                if (before.id == mod.meta.id && !before.sync_hash.empty()) s.sync_hash = before.sync_hash;
+            }
+        }
         // Only running mods take part in the handshake; hashing reads every file.
-        if (s.running && mod.meta.sync == SyncMode::Required) s.sync_hash = sync_hash(mod);
-        s.state = s.running ? "active" : (r.state == ModState::DisabledByUser ? "disabled" : "error");
-        s.reason = s.running || r.state == ModState::DisabledByUser ? "" : r.reason;
+        if (s.running && required && s.sync_hash.empty()) s.sync_hash = sync_hash(mod);
+        s.locked = game_lock::note(locked, held_off, s.user_enabled, changed);
+        s.state = s.running ? "active" : held_off ? "waiting" : (r.state == ModState::DisabledByUser ? "disabled" : "error");
+        s.reason = s.running || r.state == ModState::DisabledByUser ? "" : held_off ? s.locked : r.reason;
         if (r.state == ModState::DisabledByUser && !safe_mode_.empty() && state[mod.meta.id]) s.reason = "safe mode";
         s.warnings = mod.warnings;
         s.warnings.insert(s.warnings.end(), r.warnings.begin(), r.warnings.end());
@@ -1274,13 +1391,48 @@ void ModManager::refresh_locked(assets::Moment moment_hint) {
         status.push_back(std::move(s));
     }
 
+    // A locked mod whose folder went away or whose tome.mod.json can't be
+    // read (or now names another id) keeps running until the game ends: it
+    // stays in the list, and in the handshake, as it was when it started,
+    // in place of what its folder holds now.
+    for (const std::string& id : locked_) {
+        auto rt = runtime_.find(id);
+        if (rt == runtime_.end() || !rt->second->enabled) continue;
+        if (std::any_of(status.begin(), status.end(), [&](const ModStatus& s) { return s.id == id && s.running; })) {
+            continue;
+        }
+        ModStatus s;
+        auto before = std::find_if(status_.begin(), status_.end(), [&](const ModStatus& b) { return b.id == id; });
+        if (before != status_.end()) {
+            s = *before;
+        } else {
+            const std::wstring& dir = rt->second->handle.dir_w;
+            s.folder = narrow(dir.substr(dir.find_last_of(L'\\') + 1));
+            s.id = s.name = id;
+            s.version = rt->second->handle.version;
+        }
+        s.sync = rt->second->required ? "required" : "client";
+        s.user_enabled = wanted_by_user(state, id);
+        s.running = true;
+        s.state = "active";
+        s.reason.clear();
+        s.locked = game_lock::note(true, false, s.user_enabled, true);
+        auto same_folder = std::find_if(status.begin(), status.end(),
+                                        [&](const ModStatus& other) { return other.folder == s.folder; });
+        if (same_folder != status.end()) {
+            *same_folder = std::move(s);
+        } else {
+            status.push_back(std::move(s));
+        }
+    }
+
     // Log only when something changed, so idle refreshes stay quiet.
     auto same = [](const std::vector<ModStatus>& a, const std::vector<ModStatus>& b) {
         if (a.size() != b.size()) return false;
         for (size_t i = 0; i < a.size(); ++i) {
             if (a[i].folder != b[i].folder || a[i].state != b[i].state || a[i].reason != b[i].reason ||
                 a[i].version != b[i].version || a[i].warnings != b[i].warnings ||
-                a[i].assets_pending != b[i].assets_pending) {
+                a[i].assets_pending != b[i].assets_pending || a[i].locked != b[i].locked) {
                 return false;
             }
         }
@@ -1299,6 +1451,7 @@ void ModManager::refresh_locked(assets::Moment moment_hint) {
                           s.version.c_str(), s.state.c_str(), s.reason.c_str());
             }
             if (!s.assets_pending.empty()) TOME_INFO("    %s: %s", s.folder.c_str(), s.assets_pending.c_str());
+            if (s.running && !s.locked.empty()) TOME_INFO("    %s: %s", s.folder.c_str(), s.locked.c_str());
             for (const std::string& w : s.warnings) TOME_WARN("    %s: %s", s.folder.c_str(), w.c_str());
         }
     }

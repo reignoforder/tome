@@ -242,3 +242,51 @@ TEST(resolver_detects_cycles) {
     CHECK(r.mods[d].state == ModState::Active);
     CHECK_EQ(f.order(r), ids({"dd"}));
 }
+
+TEST(resolver_dependents_of_is_transitive) {
+    Fixture f;
+    size_t lib = f.add("lib");
+    size_t mid = f.add("mid", R"("depends":{"lib":"*"})");
+    size_t top = f.add("top", R"("depends":{"mid":"*"})");
+    f.add("other");
+    f.add("off", R"("depends":{"lib":"*"})", false);  // already disabled
+    CHECK(dependents_of(f.inputs, f.env, lib) == std::vector<size_t>({mid, top}));
+    CHECK(dependents_of(f.inputs, f.env, top).empty());
+}
+
+TEST(resolver_dependents_of_keeps_mods_with_another_provider) {
+    Fixture f;
+    size_t a = f.add("bars-a", R"("provides":["hp-bars"])");
+    f.add("bars-b", R"("provides":["hp-bars"])");
+    f.add("user", R"("depends":{"hp-bars":"*"})");
+    CHECK(dependents_of(f.inputs, f.env, a).empty());
+
+    // The other provider is disabled, or enabled but unable to run.
+    Fixture g;
+    size_t only = g.add("bars-a", R"("provides":["hp-bars"])");
+    g.add("bars-b", R"("provides":["hp-bars"])", false);
+    size_t user = g.add("user", R"("depends":{"hp-bars":"*"})");
+    CHECK(dependents_of(g.inputs, g.env, only) == std::vector<size_t>({user}));
+
+    Fixture h;
+    size_t bars = h.add("bars-a", R"("provides":["hp-bars"])");
+    h.add("bars-b", R"("provides":["hp-bars"])");
+    std::string err;
+    parse_semver_range(">=2.0", h.metas.back().tome, err);  // can't run with this Tome
+    size_t uses = h.add("user", R"("depends":{"hp-bars":"*"})");
+    CHECK(dependents_of(h.inputs, h.env, bars) == std::vector<size_t>({uses}));
+}
+
+TEST(resolver_dependents_of_only_counts_mods_that_run) {
+    Fixture f;
+    size_t lib = f.add("lib", "", true, "1.0.0");
+    f.add("needs-new", R"("depends":{"lib":">=2"})");  // never satisfied by lib
+    f.add("needs-ghost", R"("depends":{"ghost":"*"})");
+    CHECK(dependents_of(f.inputs, f.env, lib).empty());
+
+    // lib is already off: its dependent stays enabled, to run again with it.
+    Fixture g;
+    size_t off = g.add("lib", "", false);
+    g.add("user", R"("depends":{"lib":"*"})");
+    CHECK(dependents_of(g.inputs, g.env, off).empty());
+}

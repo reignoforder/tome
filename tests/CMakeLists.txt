@@ -5,6 +5,7 @@ add_executable(tome_tests
     test_command_line.cpp
     test_debug_script.cpp
     test_frames.cpp
+    test_game_lock.cpp
     test_handshake.cpp
     test_hash.cpp
     test_hooks.cpp

@@ -24,6 +24,7 @@ loader/
     frames.*              frame id table for JASS, mod FDF archive paths
     chat.*                chat command parsing, /tome subcommands
     handshake.*           multiplayer handshake: mod-set lines, comparison, lobby state, game report
+    game_lock.*           which required mods a multiplayer game locks, and the notes
     command_line.*        splits the command line like argv (for -tomesafe)
     hooks.*               argument layouts from mapping signatures; hook chain order and run
     x86.*                 instruction length decoder; moves a function's first instructions
@@ -185,6 +186,13 @@ logs each error with the symbol's name.
   the game folder unless `TOME_HOME` is set.
 - State: `<home>/tome/state.json` (`{"schema":1,"mods":{"id":{"enabled":bool}}}`).
   New mods start enabled. Entries for mods that aren't installed are kept.
+- Turning a mod off (`ModManager::set_enabled`, from the mod menu or
+  `/tome disable`) also turns off the enabled mods that depend on it,
+  directly or not, in `state.json` (`dependents_of` in `core/resolver.*`).
+  It compares what the resolver lets run with and without the mod, so a
+  mod stays on if another mod that runs still provides what it needs, and
+  disabling a mod that's already off changes nothing else.
+  Turning the mod back on doesn't bring them back.
 - `ModManager::refresh` on every run:
   1. discovers mods and declares their natives;
   2. reads the state and resolves dependencies;
@@ -548,8 +556,29 @@ report on both sides and in a replay. Not in `tools/e2e-test.sh` yet; see
   who sent nothing counts as having none. Differences are shown with
   `display_text` and logged; in a replay, the recorded players are compared
   with the viewer's mods.
-- **Not done:** locking required mods during a multiplayer game (§5.7);
-  saved games; the host's net id (see `reverse-engineering.md`).
+- **Game lock** (§5.7, `core/game_lock.*`, `ModManager::set_game_lock`):
+  a game with more than one person playing (controller user, playing; checked
+  at the start and on the first step) or a replay locks required mods until
+  it ends. The running required mods and what they depend on (directly or
+  not, by id or `provides`) keep running as they were enabled: toggles,
+  `/tome reload`, a changed DLL or `tome.mod.json`, or a removed folder
+  don't stop or reload them, and their assets stay as mounted
+  (`assets::plan`'s `frozen`). Required mods that weren't running, and mods
+  that need one of them while no mod that runs meets that need, don't start
+  (state `waiting`; `game_lock::plan_start`). A mod whose DLL is known to
+  fail shows its error instead, and a mod that's running keeps running.
+  Toggles still go into
+  `state.json`; the mod list shows a note (`ModStatus.locked`), and the
+  version, `sync` and handshake hash stay those the game started with (a
+  locked mod whose folder is gone or unreadable stays listed as it started,
+  so the handshake still counts it). When the game
+  ends, a refresh from the message loop applies what waited. Only a crash
+  stops a locked mod (logged: the game may desync). A single player game,
+  alone or against computers, isn't locked. Unit-tested; verified in a replay
+  (2026-10-27: a locked dependency, a toggle that waits, a required mod
+  waiting, both applied on leaving through End Game, Quit Mission); not yet
+  in a two-instance game.
+- **Not done:** saved games; the host's net id (see `reverse-engineering.md`).
 
 ### Testing with two instances
 

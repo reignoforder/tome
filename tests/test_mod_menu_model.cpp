@@ -317,3 +317,22 @@ TEST(menu_clamp_after_changes) {
     CHECK(s.page == Page::List);
     CHECK_EQ(s.list_first, 0);
 }
+
+TEST(menu_list_shows_the_game_lock) {
+    Data d;
+    ModStatus off = mod("req", true);  // turned off mid-game, still running
+    off.user_enabled = false;
+    off.sync = "required";
+    off.locked = "locked during this multiplayer game; turns off when it ends";
+    ModStatus waiting = mod("late", false);
+    waiting.user_enabled = true;
+    waiting.state = "waiting";
+    waiting.reason = waiting.locked = "starts when the multiplayer game ends";
+    d.mods = {off, waiting};
+    State s;
+    View v = build(s, d, 2);
+    CHECK(contains(v.rows[0].info, "Active") && contains(v.rows[0].info, "turns off when it ends"));
+    CHECK_EQ(v.rows[0].button, std::string("Enable"));  // the toggle still goes into state.json
+    CHECK(contains(v.rows[1].info, "Waiting (starts when the multiplayer game ends)"));
+    CHECK_EQ(v.rows[1].button, std::string("Disable"));
+}

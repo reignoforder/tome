@@ -125,3 +125,30 @@ TEST(assets_plan_keeps_load_order_and_held_mods) {
     CHECK(!first.changed);
     CHECK(ids(first) == std::vector<std::string>({"held", "x"}));
 }
+
+TEST(assets_plan_frozen_mods_keep_what_they_have) {
+    // Locked for a multiplayer game: new files, even live ones, wait.
+    std::vector<ModAssets> mounted = {mod("a", ReloadMode::Live, 1), mod("req", ReloadMode::Live, 2)};
+    std::set<std::string> frozen = {"req"};
+    Plan changed = plan(mounted, {mod("a", ReloadMode::Live, 1), mod("req", ReloadMode::Live, 3)}, Moment::Refresh,
+                        frozen);
+    CHECK(!changed.changed);
+    CHECK(changed.pending.empty());
+    CHECK_EQ(changed.mount[1].fingerprint, uint64_t{2});
+
+    // Turned off: it stays mounted in its place, not listed as pending.
+    Plan off = plan(mounted, {mod("a", ReloadMode::Live, 1)}, Moment::Refresh, frozen);
+    CHECK(!off.changed);
+    CHECK(off.pending.empty());
+    CHECK(ids(off) == std::vector<std::string>({"a", "req"}));
+
+    // A frozen mod with nothing mounted gets nothing; others still apply.
+    Plan none = plan(mounted, {mod("a", ReloadMode::Live, 4), mod("new", ReloadMode::Live, 5)}, Moment::Refresh,
+                     {"a", "req", "new"});
+    CHECK(!none.changed);
+    CHECK(ids(none) == std::vector<std::string>({"a", "req"}));
+    Plan other = plan(mounted, {mod("a", ReloadMode::Live, 4), mod("req", ReloadMode::Live, 2)}, Moment::Refresh,
+                      frozen);
+    CHECK(other.changed);
+    CHECK_EQ(other.mount[0].fingerprint, uint64_t{4});
+}

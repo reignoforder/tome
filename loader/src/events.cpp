@@ -15,6 +15,7 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cstring>
 #include <map>
@@ -283,17 +284,32 @@ void tome_command(const std::string& args) {
     main_thread::post([cmd] {
         if (cmd.action == chat::TomeAction::Reload) {
             std::vector<std::string> ids = mod_manager().reload(cmd.id);
-            std::string list;
-            for (const std::string& id : ids) list += (list.empty() ? "" : ", ") + id;
-            say(ids.empty() ? "nothing to reload (no running mod with a DLL)" : "reloaded " + list);
+            std::vector<ModStatus> mods = mod_manager().status();
+            std::string list, waiting;
+            for (const std::string& id : ids) {
+                bool locked = std::any_of(mods.begin(), mods.end(),
+                                          [&](const ModStatus& s) { return s.id == id && !s.locked.empty(); });
+                std::string& to = locked ? waiting : list;
+                to += (to.empty() ? "" : ", ") + id;
+            }
+            if (ids.empty()) say("nothing to reload (no running mod with a DLL)");
+            if (!list.empty()) say("reloaded " + list);
+            if (!waiting.empty()) say(waiting + ": locked during this multiplayer game; reloads when it ends");
             return;
         }
         bool enable = cmd.action == chat::TomeAction::Enable;
-        mod_manager().set_enabled(cmd.id, enable);
+        std::vector<std::string> dependents = mod_manager().set_enabled(cmd.id, enable);
+        if (!dependents.empty()) {
+            std::string list;
+            for (const std::string& id : dependents) list += (list.empty() ? "" : ", ") + id;
+            say("also disabled " + list + " (they depend on " + cmd.id + ")");
+        }
         for (const ModStatus& s : mod_manager().status()) {
             if (s.id != cmd.id) continue;
             if (s.running == enable) {
                 say(std::string(enable ? "enabled " : "disabled ") + cmd.id);
+            } else if (!s.locked.empty()) {
+                say(cmd.id + ": " + s.locked);
             } else {
                 say(cmd.id + " is " + s.state + (s.reason.empty() ? "" : ": " + s.reason));
             }

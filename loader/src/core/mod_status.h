@@ -19,11 +19,12 @@ struct ModStatus {
     std::string version;
     bool user_enabled = false;
     bool running = false; // enabled right now
-    std::string state;    // "active", "disabled", "error", ...
+    std::string state;    // "active", "disabled", "waiting" (game lock), "error", ...
     std::string reason;
     std::vector<std::string> warnings;
     std::string assets_pending;  // why the mod's asset changes are waiting; "" if they aren't
     bool restart_pending = false;  // ...and they wait for a restart
+    std::string locked;  // what a multiplayer game's lock does to it (core/game_lock.h, note); "" if nothing
 
     // For the mod menu's details page.
     std::string description;

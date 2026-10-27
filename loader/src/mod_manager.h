@@ -76,13 +76,24 @@ public:
     const Paths& paths() const { return paths_; }
 
     // Saves the mod's enabled flag to tome/state.json and applies it now.
-    // Call on the main thread (e.g. from the mod menu).
-    void set_enabled(const std::string& id, bool enabled);
+    // Disabling a mod also disables the enabled mods that depend on it
+    // (directly or not, unless another enabled mod provides what they need);
+    // returns their ids. Call on the main thread (e.g. from the mod menu).
+    std::vector<std::string> set_enabled(const std::string& id, bool enabled);
 
     // Reloads the DLL of the running mod `id` (every running mod with a DLL
     // if `id` is empty), with its dependents, as if it had been rebuilt.
     // Returns the ids that were reloaded. Main thread.
     std::vector<std::string> reload(const std::string& id);
+
+    // A multiplayer game or replay started (on) or ended (off); main thread
+    // (core/game_lock.h, docs/research.md §5.7). While it's on, the running
+    // "sync": "required" mods and what they depend on keep running unchanged
+    // (no toggles, hot reloads or asset changes; only a crash stops one) and
+    // other required mods don't start. Toggles still go into state.json and
+    // apply when the lock goes off. Refreshes later, from the message loop.
+    void set_game_lock(bool on);
+    bool game_locked() const;
 
     // Settings (core/settings.h), saved in <mod>/config/settings.json.
     // The current value of `key`, or a null value if the mod or setting
@@ -140,6 +151,10 @@ private:
         tome_mod_lifecycle_fn disable_fn = nullptr;
         tome_mod_lifecycle_fn unload_fn = nullptr;
         bool enabled = false;
+        // From tome.mod.json when it was enabled, for the game lock.
+        bool required = false;
+        std::vector<std::string> depends;  // ids
+        std::vector<std::string> provides;
     };
 
     struct LoadFailure {
@@ -177,7 +192,7 @@ private:
     void read_settings_schema(Installed& mod) const;
     // Runs fn under the lock, then tells the mods about settings that changed meanwhile.
     void locked(const std::function<void()>& fn);
-    void set_enabled_locked(const std::string& id, bool enabled);
+    std::vector<std::string> set_enabled_locked(const std::string& id, bool enabled);
     std::vector<std::string> reload_locked(const std::string& id);
     // `invalid` (optional) is set when state.json exists but can't be parsed.
     std::map<std::string, bool> read_state(bool* invalid = nullptr) const;
@@ -196,6 +211,8 @@ private:
     // `moment` says when this runs if it's known to be a better time for
     // asset changes than an ordinary refresh (the main menu, a map load).
     void refresh_locked(assets::Moment moment = assets::Moment::Refresh);
+    // The same, with what discover() just returned.
+    void refresh_locked(std::vector<Installed> installed, assets::Moment moment = assets::Moment::Refresh);
     // Brings the assets archive in line with `running` (load order), as far
     // as each mod's reload mode allows at `moment`. Returns the archive's new
     // summary, or "" if it didn't change.
@@ -225,6 +242,8 @@ private:
     bool assets_started_ = false;  // the first refresh finished; before that, asset changes count as startup
     bool shut_down_ = false;       // shutdown() ran: no more refreshes
     std::string safe_mode_;        // why safe mode is on; empty if it isn't
+    bool game_lock_ = false;       // a multiplayer game is running (set_game_lock)
+    std::set<std::string> locked_;  // the mods it keeps running, by id
     std::set<std::string> safe_mode_enabled_;  // enabled during this session despite safe mode
     std::map<std::string, std::pair<uint64_t, std::string>> sync_hashes_;  // by folder: files' stamps, hash
     mutable std::map<std::string, ParsedMeta> meta_cache_;

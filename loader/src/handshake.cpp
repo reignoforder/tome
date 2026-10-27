@@ -1,5 +1,6 @@
 #include "handshake.h"
 
+#include "core/game_lock.h"
 #include "core/handshake.h"
 #include "events.h"
 #include "frames.h"
@@ -350,6 +351,20 @@ bool install(uintptr_t game_base, const BuildMappings& build, std::string& repor
     return true;
 }
 
+namespace {
+
+// Locks required mods if this game is a multiplayer game or a replay
+// (core/game_lock.h). Checked at the start and again on the first step, in
+// case the players weren't all in place yet.
+void check_lock() {
+    if (mod_manager().game_locked()) return;
+    int humans = 0;
+    for (int slot = 0; slot < kMaxPlayerSlots; ++slot) humans += units::is_human(slot);
+    if (game_lock::applies(g_replay, humans)) mod_manager().set_game_lock(true);
+}
+
+} // namespace
+
 void on_game_start() {
     if (!g_build) return;
     g_record.reset();
@@ -357,6 +372,7 @@ void on_game_start() {
     g_replay = g_is_replay() != 0;
     g_sent = false;
     g_reported = false;
+    check_lock();
 }
 
 void on_game_tick(double game_time) {
@@ -364,6 +380,7 @@ void on_game_tick(double game_time) {
     // Sent on the first step rather than at the start, once the game runs.
     if (!g_sent) {
         g_sent = true;
+        check_lock();
         ModSet local = local_set();
         if (!g_replay && !local.empty()) send_set(local);
     }
@@ -375,6 +392,7 @@ void on_game_tick(double game_time) {
 
 void on_game_end() {
     g_in_game = false;
+    mod_manager().set_game_lock(false);
 }
 
 } // namespace tome::handshake

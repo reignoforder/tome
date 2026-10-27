@@ -7,6 +7,7 @@
 #include "metadata.h"
 
 #include <cstdint>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -53,6 +54,10 @@ struct Plan {
 // moment; otherwise the mod keeps what it has mounted and is listed as
 // pending. A removed mod is judged by the mode it was mounted with. A change
 // of reload mode alone needs no rebuild; `mount` carries the new mode.
-Plan plan(const std::vector<ModAssets>& mounted, const std::vector<ModAssets>& wanted, Moment moment);
+// `frozen` mods (locked during a multiplayer game, core/game_lock.h) keep
+// exactly what they have mounted, in place, whatever `wanted` says, and
+// aren't listed as pending: their changes apply once the game ends.
+Plan plan(const std::vector<ModAssets>& mounted, const std::vector<ModAssets>& wanted, Moment moment,
+          const std::set<std::string>& frozen = {});
 
 } // namespace tome::assets

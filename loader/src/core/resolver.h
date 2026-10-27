@@ -44,6 +44,13 @@ struct ResolveResult {
 
 ResolveResult resolve(const std::vector<ResolveInput>& inputs, const ResolveEnvironment& env);
 
+// The mods to turn off along with inputs[target] (docs/research.md §5.7):
+// enabled mods that resolve() lets run now but not once target is disabled,
+// because they need it, directly or not, and no other mod that runs gives
+// them what they need. Indices in input order, without target.
+std::vector<size_t> dependents_of(const std::vector<ResolveInput>& inputs, const ResolveEnvironment& env,
+                                  size_t target);
+
 const char* to_string(ModState state);
 
 } // namespace tome
