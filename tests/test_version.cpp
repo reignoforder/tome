@@ -91,6 +91,35 @@ TEST(semver_range_caret_and_tilde) {
     CHECK(!in("^1.0.0", "2.0.0-alpha"));
 }
 
+TEST(semver_range_operator_apart_from_version) {
+    CHECK(in(">= 1.0.0", "1.2.0"));
+    CHECK(!in(">= 1.0.0", "0.9.0"));
+    CHECK(in(">= 1.2 < 2", "1.5.0"));
+    CHECK(!in(">= 1.2 < 2", "2.0.0"));
+    CHECK(in("^ 1.2", "1.9.0"));
+    CHECK(game_in(">= 1.27", "1.27.1.7085"));
+    CHECK(!game_in("< 1.27", "1.27.1.7085"));
+    SemVerRange range;
+    std::string err;
+    CHECK(!parse_semver_range(">=", range, err));
+    CHECK(!parse_semver_range("1.0.0 >=", range, err));
+}
+
+TEST(semver_range_any) {
+    // Every version, pre-releases of 0.0.0 too.
+    CHECK(in("*", "0.0.0-alpha"));
+    CHECK(in("x", "0.0.0-alpha"));
+    CHECK(in("", "0.0.0-alpha"));
+    SemVerRange range;
+    std::string err;
+    for (const char* text : {"*", "x", "X", "", "x.x", "*.*.*", "1 || *"}) {
+        CHECK(parse_semver_range(text, range, err) && range.any());
+    }
+    for (const char* text : {"1.x", ">=0.0.0", "^0"}) {
+        CHECK(parse_semver_range(text, range, err) && !range.any());
+    }
+}
+
 TEST(semver_range_rejects_garbage) {
     SemVerRange range;
     std::string err;

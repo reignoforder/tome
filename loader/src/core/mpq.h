@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <vector>
 
 namespace tome::mpq {
@@ -47,13 +48,12 @@ public:
     std::string header() const;
 
 private:
-    struct Key {
-        uint32_t a, b;
-        bool operator<(const Key& o) const { return a != o.a ? a < o.a : b < o.b; }
-    };
+    // A name's NameA hash in the high word, NameB in the low one.
+    static uint64_t key(std::string_view name);
+
     std::vector<std::string> names_;
-    std::vector<uint32_t> blocks_;  // 4 words per file
-    std::vector<Key> keys_;         // sorted, for contains()
+    std::vector<uint32_t> blocks_;        // 4 words per file
+    std::unordered_set<uint64_t> keys_;  // every name's key, for contains()
     uint64_t size_ = header_size();
     uint32_t hash_pos_ = 0, block_pos_ = 0, hash_size_ = 0;
 };

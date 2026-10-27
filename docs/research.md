@@ -298,9 +298,10 @@ message loop, never in the middle of JASS execution, and needs no
 reverse engineering, so it works on every build. The watcher thread only
 compares file timestamps; the refresh itself is posted to the main thread.
 The e2e test checks that disables run on the window's thread. The first mod
-load is the one exception: it runs on the bootstrap thread, because nothing
-can call into mods yet, and the InitNatives hook waits for it (at most 10 s),
-so `-loadfile` maps always see enabled mods.
+load is the one exception: it runs on the bootstrap thread, and the
+InitNatives hook waits for it (at most 10 s), so `-loadfile` maps always see
+enabled mods. Until a mod's `tome_mod_enable` returns, calls into it from
+other threads (a TICK on the main thread) are skipped.
 
 Still to do: if a mod starts its own threads, wait for them before
 `FreeLibrary` (an in-flight counter per mod).

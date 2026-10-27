@@ -41,14 +41,24 @@ std::string_view trim(std::string_view s) {
     return s;
 }
 
-std::vector<std::string_view> split_whitespace(std::string_view s) {
-    std::vector<std::string_view> tokens;
+// Comparators of a range, split on whitespace. An operator on its own
+// (">= 1.2") goes with the version after it.
+std::vector<std::string> split_comparators(std::string_view s) {
+    std::vector<std::string> tokens;
+    bool joining = false;
     size_t i = 0;
     while (i < s.size()) {
         while (i < s.size() && (s[i] == ' ' || s[i] == '\t')) ++i;
         size_t start = i;
         while (i < s.size() && s[i] != ' ' && s[i] != '\t') ++i;
-        if (i > start) tokens.push_back(s.substr(start, i - start));
+        if (i == start) continue;
+        std::string_view token = s.substr(start, i - start);
+        if (joining) {
+            tokens.back() += token;
+        } else {
+            tokens.emplace_back(token);
+        }
+        joining = token.find_first_not_of("<>=^~") == std::string_view::npos;
     }
     return tokens;
 }
@@ -149,10 +159,10 @@ void push_prefix_range(std::vector<Comparator<V>>& set, const uint32_t* parts, i
             low.part[i] = i < concrete ? parts[i] : 0;
         }
     }
-    set.push_back({Op<V>::Ge, low});
     if (concrete == 0) {
-        return;  // "*"
+        return;  // "*": no comparator, so even pre-releases of 0.0.0 match
     }
+    set.push_back({Op<V>::Ge, low});
     V high = low;
     if constexpr (std::is_same_v<V, SemVer>) {
         uint32_t* fields[] = {&high.major, &high.minor, &high.patch};
@@ -262,6 +272,14 @@ const char* game_version_alias(const GameVersion& version) {
 }
 
 template <typename V>
+bool Range<V>::any() const {
+    for (const auto& set : alternatives_) {
+        if (set.empty()) return true;
+    }
+    return false;
+}
+
+template <typename V>
 bool Range<V>::matches(const V& version) const {
     for (const auto& set : alternatives_) {
         bool all = true;
@@ -284,7 +302,7 @@ bool parse_semver_range(std::string_view text, SemVerRange& out, std::string& er
     range.text_ = std::string(trim(text));
     for (std::string_view alt : split(text, "||")) {
         std::vector<Comparator<SemVer>> set;
-        auto tokens = split_whitespace(alt);
+        auto tokens = split_comparators(alt);
         if (tokens.empty()) {
             if (trim(text).empty()) {
                 tokens.push_back("*");
@@ -382,7 +400,7 @@ bool parse_game_range(std::string_view text, GameVersionRange& out, std::string&
     range.text_ = std::string(trim(text));
     for (std::string_view alt : split(text, "||")) {
         std::vector<Comparator<GameVersion>> set;
-        auto tokens = split_whitespace(alt);
+        auto tokens = split_comparators(alt);
         if (tokens.empty()) {
             if (trim(text).empty()) {
                 tokens.push_back("*");

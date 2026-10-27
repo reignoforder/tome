@@ -24,7 +24,8 @@
 
 namespace tome::overlay {
 
-// Deletes archives left in tome/cache by earlier sessions. Call once, before
+// Deletes archives left in tome/cache by earlier sessions, except the last
+// assets archive, which mount_assets may use again. Call once, before
 // anything else here (DllMain).
 void init(const Paths& paths);
 
@@ -50,6 +51,7 @@ void scan_assets(const std::wstring& dir, std::vector<AssetFile>& files, uint64_
 
 struct ModSource {
     std::string id;
+    uint64_t fingerprint = 0;  // scan_assets: the files this mod's part of the archive was built from
     // Copy this mod's files from the archive mounted now instead of from disk
     // (a mod whose newer files have to wait, see core/assets.h).
     bool keep_previous = false;
@@ -57,7 +59,10 @@ struct ModSource {
 };
 
 // Rebuilds the assets archive from `mods`, lowest precedence first, and swaps
-// it in; an empty list unmounts it. `summary` describes the result for the
+// it in; an empty list unmounts it. At the first call of a session, the
+// archive the last session built is mounted again if it was built from the
+// same mods and fingerprints (tome/cache/assets.json), instead of copying
+// every file again. `summary` describes the result for the
 // log, including files that couldn't be added. False (and the previous
 // archive stays) on failure.
 bool mount_assets(const std::vector<ModSource>& mods, std::string& summary);

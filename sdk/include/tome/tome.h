@@ -32,7 +32,12 @@ extern "C" {
 #define TOME_API_VERSION 11
 
 #define TOME_CALL __cdecl
+/* C linkage in C++ too: Tome looks the lifecycle functions up by their plain names. */
+#ifdef __cplusplus
+#define TOME_EXPORT extern "C" __declspec(dllexport)
+#else
 #define TOME_EXPORT __declspec(dllexport)
+#endif
 
 typedef struct tome_mod tome_mod; /* opaque handle identifying the calling mod */
 

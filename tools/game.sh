@@ -4,7 +4,8 @@
 #   tools/game.sh start [VAR=value ...] [-- game args]   restart the game (stops any running copy)
 #   tools/game.sh stop                                   stop the game
 #   tools/game.sh wait <regex> [seconds]                 wait for a tome.log line (default 30 s)
-#   tools/game.sh shot <file.png>                        full-screen screenshot (KDE Spectacle)
+#   tools/game.sh shot <file.png>                        screenshot (the headless game's screen, or
+#                                                        the full screen with KDE Spectacle)
 #   tools/game.sh log                                    print tome.log
 #
 # Examples:
@@ -15,10 +16,12 @@
 # The game is found by its exact process name (war3.exe), never by command
 # line: `pkill -f` patterns also match the shell that runs them.
 # Set GAME_DIR to use a game folder other than ./WarCraft III, and TOME_HOME
-# (a Windows path) to keep mods/ and tome/ somewhere else.
+# (a Windows path) to keep mods/ and tome/ somewhere else. HEADLESS=1 runs
+# the game off screen, in gamescope (tools/headless.sh).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "$ROOT/tools/headless.sh"
 GAME="${GAME_DIR:-$ROOT/WarCraft III}"
 LOG_DIR="$GAME"
 if [[ -n "${TOME_HOME:-}" ]]; then
@@ -42,7 +45,7 @@ start)
     [[ "${1:-}" == "--" ]] && shift
     stop
     rm -f "$LOG"
-    (cd "$GAME" && env WINEDEBUG=-all "${envs[@]}" wine war3.exe -window -opengl "$@" >/dev/null 2>&1 &)
+    (cd "$GAME" && headless_exec env WINEDEBUG=-all "${envs[@]}" wine war3.exe -window -opengl "$@" >/dev/null 2>&1 &)
     ;;
 stop)
     stop
@@ -57,7 +60,12 @@ wait)
     exit 1
     ;;
 shot)
-    timeout 20 spectacle -b -n -f -o "${2:?usage: game.sh shot <file.png>}"
+    file="${2:?usage: game.sh shot <file.png>}"
+    if [[ -n "$(headless_display)" ]]; then
+        headless_shot "$file"
+    else
+        timeout 20 spectacle -b -n -f -o "$file"
+    fi
     ;;
 log)
     cat "$LOG"

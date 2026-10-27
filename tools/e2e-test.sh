@@ -10,10 +10,12 @@
 # afterwards. The test map calls the hello mod's JASS natives.
 #
 # Usage: tools/e2e-test.sh [build-dir] [game-dir]
-# A game window opens six times, for up to a minute and a half each.
+# A game window opens six times, for up to a minute and a half each, unless
+# HEADLESS=1: then the game runs off screen in gamescope (tools/headless.sh).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "$ROOT/tools/headless.sh"
 BUILD="$(realpath "${1:-$ROOT/build}")"
 GAME="$(realpath "${2:-$ROOT/WarCraft III}")"
 FIXTURES="$ROOT/tests/e2e/mods"
@@ -130,7 +132,7 @@ launch() {
     rm -f "$LOG"
     (cd "$GAME" && WINEDEBUG=-all TOME_HOME="$TOME_HOME_WIN" TOME_DEBUG_CLICKS="${TOME_DEBUG_CLICKS:-}" \
         TOME_DEBUG_ASSET="$PROBE" \
-        exec wine war3.exe -window -opengl "${MAP_ARG[@]}" >/dev/null 2>&1) &
+        headless_exec wine war3.exe -window -opengl "${MAP_ARG[@]}" >/dev/null 2>&1) &
     WINE_PID=$!
 }
 

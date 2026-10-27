@@ -110,12 +110,26 @@ TEST(settings_load_values) {
     CHECK_EQ(empty.members().size(), size_t(5));
 }
 
+TEST(settings_step_from_off_grid) {
+    Schema s;
+    std::vector<std::string> errors, warnings;
+    CHECK(parse_schema(parse_json(R"({"properties": {"n": {"type": "integer", "minimum": 0, "maximum": 20,
+                                                            "step": 2, "default": 5}}})"),
+                       s, errors, warnings));
+    const Setting& n = *s.find("n");
+    CHECK_EQ(step(n, json::Value::number(5), 1).as_number(), 6.0);  // the next grid point, not 8
+    CHECK_EQ(step(n, json::Value::number(5), -1).as_number(), 4.0);
+    CHECK_EQ(step(n, json::Value::number(6), 1).as_number(), 8.0);
+    CHECK_EQ(step(n, json::Value::number(6), -1).as_number(), 4.0);
+}
+
 TEST(settings_display_and_step) {
     Schema s = schema();
     const Setting& scale = *s.find("scale");
     CHECK_EQ(display(*s.find("show"), json::Value::boolean(true)), std::string("On"));
     CHECK_EQ(display(*s.find("mode"), json::Value::string("always")), std::string("Always"));
     CHECK_EQ(display(scale, json::Value::number(1.5)), std::string("1.5"));
+    CHECK_EQ(display(scale, json::Value::number(1234567)), std::string("1234567"));  // not 1.23457e+06
 
     json::Value v = json::Value::number(1);
     for (int i = 0; i < 7; ++i) v = step(scale, v, 1);

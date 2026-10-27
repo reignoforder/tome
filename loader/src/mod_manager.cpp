@@ -20,7 +20,6 @@ namespace tome {
 namespace {
 
 constexpr int kStateSchema = 1;
-constexpr unsigned kHookWaitMs = 2000;     // for handlers running on other threads
 constexpr unsigned kReleaseRetryMs = 250;
 
 using Gates = std::vector<std::shared_ptr<hooks::Gate>>;
@@ -36,21 +35,21 @@ struct InRefresh {
 };
 
 // Frees a mod's DLL once none of its hook handlers runs (they're revoked by
-// now, so none starts). If one is still running on another thread after
-// kHookWaitMs, or is on this thread's own stack (e.g. the mod menu disabled
-// the mod from a click that came through the mod's own OnEvent hook), the
-// DLL stays loaded and the main thread tries again later. The shadow copy
-// goes with it.
+// now, so none starts). If one is still running on another thread, or is on
+// this thread's own stack (e.g. the mod menu disabled the mod from a click
+// that came through the mod's own OnEvent hook), the DLL stays loaded and the
+// main thread tries again every kReleaseRetryMs, so nothing waits for it.
+// The shadow copy goes with it.
 void release_module(HMODULE module, const std::wstring& shadow, const Gates& gates, const std::string& id,
-                    unsigned wait_ms) {
-    if (!hooks::idle(gates, wait_ms)) {
-        if (wait_ms) TOME_WARN("%s: a hook handler is still running; freeing the DLL once it returns", id.c_str());
-        main_thread::post_delayed(kReleaseRetryMs, [=] { release_module(module, shadow, gates, id, 0); });
+                    bool retry = false) {
+    if (!hooks::idle(gates, 0)) {
+        if (!retry) TOME_WARN("%s: a hook handler is still running; freeing the DLL once it returns", id.c_str());
+        main_thread::post_delayed(kReleaseRetryMs, [=] { release_module(module, shadow, gates, id, true); });
         return;
     }
     FreeLibrary(module);
     DeleteFileW(shadow.c_str());
-    if (!wait_ms) TOME_INFO("%s: freed the old DLL", id.c_str());
+    if (retry) TOME_INFO("%s: freed the old DLL", id.c_str());
 }
 
 std::wstring to_windows_path(const std::string& relative) {
@@ -124,17 +123,24 @@ HMODULE load_with_mod_dir(const std::wstring& dll, const std::wstring& mod_dir) 
     return module;
 }
 
+// Marks the mod as starting on this thread for the duration of a lifecycle
+// call (tome_mod::starting_on).
+struct Starting {
+    tome_mod& mod;
+    explicit Starting(tome_mod& m) : mod(m) { mod.starting_on.store(GetCurrentThreadId(), std::memory_order_release); }
+    ~Starting() { mod.starting_on.store(0, std::memory_order_release); }
+};
+
 template <typename Fn>
 Fn lookup(HMODULE module, const char* name) {
     return reinterpret_cast<Fn>(reinterpret_cast<void*>(GetProcAddress(module, name)));
 }
 
-// Mixes a file's contents into `hash`, 1 MiB at a time. False if it can't be read.
-bool hash_file(const std::wstring& path, Fnv1a64& hash) {
+// Mixes a file's contents into `hash`, a buffer at a time. False if it can't be read.
+bool hash_file(const std::wstring& path, Fnv1a64& hash, std::vector<char>& buffer) {
     HANDLE in = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                             nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (in == INVALID_HANDLE_VALUE) return false;
-    std::vector<char> buffer(1 << 20);
     DWORD got = 0;
     bool ok = true;
     while ((ok = ReadFile(in, buffer.data(), static_cast<DWORD>(buffer.size()), &got, nullptr)) && got > 0) {
@@ -177,35 +183,60 @@ void ModManager::init(const Paths& paths, const GameBuild& build) {
 }
 
 // The mod's settings schema ("config" in tome.mod.json) and its saved values.
-// Problems with either are reported but don't stop the mod.
+// Problems with either are reported but don't stop the mod. Each file is
+// parsed again only when its stamp changes.
 void ModManager::read_settings_schema(Installed& mod) const {
-    std::string text;
-    if (!read_file(mod.dir + L"\\" + to_windows_path(mod.meta.config), text)) {
-        mod.settings_error = "can't read " + mod.meta.config;
-        return;
+    const std::wstring schema_file = mod.dir + L"\\" + to_windows_path(mod.meta.config);
+    const std::wstring values_file = mod.dir + L"\\config\\settings.json";
+    // The stamps first: if a file changes while it's read, the next poll sees a newer one.
+    FileStamp schema_stamp, values_stamp;
+    bool schema_exists = file_stamp(schema_file, schema_stamp);
+    bool values_exist = file_stamp(values_file, values_stamp);
+
+    ParsedSettings& cached = settings_cache_[mod.folder];
+    if (!cached.schema_read || cached.schema_file != schema_file || !(cached.schema_stamp == schema_stamp)) {
+        cached = {};
+        cached.schema_read = true;
+        cached.schema_file = schema_file;
+        cached.schema_stamp = schema_stamp;
+        std::string text;
+        json::Value root;
+        json::ParseResult parsed;
+        if (!schema_exists || !read_file(schema_file, text)) {
+            cached.error = "can't read " + mod.meta.config;
+            cached.unusable = true;
+        } else if (parsed = json::parse(text, root); !parsed.ok) {
+            cached.error = mod.meta.config + ": " + parsed.error;
+            cached.unusable = true;
+        } else {
+            std::vector<std::string> errors, warnings;
+            if (!settings::parse_schema(root, cached.schema, errors, warnings)) {
+                cached.error = mod.meta.config + ": " + errors.front();
+            }
+            for (const std::string& w : warnings) cached.schema_warnings.push_back(mod.meta.config + ": " + w);
+        }
     }
-    json::Value root;
-    json::ParseResult parsed = json::parse(text, root);
-    if (!parsed.ok) {
-        mod.settings_error = mod.meta.config + ": " + parsed.error;
-        return;
+    mod.settings_error = cached.error;
+    if (cached.unusable) return;
+    mod.settings = cached.schema;
+    mod.warnings.insert(mod.warnings.end(), cached.schema_warnings.begin(), cached.schema_warnings.end());
+
+    if (!cached.values_read || !(cached.values_stamp == values_stamp)) {
+        cached.values_read = true;
+        cached.values_stamp = values_stamp;
+        cached.values = json::Value();
+        cached.values_warning.clear();
+        std::string text;
+        if (!values_exist || !read_file(values_file, text)) {
+            cached.values_stamp = {};
+        } else if (json::ParseResult parsed = json::parse(text, cached.values); !parsed.ok) {
+            cached.values_warning = "config\\settings.json: " + parsed.error + "; using the defaults";
+            cached.values = json::Value();
+        }
     }
-    std::vector<std::string> errors, warnings;
-    if (!settings::parse_schema(root, mod.settings, errors, warnings)) {
-        mod.settings_error = mod.meta.config + ": " + errors.front();
-    }
-    for (const std::string& w : warnings) mod.warnings.push_back(mod.meta.config + ": " + w);
-    std::wstring values_file = mod.dir + L"\\config\\settings.json";
-    // The stamp first: if the file changes while it's read, the next poll sees a newer one.
-    if (!file_stamp(values_file, mod.settings_stamp) || !read_file(values_file, text)) {
-        mod.settings_stamp = {};
-        return;
-    }
-    parsed = json::parse(text, mod.stored_settings);
-    if (!parsed.ok) {
-        mod.warnings.push_back("config\\settings.json: " + parsed.error + "; using the defaults");
-        mod.stored_settings = json::Value();
-    }
+    mod.settings_stamp = cached.values_stamp;
+    mod.stored_settings = cached.values;
+    if (!cached.values_warning.empty()) mod.warnings.push_back(cached.values_warning);
 }
 
 std::vector<ModManager::Installed> ModManager::discover() const {
@@ -222,35 +253,47 @@ std::vector<ModManager::Installed> ModManager::discover() const {
         mod.folder = narrow(name);
         mod.dir = paths_.mods_dir + L"\\" + name;
 
-        std::string text;
-        if (!read_file(mod.dir + L"\\tome.mod.json", text)) {
-            mod.errors.push_back("no readable tome.mod.json");
-            mods.push_back(std::move(mod));
-            continue;
-        }
-        json::Value root;
-        json::ParseResult parsed = json::parse(text, root);
-        if (!parsed.ok) {
-            mod.errors.push_back("tome.mod.json: " + parsed.error);
-            mods.push_back(std::move(mod));
-            continue;
-        }
-        MetadataResult meta = parse_metadata(root, mod.meta);
-        mod.errors = std::move(meta.errors);
-        mod.warnings = std::move(meta.warnings);
-        mod.valid = meta.ok;
-        if (mod.valid && build_.known) {
-            // Names with a single ':' are capabilities ("event:frame"), not mappings; not checked
-            // yet. "Class::Method" is a mapping.
-            for (const std::string& name : mod.meta.requires_) {
-                const bool capability = name.find(':') != std::string::npos && name.find("::") == std::string::npos;
-                if (!capability && !build_.known->data->find(name)) {
-                    mod.errors.push_back("needs \"" + name + "\", which isn't mapped for " +
-                                         build_.known->data->name);
-                    mod.valid = false;
+        // tome.mod.json is parsed again only when its stamp changes.
+        const std::wstring meta_file = mod.dir + L"\\tome.mod.json";
+        FileStamp meta_stamp;
+        bool meta_exists = file_stamp(meta_file, meta_stamp);
+        ParsedMeta& cached = meta_cache_[mod.folder];
+        if (!cached.read || !(cached.stamp == meta_stamp)) {
+            cached = {};
+            cached.read = true;
+            cached.stamp = meta_stamp;
+            std::string text;
+            json::Value root;
+            json::ParseResult parsed;
+            if (!meta_exists || !read_file(meta_file, text)) {
+                cached.stamp = {};  // read again next time
+                cached.errors.push_back("no readable tome.mod.json");
+            } else if (parsed = json::parse(text, root); !parsed.ok) {
+                cached.errors.push_back("tome.mod.json: " + parsed.error);
+            } else {
+                MetadataResult meta = parse_metadata(root, cached.meta);
+                cached.errors = std::move(meta.errors);
+                cached.warnings = std::move(meta.warnings);
+                cached.valid = meta.ok;
+                if (cached.valid && build_.known) {
+                    // Names with a single ':' are capabilities ("event:frame"), not mappings; not checked
+                    // yet. "Class::Method" is a mapping.
+                    for (const std::string& name : cached.meta.requires_) {
+                        const bool capability =
+                            name.find(':') != std::string::npos && name.find("::") == std::string::npos;
+                        if (!capability && !build_.known->data->find(name)) {
+                            cached.errors.push_back("needs \"" + name + "\", which isn't mapped for " +
+                                                    build_.known->data->name);
+                            cached.valid = false;
+                        }
+                    }
                 }
             }
         }
+        mod.meta = cached.meta;
+        mod.errors = cached.errors;
+        mod.warnings = cached.warnings;
+        mod.valid = cached.valid;
         if (mod.valid) {
             std::string entry = mod.meta.entry_for(game_version_);
             if (!entry.empty()) {
@@ -277,6 +320,12 @@ std::vector<ModManager::Installed> ModManager::discover() const {
     FindClose(find);
 
     std::sort(mods.begin(), mods.end(), [](const Installed& a, const Installed& b) { return a.folder < b.folder; });
+    // Forget folders that are gone.
+    std::set<std::string> folders;
+    for (const Installed& mod : mods) folders.insert(mod.folder);
+    auto gone = [&](const auto& entry) { return !folders.count(entry.first); };
+    std::erase_if(meta_cache_, gone);
+    std::erase_if(settings_cache_, gone);
     return mods;
 }
 
@@ -307,7 +356,7 @@ bool ModManager::wanted_by_user(const std::map<std::string, bool>& state, const 
     return saved == state.end() || saved->second;
 }
 
-void ModManager::write_state(const std::map<std::string, bool>& state) const {
+void ModManager::write_state(const std::map<std::string, bool>& state) {
     json::Value root = json::Value::object();
     root.set("schema", json::Value::number(kStateSchema));
     json::Value mods = json::Value::object();
@@ -317,8 +366,15 @@ void ModManager::write_state(const std::map<std::string, bool>& state) const {
         mods.set(id, std::move(entry));
     }
     root.set("mods", std::move(mods));
-    if (!write_file_atomic(paths_.tome_dir + L"\\state.json", json::serialize(root))) {
+    const std::wstring path = paths_.tome_dir + L"\\state.json";
+    if (!write_file_atomic(path, json::serialize(root))) {
         TOME_WARN("Couldn't write tome/state.json");
+        return;
+    }
+    FileStamp stamp;
+    if (file_stamp(path, stamp)) {
+        ExclusiveLock hold(state_stamp_lock_);
+        written_state_stamp_ = stamp;
     }
 }
 
@@ -357,7 +413,12 @@ bool ModManager::load(Runtime& rt, const Installed& mod, std::string& error) {
 
     rt.handle.clear_fault();  // a new DLL starts with a clean record
     int rc = 0;
-    if (!guard::run(&rt.handle, "tome_mod_load", nullptr, [&] { rc = load_fn(api_table(), &rt.handle); })) {
+    bool returned;
+    {
+        Starting starting(rt.handle);
+        returned = guard::run(&rt.handle, "tome_mod_load", nullptr, [&] { rc = load_fn(api_table(), &rt.handle); });
+    }
+    if (!returned) {
         error = rt.handle.fault_text();
         // The DLL stays loaded: whatever the crash left behind (a thread, a
         // patch of its own) may still point into it.
@@ -371,7 +432,7 @@ bool ModManager::load(Runtime& rt, const Installed& mod, std::string& error) {
         // Undo whatever it registered before failing (hooks would otherwise
         // keep calling into the freed DLL).
         rt.handle.revoke_all();
-        release_module(module, rt.shadow_dll, rt.handle.take_hook_gates(), rt.handle.id, kHookWaitMs);
+        release_module(module, rt.shadow_dll, rt.handle.take_hook_gates(), rt.handle.id);
         rt.module = nullptr;
         return false;
     }
@@ -419,7 +480,7 @@ void ModManager::unload(Runtime& rt) {
         rt.handle.take_hook_gates();
         TOME_INFO("Unloaded %s (its DLL stays loaded after the crash)", rt.handle.id.c_str());
     } else {
-        release_module(rt.module, rt.shadow_dll, rt.handle.take_hook_gates(), rt.handle.id, kHookWaitMs);
+        release_module(rt.module, rt.shadow_dll, rt.handle.take_hook_gates(), rt.handle.id);
         TOME_INFO("Unloaded %s", rt.handle.id.c_str());
     }
     rt.module = nullptr;
@@ -430,7 +491,10 @@ void ModManager::enable(Runtime& rt) {
     if (rt.enabled) return;
     // A crash leaves it enabled (with what it registered so far); the end of
     // the refresh disables it.
-    if (rt.enable_fn) guard::run(&rt.handle, "tome_mod_enable", nullptr, [&] { rt.enable_fn(&rt.handle); });
+    if (rt.enable_fn) {
+        Starting starting(rt.handle);
+        guard::run(&rt.handle, "tome_mod_enable", nullptr, [&] { rt.enable_fn(&rt.handle); });
+    }
     rt.enabled = true;
     enable_order_.push_back(rt.handle.id);
     TOME_INFO("Enabled %s", rt.handle.id.c_str());
@@ -516,7 +580,6 @@ std::string ModManager::apply_assets(const std::vector<const Installed*>& runnin
         by_id[mod->meta.id] = mod;
     }
     assets::Plan plan = assets::plan(mounted_assets_, wanted, moment);
-    assets_started_ = true;
     for (const assets::Pending& p : plan.pending) {
         bool known = std::any_of(pending_assets_.begin(), pending_assets_.end(), [&p](const assets::Pending& q) {
             return q.id == p.id && q.reload == p.reload;
@@ -537,9 +600,9 @@ std::string ModManager::apply_assets(const std::vector<const Installed*>& runnin
     for (const assets::ModAssets& m : plan.mount) {
         auto it = by_id.find(m.id);
         if (it != by_id.end() && it->second->assets_fingerprint == m.fingerprint) {
-            sources.push_back({m.id, false, it->second->assets});
+            sources.push_back({m.id, m.fingerprint, false, it->second->assets});
         } else {
-            sources.push_back({m.id, true, {}});  // its newer files have to wait
+            sources.push_back({m.id, m.fingerprint, true, {}});  // its newer files have to wait
         }
     }
     std::string summary;
@@ -778,20 +841,21 @@ std::string ModManager::sync_hash(const Installed& mod) {
     // Names are mixed in too, so moving a file changes the hash; a file that
     // can't be read changes it as well (the other players would differ).
     DWORD started = GetTickCount();
+    std::vector<char> buffer(1 << 20);  // shared by every file
     Fnv1a64 hash;
     auto mix_name = [&](const std::string& name) { hash.mix(name.c_str(), name.size() + 1); };
     mix_name("tome.mod.json");
-    bool readable = hash_file(meta_path, hash);
+    bool readable = hash_file(meta_path, hash, buffer);
     if (!mod.dll.empty()) {
         mix_name("dll");
-        readable = hash_file(mod.dll, hash) && readable;
+        readable = hash_file(mod.dll, hash, buffer) && readable;
     }
     std::vector<const overlay::AssetFile*> files;
     for (const overlay::AssetFile& f : mod.assets) files.push_back(&f);
     std::sort(files.begin(), files.end(), [](auto* a, auto* b) { return a->name < b->name; });
     for (const overlay::AssetFile* f : files) {
         mix_name(f->name);
-        readable = hash_file(f->path, hash) && readable;
+        readable = hash_file(f->path, hash, buffer) && readable;
     }
     char text[9];
     std::snprintf(text, sizeof(text), "%08x", static_cast<uint32_t>(hash.value ^ (hash.value >> 32)));
@@ -837,7 +901,24 @@ uint64_t ModManager::disk_fingerprint() const {
         FindClose(find);
     };
 
-    mix_file(paths_.tome_dir + L"\\state.json");
+    {
+        // state.json as Tome itself wrote it counts as unchanged: the refresh
+        // that wrote it already ran, so the watcher needn't run another.
+        const std::wstring path = paths_.tome_dir + L"\\state.json";
+        FileStamp stamp;
+        bool exists = file_stamp(path, stamp);
+        bool ours;
+        {
+            SharedLock hold(state_stamp_lock_);
+            ours = exists && stamp == written_state_stamp_;
+        }
+        if (ours) {
+            static const char kWrittenByTome[] = "state.json written by Tome";
+            mix(kWrittenByTome, sizeof(kWrittenByTome));
+        } else {
+            mix_file(path);
+        }
+    }
     WIN32_FIND_DATAW fd;
     HANDLE find = FindFirstFileW((paths_.mods_dir + L"\\*").c_str(), &fd);
     if (find != INVALID_HANDLE_VALUE) {
@@ -1043,8 +1124,28 @@ void ModManager::refresh_locked(assets::Moment moment_hint) {
                             : moment_hint != assets::Moment::Refresh ? moment_hint
                             : frames::on_main_thread() && frames::main_menu_showing() ? assets::Moment::MainMenu
                                                                                        : assets::Moment::Refresh;
+    // A DLL that failed before and hasn't changed won't load below either,
+    // and neither will its dependents: leave their assets out from the start
+    // rather than mounting them and rebuilding the archive again without them.
+    std::set<std::string> known_failed;
     std::vector<const Installed*> running;
-    for (size_t i : resolved.load_order) running.push_back(input_mods[i]);
+    for (size_t i : resolved.load_order) {
+        const Installed& mod = *input_mods[i];
+        bool fails = std::any_of(mod.meta.depends.begin(), mod.meta.depends.end(),
+                                 [&](const Dependency& dep) { return known_failed.count(dep.id) > 0; });
+        if (!fails && !mod.dll.empty()) {
+            auto failure = failures_.find(mod.meta.id);
+            auto rt = runtime_.find(mod.meta.id);
+            bool loaded = rt != runtime_.end() && rt->second->module;
+            fails = !loaded && failure != failures_.end() && failure->second.stamp == mod.dll_stamp;
+        }
+        if (fails) {
+            known_failed.insert(mod.meta.id);
+            for (const std::string& p : mod.meta.provides) known_failed.insert(p);
+            continue;
+        }
+        running.push_back(&mod);
+    }
     apply_assets(running, moment);
 
     // Start everything wanted, dependencies first. A mod whose DLL fails to
@@ -1072,10 +1173,16 @@ void ModManager::refresh_locked(assets::Moment moment_hint) {
             slot->handle.id = id;
         }
         Runtime& rt = *slot;
-        rt.handle.version = mod.meta.version.to_string();
-        rt.handle.dir_w = mod.dir;
-        rt.handle.dir = narrow(mod.dir);
-        rt.handle.config_dir = narrow(mod.dir + L"\\config");
+        // Only when they change: mods may keep the pointers mod_version(),
+        // mod_dir() and config_dir() return (valid until tome_mod_unload),
+        // and assigning a new string frees the old buffer.
+        std::string version = mod.meta.version.to_string();
+        if (rt.handle.version != version) rt.handle.version = std::move(version);
+        if (rt.handle.dir_w != mod.dir) {
+            rt.handle.dir_w = mod.dir;
+            rt.handle.dir = narrow(mod.dir);
+            rt.handle.config_dir = narrow(mod.dir + L"\\config");
+        }
 
         if (!mod.dll.empty() && !rt.module) {
             auto failure = failures_.find(id);
@@ -1196,6 +1303,10 @@ void ModManager::refresh_locked(assets::Moment moment_hint) {
         }
     }
     status_ = std::move(status);
+    // From now on asset changes follow the mods' reload modes. Until here
+    // (DllMain and the first refresh, both part of startup) a mod whose DLL
+    // fails to load loses its assets at once, whatever its reload mode.
+    assets_started_ = true;
 }
 
 } // namespace tome

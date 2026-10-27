@@ -4,6 +4,7 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <cwctype>
 #include <string>
 
@@ -16,6 +17,9 @@ constexpr DWORD kSettleMs = 400;
 // subfolders of a recursive watch (seen with a replaced mods/<id>/mod.dll).
 // Windows does, so there the watcher only wakes up for notifications.
 constexpr DWORD kPollMs = 1500;
+// A poll lists every file under mods/; with large asset folders that takes a
+// while, so the next one waits at least this many times as long.
+constexpr DWORD kPollCostFactor = 50;
 
 bool running_on_wine() {
     HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
@@ -73,14 +77,29 @@ bool relevant(Watch& w, DWORD bytes) {
 DWORD WINAPI watcher_thread(LPVOID param) {
     auto state = static_cast<WatcherState*>(param);
     HANDLE events[2] = {state->watches[0].overlapped.hEvent, state->watches[1].overlapped.hEvent};
-    const DWORD idle_ms = running_on_wine() ? kPollMs : INFINITE;
-    bool pending = false;
+    const bool poll = running_on_wine();
+    // Absolute deadlines: notifications that don't count (tome.log is written
+    // next to state.json all the time) wake the thread too, and mustn't push
+    // back a change that's settling or the next poll.
+    ULONGLONG settle_at = 0;  // when a pending change has settled; 0: none pending
+    ULONGLONG poll_at = poll ? GetTickCount64() + kPollMs : 0;
 
     for (;;) {
-        DWORD wait = WaitForMultipleObjects(2, events, FALSE, pending ? kSettleMs : idle_ms);
+        const ULONGLONG due = settle_at ? settle_at : poll_at;
+        DWORD timeout = INFINITE;
+        if (due) {
+            const ULONGLONG now = GetTickCount64();
+            timeout = due > now ? static_cast<DWORD>(due - now) : 0;
+        }
+        DWORD wait = WaitForMultipleObjects(2, events, FALSE, timeout);
         if (wait == WAIT_TIMEOUT) {
-            pending = false;
+            settle_at = 0;
+            const ULONGLONG started = GetTickCount64();
             state->on_change();
+            if (poll) {
+                const ULONGLONG now = GetTickCount64();
+                poll_at = now + std::max<ULONGLONG>(kPollMs, (now - started) * kPollCostFactor);
+            }
             continue;
         }
         if (wait < WAIT_OBJECT_0 || wait >= WAIT_OBJECT_0 + 2) {
@@ -90,7 +109,7 @@ DWORD WINAPI watcher_thread(LPVOID param) {
         Watch& w = state->watches[wait - WAIT_OBJECT_0];
         DWORD bytes = 0;
         if (GetOverlappedResult(w.handle, &w.overlapped, &bytes, FALSE) && relevant(w, bytes)) {
-            pending = true;  // restart the settle timer
+            settle_at = GetTickCount64() + kSettleMs;  // restart the settle timer
         }
         if (!arm(w)) {
             TOME_ERROR("File watcher stopped watching %s", narrow(w.dir).c_str());

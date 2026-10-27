@@ -142,6 +142,71 @@ TEST(resolver_breaks_ignored_when_other_disabled) {
     CHECK(r.mods[a].state == ModState::Active);
 }
 
+TEST(resolver_breaks_only_mods_that_run) {
+    // The broken mod can't run anyway (a missing dependency), in either folder order.
+    for (int flip = 0; flip < 2; ++flip) {
+        Fixture f;
+        size_t a = 0, b = 0;
+        if (flip) b = f.add("old-bars", R"("depends":{"ghost":"*"})");
+        a = f.add("new-bars", R"("breaks":{"old-bars":"*"})");
+        if (!flip) b = f.add("old-bars", R"("depends":{"ghost":"*"})");
+        auto r = f.run();
+        CHECK(r.mods[a].state == ModState::Active);
+        CHECK(r.mods[b].state == ModState::MissingDependency);
+    }
+    // A chain: aa breaks bb, bb breaks cc. cc runs, so bb can't, so aa can.
+    Fixture f;
+    size_t a = f.add("aa", R"("breaks":{"bb":"*"})");
+    size_t b = f.add("bb", R"("breaks":{"cc":"*"})");
+    size_t c = f.add("cc");
+    auto r = f.run();
+    CHECK(r.mods[a].state == ModState::Active);
+    CHECK(r.mods[b].state == ModState::Breaks);
+    CHECK(r.mods[c].state == ModState::Active);
+
+    // aa breaks tt, which needs xx; xx can't run with yy, so tt goes too and aa can run.
+    Fixture g;
+    a = g.add("aa", R"("breaks":{"tt":"*"})");
+    size_t t = g.add("tt", R"("depends":{"xx":"*"})");
+    size_t x = g.add("xx", R"("breaks":{"yy":"*"})");
+    g.add("yy");
+    r = g.run();
+    CHECK(r.mods[a].state == ModState::Active);
+    CHECK(r.mods[t].state == ModState::DependencyInactive);
+    CHECK(r.mods[x].state == ModState::Breaks);
+
+    // Two mods breaking each other: one of them runs.
+    Fixture h;
+    a = h.add("aa", R"("breaks":{"bb":"*"})");
+    b = h.add("bb", R"("breaks":{"aa":"*"})");
+    r = h.run();
+    CHECK((r.mods[a].state == ModState::Active) != (r.mods[b].state == ModState::Active));
+}
+
+TEST(resolver_breaks_nothing_in_a_cycle) {
+    // tt can't run (a cycle), so aa, which breaks it, runs, in either folder order.
+    for (int flip = 0; flip < 2; ++flip) {
+        Fixture f;
+        size_t a = 0;
+        if (!flip) a = f.add("aa", R"("breaks":{"tt":"*"})");
+        size_t t = f.add("tt", R"("depends":{"uu":"*"})");
+        size_t u = f.add("uu", R"("depends":{"tt":"*"})");
+        if (flip) a = f.add("zz", R"("breaks":{"tt":"*"})");
+        auto r = f.run();
+        CHECK(r.mods[a].state == ModState::Active);
+        CHECK(r.mods[t].state == ModState::Cycle);
+        CHECK(r.mods[u].state == ModState::Cycle);
+    }
+    // A load order cycle too.
+    Fixture f;
+    size_t a = f.add("aa", R"("breaks":{"tt":"*"})");
+    size_t t = f.add("tt", R"("load":{"after":["uu"]})");
+    f.add("uu", R"("load":{"after":["tt"]})");
+    auto r = f.run();
+    CHECK(r.mods[a].state == ModState::Active);
+    CHECK(r.mods[t].state == ModState::Cycle);
+}
+
 TEST(resolver_conflicts_and_recommends_are_warnings) {
     Fixture f;
     size_t a = f.add("aa", R"("conflicts":{"bb":"*"},"recommends":{"cc":"*"})");
@@ -156,10 +221,12 @@ TEST(resolver_provides_satisfies_unversioned_dependency) {
     f.add("ujapi-port", R"("provides":["ujapi"])");
     size_t user = f.add("map-helper", R"("depends":{"ujapi":"*"})");
     size_t strict = f.add("strict", R"("depends":{"ujapi":">=1"})");
+    size_t any = f.add("x-user", R"("depends":{"ujapi":"x"})");
     auto r = f.run();
     CHECK(r.mods[user].state == ModState::Active);
     CHECK(r.mods[strict].state == ModState::MissingDependency);
-    CHECK_EQ(f.order(r), ids({"ujapi-port", "map-helper"}));
+    CHECK(r.mods[any].state == ModState::Active);
+    CHECK_EQ(f.order(r), ids({"ujapi-port", "map-helper", "x-user"}));
 }
 
 TEST(resolver_detects_cycles) {

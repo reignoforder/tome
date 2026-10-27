@@ -7,6 +7,7 @@ add_library(tome_core STATIC
     src/core/assets.cpp
     src/core/chat.cpp
     src/core/command_line.cpp
+    src/core/debug_script.cpp
     src/core/frames.cpp
     src/core/handshake.cpp
     src/core/hooks.cpp

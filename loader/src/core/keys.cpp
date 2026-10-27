@@ -57,14 +57,15 @@ uint8_t parse_key_name(std::string_view name) {
         char c = static_cast<char>(std::toupper(static_cast<unsigned char>(name[0])));
         if ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) return static_cast<uint8_t>(c);
     }
-    if (name.size() >= 2 && (name[0] == 'F' || name[0] == 'f')) {
+    // F1-F24: at most two digits (checked first, so a long run of digits can't overflow n).
+    if (name.size() >= 2 && name.size() <= 3 && (name[0] == 'F' || name[0] == 'f')) {
         int n = 0;
         bool digits = true;
         for (char c : name.substr(1)) {
             if (c < '0' || c > '9') digits = false;
             else n = n * 10 + (c - '0');
         }
-        if (digits && name.size() <= 3 && n >= 1 && n <= 24) return static_cast<uint8_t>(kVkF1 + n - 1);
+        if (digits && n >= 1 && n <= 24) return static_cast<uint8_t>(kVkF1 + n - 1);
     }
     if (name.size() == 4 && equal_ignoring_case(name.substr(0, 3), "Num") && name[3] >= '0' && name[3] <= '9') {
         return static_cast<uint8_t>(kVkNumpad0 + (name[3] - '0'));

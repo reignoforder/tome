@@ -52,6 +52,8 @@ template <typename V>
 class Range {
 public:
     bool matches(const V& version) const;
+    // Matches every version ("*", "x", "").
+    bool any() const;
     const std::string& text() const { return text_; }
 
 private:

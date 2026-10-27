@@ -391,6 +391,9 @@ Action edit_row(State& state, const Data& data, int rows, int row, const std::st
     const json::Value* found = m->settings_values.find(s.key);
     json::Value value;
     if (s.text_input) {
+        // Untouched: the box still shows the value as display() wrote it,
+        // possibly rounded, and saving that would replace the real value.
+        if (text == settings::display(s, found ? *found : s.fallback)) return action;
         // Not a number: nothing changes, and the box shows the value again.
         if (!settings::parse_typed_number(text, value)) return action;
         json::Value coerced;

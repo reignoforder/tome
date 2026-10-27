@@ -15,6 +15,7 @@ cmake --build build --target deploy    # build and copy tome.mix into "WarCraft 
 cd build && ctest                        # unit tests (Wine)
 tools/e2e-test.sh                        # real game, 4 launches (~5 min); close the game first
 tools/game.sh start [VAR=val] / wait <regex> / shot <png> / stop / log
+HEADLESS=1 tools/e2e-test.sh             # either script, off screen in gamescope (tools/headless.sh)
 ```
 
 ## Rules
@@ -51,7 +52,8 @@ tools/game.sh start [VAR=val] / wait <regex> / shot <png> / stop / log
   game keeps the map open, `put` fails, and the old map loads as if
   nothing changed.
 - **UI opened from code** only shows once the menu has finished appearing (about 3 s after Setup).
-- **Screenshots:** `spectacle -b -n -f -o file.png` (KDE). Simulate clicks with
+- **Screenshots:** `spectacle -b -n -f -o file.png` (KDE); `tools/game.sh shot`
+  uses gamescopectl instead when the game runs with `HEADLESS=1`. Simulate clicks with
   `TOME_DEBUG_CLICKS="x,y@ms;..."` (fractions of the window).
 - **Check `ret N` before mapping a function's `sig`.** A hook pops what
   the signature says; one stack argument too few crashed the game.

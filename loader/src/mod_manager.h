@@ -149,6 +149,30 @@ private:
         std::string calls;     // a crash: where it was called from, as logged
     };
 
+    // What discover() parsed from a mod folder's files, by folder, kept until
+    // a file's stamp changes. Under lock_, like discover().
+    struct ParsedMeta {
+        bool read = false;
+        FileStamp stamp;  // of tome.mod.json; zero: read it again
+        ModMetadata meta;
+        bool valid = false;
+        std::vector<std::string> errors;
+        std::vector<std::string> warnings;
+    };
+    struct ParsedSettings {
+        bool schema_read = false;
+        std::wstring schema_file;
+        FileStamp schema_stamp;
+        settings::Schema schema;
+        std::string error;
+        bool unusable = false;  // the schema couldn't be read or parsed: no settings at all
+        std::vector<std::string> schema_warnings;
+        bool values_read = false;
+        FileStamp values_stamp;  // of config/settings.json; zero if there's none
+        json::Value values;
+        std::string values_warning;
+    };
+
     std::vector<Installed> discover() const;
     void read_settings_schema(Installed& mod) const;
     // Runs fn under the lock, then tells the mods about settings that changed meanwhile.
@@ -160,7 +184,9 @@ private:
     // Whether the user wants `id` to run: state.json (new mods start
     // enabled), unless safe mode is on.
     bool wanted_by_user(const std::map<std::string, bool>& state, const std::string& id) const;
-    void write_state(const std::map<std::string, bool>& state) const;
+    // Also records the new file's stamp, so the watcher doesn't take Tome's
+    // own write for an edit (disk_fingerprint).
+    void write_state(const std::map<std::string, bool>& state);
 
     bool load(Runtime& rt, const Installed& mod, std::string& error);
     void unload(Runtime& rt);
@@ -196,12 +222,18 @@ private:
     unsigned shadow_counter_ = 0;
     std::vector<assets::ModAssets> mounted_assets_;  // what the assets archive holds
     std::vector<assets::Pending> pending_assets_;
-    bool assets_started_ = false;  // the first apply_assets ran (counts as startup)
+    bool assets_started_ = false;  // the first refresh finished; before that, asset changes count as startup
     bool shut_down_ = false;       // shutdown() ran: no more refreshes
     std::string safe_mode_;        // why safe mode is on; empty if it isn't
     std::set<std::string> safe_mode_enabled_;  // enabled during this session despite safe mode
     std::map<std::string, std::pair<uint64_t, std::string>> sync_hashes_;  // by folder: files' stamps, hash
+    mutable std::map<std::string, ParsedMeta> meta_cache_;
+    mutable std::map<std::string, ParsedSettings> settings_cache_;
     uint64_t last_polled_ = 0;  // set in init(), then only touched by the watcher thread
+    // tome/state.json as Tome last wrote it. Its own lock: written under
+    // lock_ on the main thread, read by the watcher thread without lock_.
+    mutable SRWLOCK state_stamp_lock_ = SRWLOCK_INIT;
+    FileStamp written_state_stamp_;
     // Settings have a lock of their own, taken after lock_ if both are: mods
     // read and change them from callbacks that run while lock_ is held.
     mutable SRWLOCK settings_lock_ = SRWLOCK_INIT;

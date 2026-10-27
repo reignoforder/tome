@@ -84,13 +84,16 @@ void decrypt(uint32_t* words, size_t count, uint32_t key) {
     }
 }
 
+uint64_t ArchiveWriter::key(std::string_view name) {
+    return (uint64_t{hash_string(name, HashType::NameA)} << 32) | hash_string(name, HashType::NameB);
+}
+
 bool ArchiveWriter::add(std::string_view name, uint32_t size) {
-    Key key{hash_string(name, HashType::NameA), hash_string(name, HashType::NameB)};
-    auto at = std::lower_bound(keys_.begin(), keys_.end(), key);
-    if (at != keys_.end() && !(key < *at)) return false;
+    const uint64_t k = key(name);
+    if (keys_.count(k)) return false;
     // Leave room for the tables and the listfile that finish() adds.
     if (size_ + size > 0xF0000000ull) return false;
-    keys_.insert(at, key);
+    keys_.insert(k);
     names_.emplace_back(name);
     blocks_.insert(blocks_.end(), {static_cast<uint32_t>(size_), size, size, kFileExists});
     size_ += size;
@@ -98,8 +101,7 @@ bool ArchiveWriter::add(std::string_view name, uint32_t size) {
 }
 
 bool ArchiveWriter::contains(std::string_view name) const {
-    Key key{hash_string(name, HashType::NameA), hash_string(name, HashType::NameB)};
-    return std::binary_search(keys_.begin(), keys_.end(), key);
+    return keys_.count(key(name)) > 0;
 }
 
 std::string ArchiveWriter::finish() {

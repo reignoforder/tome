@@ -123,7 +123,15 @@ rate above 60, is built that way and lives next to this repo.
 ```sh
 cd build && ctest                  # unit tests (run under Wine)
 tools/e2e-test.sh                  # end-to-end in the real game
+HEADLESS=1 tools/e2e-test.sh       # the same, off screen
 ```
+
+With `HEADLESS=1` (for `tools/e2e-test.sh` and `tools/game.sh`), the game
+runs inside [gamescope](https://github.com/ValveSoftware/gamescope)'s headless
+backend: no window appears, and simulated key presses don't depend on the
+game window having the focus. The virtual screen takes the game's resolution
+setting (or `HEADLESS_SIZE=1280x720`); `tools/game.sh shot` then captures it
+through `gamescopectl`.
 
 The end-to-end test launches the game three times (about a minute each). It
 runs Tome with `TOME_HOME` set to a temporary folder, so your own `mods/` and

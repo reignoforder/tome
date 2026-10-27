@@ -50,7 +50,7 @@ loader/
     guard.*               crash isolation: an SEH frame around every call into a mod
     api.*                 the tome_api table given to mods
     main_thread.*         window-message dispatcher (the main-thread safe point)
-    watcher.*             change notifications (+ 1.5 s timestamp polling under Wine)
+    watcher.*             change notifications (+ timestamp polling under Wine: every 1.5 s, or 50x as long as a poll takes)
     storm.*               Storm.dll file/archive functions by ordinal
     overlay.*             the generated overlay and the mod assets archive
     frames.*              game frame functions, the frame API for mods, Blz* natives
@@ -88,7 +88,8 @@ docs/
    call have already run.
 2. **`DllMain` → `start_bootstrap`** (still on the main thread, loader lock held):
    - resolves paths (`TOME_HOME` support) and deletes archives left in
-     `tome/cache` by the previous session;
+     `tome/cache` by the previous session, except its last assets archive
+     (see "Asset overlay");
    - checks for safe mode (see "Crash isolation and safe mode");
    - identifies the build from the in-memory PE header;
    - checks the build's byte signatures and call sites against the loaded
@@ -109,9 +110,12 @@ docs/
      one (if game.dll wasn't loaded at attach, the signatures are checked
      here instead, before the late hooks);
    - logs the hook results;
-   - runs the **first mod load** (`ModManager::refresh`). This is safe off the
-     main thread because nothing can call into mods yet. Then it signals
-     `natives::set_mods_ready()`, which InitNatives waits on (≤ 10 s);
+   - runs the **first mod load** (`ModManager::refresh`) off the main thread.
+     The main thread keeps running meanwhile, so a handler a mod registers
+     (a TICK, a hook) could be called before the mod is set up: while a
+     mod's `tome_mod_load` or `tome_mod_enable` runs, guarded calls into it
+     from other threads are skipped (`tome_mod::starting_on`). Then it
+     signals `natives::set_mods_ready()`, which InitNatives waits on (≤ 10 s);
    - finds the game window and installs the main-thread dispatcher;
    - starts the file watcher.
 4. **Later changes** (state.json edits, DLL rebuilds, menu clicks) always run
@@ -649,8 +653,8 @@ API version 4 (`hook`, `unhook`, `hook_call_next` in `tome.h`).
   before it leaves the chain, so once a revoker has run, no new call of
   that handler starts, even from a snapshot taken earlier (a skipped
   REPLACE handler passes on to the next). `ModManager::unload` then calls
-  `hooks::idle`: it waits up to 2 s for calls on other threads to finish.
-  If one is still running, or one is on the unloading thread's own stack
+  `hooks::idle` without waiting, so the main thread never blocks on them.
+  If a call on another thread is still running, or one is on the unloading thread's own stack
   (a thread-local list of running gates says so: e.g. the mod menu
   disabled the mod from a click that came through the mod's own OnEvent
   hook), `FreeLibrary` and the shadow copy's deletion are retried from the
@@ -896,7 +900,11 @@ API version 10: `popup`, `popup_close`, `restart_game`.
   files. Files are stored uncompressed and streamed from disk in 1 MiB
   chunks (`mpq::ArchiveWriter`), so large asset folders don't need to fit
   in memory. The whole archive is rebuilt on every change, on the main
-  thread; the log shows the time it took.
+  thread; the log shows the time it took. At startup, the last session's
+  archive is mounted again instead if it was built from the same mods with
+  the same files (`tome/cache/assets.json` lists the mods, their assets
+  fingerprints and where each file is; an archive with unreadable files
+  isn't kept).
 - **Swapping:** a change writes a new archive, opens it, then closes the
   old one with SFileCloseArchive. Storm reference-counts archives: a closed
   archive stays alive until the game closes its last file from it (checked

@@ -2,6 +2,7 @@
 
 #include "core/assets.h"
 #include "core/hash.h"
+#include "core/json.h"
 #include "log.h"
 #include "storm.h"
 #include "unwind.h"
@@ -10,6 +11,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cwchar>
 #include <map>
 
 namespace tome::overlay {
@@ -42,6 +44,17 @@ struct Entry {
     uint32_t size;
 };
 std::map<std::string, std::vector<Entry>> g_mounted_entries;  // by mod id
+
+// The last assets archive Tome built and what's in it (tome/cache/assets.json),
+// so the next start can mount it again instead of copying every file anew.
+constexpr wchar_t kManifest[] = L"assets.json";
+constexpr int kManifestSchema = 1;
+struct Manifest {
+    std::wstring file;  // name in tome/cache
+    std::vector<std::pair<std::string, uint64_t>> mods;  // id, assets fingerprint; lowest precedence first
+    std::map<std::string, std::vector<Entry>> entries;
+};
+Manifest g_kept;  // from the last session, until the first mount_assets uses or deletes it
 
 // Sequential output to a new archive file; the header goes in last.
 class Output {
@@ -128,6 +141,93 @@ HANDLE open_for_reading(const std::wstring& path) {
                        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
 }
 
+std::string to_hex(uint64_t value) {
+    char text[17];
+    snprintf(text, sizeof(text), "%016llx", static_cast<unsigned long long>(value));
+    return text;
+}
+
+// The manifest, if it's valid and its archive is still there with the size it had.
+bool read_manifest(Manifest& out) {
+    std::string text;
+    if (!read_file(g_cache + L"\\" + kManifest, text)) return false;
+    json::Value root;
+    if (!json::parse(text, root).ok) return false;
+    const json::Value* schema = root.find("schema");
+    const json::Value* file = root.find("archive");
+    const json::Value* size = root.find("size");
+    const json::Value* mods = root.find("mods");
+    if (!schema || !schema->is_number() || schema->as_number() != kManifestSchema || !file || !file->is_string() ||
+        !size || !size->is_number() || !mods || !mods->is_array()) {
+        return false;
+    }
+    Manifest m;
+    m.file = widen(file->as_string());
+    if (m.file.empty() || m.file.find_first_of(L"\\/:") != std::wstring::npos) return false;
+    WIN32_FILE_ATTRIBUTE_DATA attributes;
+    if (!GetFileAttributesExW((g_cache + L"\\" + m.file).c_str(), GetFileExInfoStandard, &attributes) ||
+        attributes.nFileSizeHigh != 0 || attributes.nFileSizeLow != size->as_number()) {
+        return false;
+    }
+    for (const json::Value& mod : mods->items()) {
+        const json::Value* id = mod.find("id");
+        const json::Value* fingerprint = mod.find("fingerprint");
+        const json::Value* files = mod.find("files");
+        if (!id || !id->is_string() || !fingerprint || !fingerprint->is_string() || !files || !files->is_array()) {
+            return false;
+        }
+        m.mods.emplace_back(id->as_string(), std::strtoull(fingerprint->as_string().c_str(), nullptr, 16));
+        std::vector<Entry>& entries = m.entries[id->as_string()];
+        for (const json::Value& f : files->items()) {
+            if (!f.is_array() || f.items().size() != 3 || !f.items()[0].is_string() || !f.items()[1].is_number() ||
+                !f.items()[2].is_number()) {
+                return false;
+            }
+            entries.push_back({f.items()[0].as_string(), static_cast<uint32_t>(f.items()[1].as_number()),
+                               static_cast<uint32_t>(f.items()[2].as_number())});
+        }
+    }
+    out = std::move(m);
+    return true;
+}
+
+void write_manifest(const std::wstring& path, uint64_t size, const std::vector<ModSource>& mods) {
+    json::Value root = json::Value::object();
+    root.set("schema", json::Value::number(kManifestSchema));
+    root.set("archive", json::Value::string(narrow(path.substr(path.rfind(L'\\') + 1))));
+    root.set("size", json::Value::number(static_cast<double>(size)));
+    json::Value list = json::Value::array();
+    for (const ModSource& mod : mods) {
+        json::Value entry = json::Value::object();
+        entry.set("id", json::Value::string(mod.id));
+        entry.set("fingerprint", json::Value::string(to_hex(mod.fingerprint)));
+        json::Value files = json::Value::array();
+        auto placed = g_mounted_entries.find(mod.id);
+        if (placed != g_mounted_entries.end()) {
+            for (const Entry& e : placed->second) {
+                json::Value f = json::Value::array();
+                f.push(json::Value::string(e.name));
+                f.push(json::Value::number(e.offset));
+                f.push(json::Value::number(e.size));
+                files.push(std::move(f));
+            }
+        }
+        entry.set("files", std::move(files));
+        list.push(std::move(entry));
+    }
+    root.set("mods", std::move(list));
+    if (!write_file_atomic(g_cache + L"\\" + kManifest, json::serialize(root))) {
+        DeleteFileW((g_cache + L"\\" + kManifest).c_str());
+    }
+}
+
+// The archive kept from the last session isn't the one mounted: delete it.
+void drop_kept() {
+    if (g_kept.file.empty()) return;
+    DeleteFileW((g_cache + L"\\" + g_kept.file).c_str());
+    g_kept = {};
+}
+
 bool ignored_name(const wchar_t* name) {
     return name[0] == L'.' || _wcsicmp(name, L"Thumbs.db") == 0 || _wcsicmp(name, L"desktop.ini") == 0;
 }
@@ -176,11 +276,19 @@ void scan_dir(const std::wstring& dir, const std::string& prefix, int depth, std
 void init(const Paths& paths) {
     g_cache = paths.tome_dir + L"\\cache";
     CreateDirectoryW(g_cache.c_str(), nullptr);
+    if (!read_manifest(g_kept)) {
+        g_kept = {};
+        DeleteFileW((g_cache + L"\\" + kManifest).c_str());
+    }
+    // New archives get higher numbers than the one kept.
+    unsigned kept_number = 0;
+    if (swscanf(g_kept.file.c_str(), L"assets-%u.mpq", &kept_number) == 1) g_counter = kept_number;
     // Archives in use by another game instance fail to delete and stay.
     WIN32_FIND_DATAW fd;
     HANDLE find = FindFirstFileW((g_cache + L"\\*.mpq").c_str(), &fd);
     if (find != INVALID_HANDLE_VALUE) {
         do {
+            if (_wcsicmp(fd.cFileName, g_kept.file.c_str()) == 0) continue;
             DeleteFileW((g_cache + L"\\" + fd.cFileName).c_str());
         } while (FindNextFileW(find, &fd));
         FindClose(find);
@@ -228,6 +336,8 @@ bool mount_assets(const std::vector<ModSource>& mods, std::string& summary) {
     ExclusiveLock hold(g_lock);
     if (mods.empty()) {
         unmount(g_assets);
+        drop_kept();
+        DeleteFileW((g_cache + L"\\" + kManifest).c_str());
         g_mounted_entries.clear();
         summary = "no mod assets mounted";
         return true;
@@ -235,6 +345,28 @@ bool mount_assets(const std::vector<ModSource>& mods, std::string& summary) {
     if (!storm::init()) {
         summary = "Storm functions not found";
         return false;
+    }
+
+    // The first mount of the session, with the same mods and files as the
+    // archive kept from the last one: mount that one again.
+    if (!g_kept.file.empty()) {
+        bool same = !g_assets.archive && g_kept.mods.size() == mods.size();
+        for (size_t i = 0; same && i < mods.size(); ++i) {
+            same = !mods[i].keep_previous && mods[i].fingerprint && g_kept.mods[i].first == mods[i].id &&
+                   g_kept.mods[i].second == mods[i].fingerprint;
+        }
+        if (same && swap_in(g_assets, g_cache + L"\\" + g_kept.file)) {
+            size_t files = 0;
+            for (const auto& [id, entries] : g_kept.entries) files += entries.size();
+            g_mounted_entries = std::move(g_kept.entries);
+            g_kept = {};
+            char text[120];
+            snprintf(text, sizeof(text), "%zu file%s from %zu mod%s, unchanged since the last start", files,
+                     files == 1 ? "" : "s", mods.size(), mods.size() == 1 ? "" : "s");
+            summary = text;
+            return true;
+        }
+        drop_kept();  // swap_in deletes it as well if the game couldn't open it
     }
     std::wstring path;
     HANDLE file = create_archive_file(g_assets, path);
@@ -313,6 +445,12 @@ bool mount_assets(const std::vector<ModSource>& mods, std::string& summary) {
     if (!out.ok()) DeleteFileW(path.c_str());
     if (ok) {
         g_mounted_entries = std::move(entries);
+        // Only an archive with every file in it is worth mounting again.
+        if (problems.empty()) {
+            write_manifest(path, out.pos(), mods);
+        } else {
+            DeleteFileW((g_cache + L"\\" + kManifest).c_str());
+        }
         char text[160];
         snprintf(text, sizeof(text), "%zu file%s from %zu mod%s (%zu overridden by a later mod), %.1f MB in %lu ms",
                  writer.file_count() - 1, writer.file_count() == 2 ? "" : "s", mods.size(), mods.size() == 1 ? "" : "s",

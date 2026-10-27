@@ -22,6 +22,16 @@ function(tome_add_mod target)
 
     add_library(${target} SHARED ${MOD_SOURCES})
     target_link_libraries(${target} PRIVATE tome_sdk)
+    if(MINGW)
+        # Keeps new game threads at the x87 precision Windows gives them
+        # (support/fpreset.c), compiled as whichever language the mod uses.
+        set(fpreset "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/support/fpreset.c")
+        get_property(languages GLOBAL PROPERTY ENABLED_LANGUAGES)
+        if(NOT "C" IN_LIST languages)
+            set_source_files_properties("${fpreset}" TARGET_DIRECTORY ${target} PROPERTIES LANGUAGE CXX)
+        endif()
+        target_sources(${target} PRIVATE "${fpreset}")
+    endif()
     set_target_properties(${target} PROPERTIES
         PREFIX ""
         LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/mods/${MOD_FOLDER}"
@@ -42,7 +52,8 @@ function(tome_add_mod target)
                 "${CMAKE_BINARY_DIR}/mods/${MOD_FOLDER}/${file}"
         )
     endforeach()
-    # Rebuild (and so recopy) when one of the files changes.
+    # Rebuild (and so recopy) when the metadata or one of the files changes.
     list(TRANSFORM MOD_FILES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/" OUTPUT_VARIABLE file_paths)
+    list(APPEND file_paths "${CMAKE_CURRENT_SOURCE_DIR}/${MOD_METADATA}")
     set_property(TARGET ${target} APPEND PROPERTY LINK_DEPENDS ${file_paths})
 endfunction()

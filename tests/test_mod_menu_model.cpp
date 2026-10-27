@@ -197,6 +197,26 @@ TEST(menu_settings_page) {
     CHECK(s.page == Page::Details);
 }
 
+TEST(menu_untouched_number_box_keeps_its_value) {
+    ModStatus m = mod("cfg", true);
+    json::Value schema;
+    json::parse(R"({"properties": {"ratio": {"type": "number", "input": "text", "default": 1}}})", schema);
+    std::vector<std::string> errors, warnings;
+    CHECK(settings::parse_schema(schema, m.settings, errors, warnings));
+    m.settings_values = json::Value::object();
+    m.settings_values.set("ratio", json::Value::number(1.23456789));
+    Data d;
+    d.mods.push_back(m);
+    State s;
+    s.page = Page::Settings;
+    s.mod = "cfg";
+    View v = build(s, d, 8);
+    CHECK_EQ(v.rows[0].edit, std::string("1.23457"));                   // rounded for display
+    CHECK(edit_row(s, d, 8, 0, v.rows[0].edit).kind == Action::None);  // so not saved back
+    Action typed = edit_row(s, d, 8, 0, "1.5");
+    CHECK(typed.kind == Action::SetSetting && typed.value.as_number() == 1.5);
+}
+
 TEST(menu_keybinds_capture) {
     Data d = data_with(1);
     keys::Binding b;

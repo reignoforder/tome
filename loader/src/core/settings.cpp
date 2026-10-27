@@ -46,7 +46,13 @@ double clamp(const Setting& s, double v) {
 
 std::string format_number(double v) {
     char buf[32];
-    snprintf(buf, sizeof(buf), "%.6g", v);
+    // Whole numbers in full (1234567, not 1.23457e+06, which a text box
+    // couldn't take back); others to 6 significant digits.
+    if (std::isfinite(v) && std::fabs(v) < 1e15 && v == std::trunc(v)) {
+        snprintf(buf, sizeof(buf), "%.0f", v);
+    } else {
+        snprintf(buf, sizeof(buf), "%.6g", v);
+    }
     return buf;
 }
 
@@ -343,12 +349,14 @@ json::Value step(const Setting& s, const json::Value& value, int direction) {
     case Type::Integer:
     case Type::Number: {
         double v = value.is_number() ? value.as_number() : s.fallback.as_number();
-        double next = v + s.step * (direction < 0 ? -1 : 1);
         // Stay on the grid of steps from the minimum, so repeated clicks
-        // don't collect rounding errors.
+        // don't collect rounding errors: a value on the grid moves one step,
+        // one between two grid points (typed, or an off-grid default) moves
+        // to the next one in that direction. The tolerance absorbs rounding.
         double origin = s.has_minimum ? s.minimum : 0;
-        double steps = std::round((next - origin) / s.step);
-        next = origin + steps * s.step;
+        double at = (v - origin) / s.step;
+        double steps = direction < 0 ? std::ceil(at - 1e-9) - 1 : std::floor(at + 1e-9) + 1;
+        double next = origin + steps * s.step;
         if (std::fabs(next) < s.step * 1e-9) next = 0;
         if (s.type == Type::Integer) next = std::round(next);
         return json::Value::number(clamp(s, next));

@@ -35,7 +35,9 @@ enum Flags : unsigned {
 // Calls fn(context) on this thread under a guard. `what` and `detail` say
 // what the call was for the log ("event handler", "tick"). True if it
 // returned normally; false if it crashed, or if the mod had crashed before
-// (then fn isn't called, unless kEvenIfFaulted).
+// (then fn isn't called, unless kEvenIfFaulted). Also false without calling
+// fn while another thread runs the mod's tome_mod_load or tome_mod_enable
+// (tome_mod::starting_on).
 bool call(tome_mod* mod, const char* what, const char* detail, void (*fn)(void*), void* context,
           unsigned flags = kNone);
 

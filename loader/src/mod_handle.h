@@ -38,6 +38,13 @@ struct tome_mod {
     // Set when one of the mod's callbacks crashed (guard.cpp). Guarded calls
     // skip the mod from then on, until a new DLL is loaded.
     std::atomic<bool> faulted{false};
+
+    // The thread running the mod's tome_mod_load or tome_mod_enable, or 0.
+    // Until that returns, guarded calls from other threads skip the mod
+    // (guard.cpp): a handler it registered must not run while the mod is
+    // still setting up, e.g. a TICK on the main thread during the first
+    // load, which runs on the bootstrap thread.
+    std::atomic<unsigned long> starting_on{0};
     std::string fault;        // the first crash, for the log and the mod's status
     std::string fault_calls;  // where it was called from (likely), as logged
 

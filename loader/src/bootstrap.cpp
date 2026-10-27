@@ -118,12 +118,13 @@ void announce_in_window_title(HWND window) {
 }
 
 DWORD bootstrap() {
+    // Until log::open succeeds, TOME_* lines go to the debugger only.
     if (!g_paths_ok) {
-        OutputDebugStringA("[tome] failed to resolve paths; Tome is disabled\n");
+        TOME_ERROR("Failed to resolve paths; Tome is disabled");
         return 1;
     }
     if (!log::open(g_paths.tome_dir + L"\\tome.log")) {
-        OutputDebugStringA("[tome] failed to open tome.log; logging to debugger only\n");
+        TOME_WARN("Failed to open tome.log; logging to the debugger only");
     }
 
     TOME_INFO("Tome %s starting", TOME_VERSION);
@@ -328,7 +329,7 @@ void start_bootstrap(HMODULE self) {
     if (thread) {
         CloseHandle(thread);
     } else {
-        OutputDebugStringA("[tome] failed to create bootstrap thread\n");
+        TOME_ERROR("Failed to create the bootstrap thread");
     }
 }
 

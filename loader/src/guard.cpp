@@ -283,6 +283,10 @@ void set_fault_sink(FaultSink sink) {
 
 bool call(tome_mod* mod, const char* what, const char* detail, void (*fn)(void*), void* context, unsigned flags) {
     if (mod && mod->faulted && !(flags & kEvenIfFaulted)) return false;
+    if (mod && !(flags & kEvenIfFaulted)) {
+        const unsigned long starting = mod->starting_on.load(std::memory_order_acquire);
+        if (starting && starting != GetCurrentThreadId()) return false;
+    }
     GuardFrame frame;
     const hooks::ThreadState state = hooks::thread_state();
     if (!tome_guard_enter(&frame, fn, context)) return true;
