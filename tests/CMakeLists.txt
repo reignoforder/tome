@@ -2,6 +2,7 @@ add_executable(tome_tests
     main.cpp
     test_abi.cpp
     test_assets.cpp
+    test_background_mute.cpp
     test_blp.cpp
     test_chat.cpp
     test_command_line.cpp

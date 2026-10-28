@@ -269,6 +269,24 @@ int32_t ui_event_for_screen(uint32_t screen) {
     return 0;  // the main menu (its own Setup hook) or a screen mods can't ask for
 }
 
+// For tome.log ("Screen: custom game"), which tests wait for.
+const char* screen_name(int32_t event) {
+    switch (event) {
+    case TOME_UI_SINGLE_PLAYER: return "single player";
+    case TOME_UI_CUSTOM_GAME: return "custom game";
+    case TOME_UI_OPTIONS: return "options";
+    case TOME_UI_CAMPAIGN: return "campaign";
+    case TOME_UI_CUSTOM_CAMPAIGN: return "custom campaign";
+    case TOME_UI_LOAD_SAVED_GAME: return "load saved game";
+    case TOME_UI_VIEW_REPLAY: return "view replay";
+    case TOME_UI_LAN: return "LAN";
+    case TOME_UI_BATTLE_NET: return "Battle.net";
+    case TOME_UI_LOADING: return "loading";
+    case TOME_UI_SCORE_SCREEN: return "score screen";
+    }
+    return "?";
+}
+
 // --- chat ------------------------------------------------------------------------------
 
 void say(const std::string& text) {
@@ -448,6 +466,7 @@ void map_load() {
 
 void TOME_CALL after_set_screen(tome_mod*, tome_hook_call* call, void*) {
     int32_t event = ui_event_for_screen(call->args[0]);
+    if (event) TOME_INFO("Screen: %s", screen_name(event));
     if (event == TOME_UI_SCORE_SCREEN) end_game();  // the game is over once its score screen shows
     if (event == TOME_UI_LOADING) map_load();
     if (!event) return;

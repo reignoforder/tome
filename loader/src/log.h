@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cstddef>
 #include <string>
+#include <string_view>
 
 namespace tome::log {
 
@@ -9,6 +11,15 @@ enum class Level { Debug, Info, Warn, Error };
 // Opens (truncates) the log file. Messages written before this are only sent
 // to OutputDebugString, which winedbg/DebugView can still show.
 bool open(const std::wstring& path);
+
+// From now on every line is also kept in memory, for find_kept
+// (TOME_DEBUG_CLICKS's wait steps), or no longer (and the kept lines
+// dropped). Off unless asked for.
+void keep_lines(bool keep);
+
+// Whether a line kept since offset `from` contains `text`. If so, `from`
+// moves past the end of that line.
+bool find_kept(size_t& from, std::string_view text);
 
 void write(Level level, const char* fmt, ...) __attribute__((format(gnu_printf, 2, 3)));
 

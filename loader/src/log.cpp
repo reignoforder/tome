@@ -5,12 +5,15 @@
 
 #include <cstdarg>
 #include <cstdio>
+#include <string>
 
 namespace tome::log {
 namespace {
 
 HANDLE g_file = INVALID_HANDLE_VALUE;
 SRWLOCK g_lock = SRWLOCK_INIT;
+bool g_keep = false;
+std::string g_kept;  // every line since keep_lines()
 
 const char* level_name(Level level) {
     switch (level) {
@@ -36,6 +39,22 @@ bool open(const std::wstring& path) {
     return true;
 }
 
+void keep_lines(bool keep) {
+    ExclusiveLock hold(g_lock);
+    g_keep = keep;
+    if (!keep) std::string().swap(g_kept);
+}
+
+bool find_kept(size_t& from, std::string_view text) {
+    SharedLock hold(g_lock);
+    if (from > g_kept.size()) return false;
+    size_t at = g_kept.find(text, from);
+    if (at == std::string::npos) return false;
+    size_t end = g_kept.find('\n', at);
+    from = end == std::string::npos ? g_kept.size() : end + 1;
+    return true;
+}
+
 void write(Level level, const char* fmt, ...) {
     char message[2048];
     va_list args;
@@ -54,12 +73,16 @@ void write(Level level, const char* fmt, ...) {
         return;
     }
     if (len >= static_cast<int>(sizeof(line))) {
+        // Cut short: still one line, for find_kept and readers of the file.
         len = sizeof(line) - 1;
+        line[len - 2] = '\r';
+        line[len - 1] = '\n';
     }
 
     OutputDebugStringA(line);
 
     ExclusiveLock hold(g_lock);
+    if (g_keep) g_kept.append(line, static_cast<size_t>(len));
     if (g_file != INVALID_HANDLE_VALUE) {
         // Unbuffered on our side: if the game crashes, everything up to the
         // crash is already in the OS file cache.

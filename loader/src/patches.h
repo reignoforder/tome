@@ -49,4 +49,9 @@ struct Patch {
 // fit or fails is logged and skipped. `report` summarizes what was applied.
 bool install(uintptr_t base, const BuildMappings& build, std::string& report);
 
+// background-mute, once the game window is subclassed, on the main thread:
+// undoes a mute a crashed or quit run left in the system mixer, and keeps
+// the flag that tells it so in `tome_dir` from now on.
+void background_mute_start(const std::wstring& tome_dir);
+
 } // namespace tome::patches

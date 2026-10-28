@@ -1,7 +1,9 @@
 #pragma once
 
 // The TOME_DEBUG_CLICKS script (debug_input.h): steps separated by ';',
-// each at a time in ms since the script started.
+// each at a time in ms since the script started or, after a wait step, since
+// that wait ended. Waiting for log lines instead of guessing how long the
+// game takes keeps a script working on slow machines (software rendering).
 //
 //   x,y@ms          left click; x and y are fractions of the client area
 //   type:<text>@ms  Enter, the text, Enter: a line in the in-game chat
@@ -9,6 +11,9 @@
 //   key:<name>@ms   a key press with modifiers ("Ctrl+J", core/keys.h)
 //   close@ms        WM_CLOSE, like Alt-F4
 //   minimize@ms, restore@ms   like Alt-Tab away and back
+//   wait:<text>@ms  from then on, until tome.log has a line containing the
+//                   text; each wait looks only after the line the last one
+//                   matched (or the script's start)
 //
 // Texts can't contain ';' (it ends the step); they may contain '@', since
 // the time is taken from after the last one.
@@ -20,12 +25,12 @@
 
 namespace tome::debug_script {
 
-enum class Kind { Click, Type, Text, Key, Close, Minimize, Restore };
+enum class Kind { Click, Type, Text, Key, Close, Minimize, Restore, Wait };
 
 struct Step {
     Kind kind = Kind::Click;
     double x = 0, y = 0;  // Click
-    std::string text;     // Type, Text, Key
+    std::string text;     // Type, Text, Key, Wait
     uint32_t at_ms = 0;
 };
 

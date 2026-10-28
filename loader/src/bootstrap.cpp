@@ -121,6 +121,7 @@ DWORD bootstrap() {
     if (!log::open(g_paths.tome_dir + L"\\tome.log")) {
         TOME_WARN("Failed to open tome.log; logging to the debugger only");
     }
+    debug_input::prepare();
 
     TOME_INFO("Tome %s starting", TOME_VERSION);
     TOME_INFO("Host process: %s (pid %lu)", narrow(g_paths.host_exe).c_str(), GetCurrentProcessId());
@@ -247,6 +248,7 @@ DWORD bootstrap() {
         debug_input::start(window);
         // Mods enabled above may have asked for a main menu that already exists.
         main_thread::post(frames::catch_up);
+        main_thread::post([] { patches::background_mute_start(g_paths.tome_dir); });
     } else {
         TOME_WARN("No game window to attach to; mod changes will apply off the main thread");
     }

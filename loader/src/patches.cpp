@@ -12,6 +12,7 @@ extern const Patch kPathSanitizer;
 extern const Patch kBlpGuard;
 extern const Patch kD3dResetLights;
 extern const Patch kGlContextRestore;
+extern const Patch kBackgroundMute;
 
 const Patch* const kAll[] = {
     &kMemhackGuard,
@@ -19,6 +20,7 @@ const Patch* const kAll[] = {
     &kBlpGuard,
     &kD3dResetLights,
     &kGlContextRestore,
+    &kBackgroundMute,
 };
 
 namespace {

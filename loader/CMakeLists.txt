@@ -5,6 +5,7 @@ tome_embed_mappings("${CMAKE_CURRENT_BINARY_DIR}/generated/embedded_mappings.cpp
 # resolution). Kept free of Windows APIs so it can be unit-tested.
 add_library(tome_core STATIC
     src/core/assets.cpp
+    src/core/background_mute.cpp
     src/core/blp.cpp
     src/core/chat.cpp
     src/core/command_line.cpp
@@ -65,6 +66,7 @@ add_library(tome_loader SHARED
     src/packages.cpp
     src/patch.cpp
     src/patches.cpp
+    src/patches/background_mute.cpp
     src/patches/blp_guard.cpp
     src/patches/d3d_reset_lights.cpp
     src/patches/gl_context_restore.cpp
@@ -111,7 +113,7 @@ target_link_options(tome_loader PRIVATE
     $<$<CONFIG:Release>:-s>
 )
 
-target_link_libraries(tome_loader PRIVATE tome_core tome_sdk bcrypt version)
+target_link_libraries(tome_loader PRIVATE tome_core tome_sdk bcrypt version ole32)
 
 add_custom_target(deploy
     COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:tome_loader> "${TOME_GAME_DIR}/tome.mix"

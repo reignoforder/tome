@@ -41,12 +41,13 @@ bool parse_step(std::string_view item, Step& step) {
             return true;
         }
     }
-    for (Named n : {Named{"type:", Kind::Type}, Named{"text:", Kind::Text}, Named{"key:", Kind::Key}}) {
+    for (Named n : {Named{"type:", Kind::Type}, Named{"text:", Kind::Text}, Named{"key:", Kind::Key},
+                    Named{"wait:", Kind::Wait}}) {
         std::string_view prefix = n.name;
         if (head.substr(0, prefix.size()) == prefix) {
             step.kind = n.kind;
             step.text = std::string(head.substr(prefix.size()));
-            return step.kind != Kind::Key || !step.text.empty();
+            return (step.kind != Kind::Key && step.kind != Kind::Wait) || !step.text.empty();
         }
     }
     size_t comma = head.find(',');

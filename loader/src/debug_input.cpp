@@ -13,10 +13,18 @@ namespace {
 using debug_script::Kind;
 using debug_script::Step;
 
+// How long a wait step waits for its line: a map's loading screen under
+// software rendering takes well over a minute.
+constexpr DWORD kWaitMs = 300000;
+
 struct Script {
     HWND window;
     std::vector<Step> steps;
 };
+
+// Parsed by prepare(), played by start().
+std::vector<Step> g_steps;
+bool g_waits = false;  // the script has wait steps: the log keeps its lines
 
 void press(HWND window, WPARAM key) {
     PostMessageW(window, WM_KEYDOWN, key, 1);
@@ -77,11 +85,28 @@ void click(HWND window, double fx, double fy) {
 
 DWORD WINAPI run(LPVOID param) {
     auto script = static_cast<Script*>(param);
-    DWORD start = GetTickCount();
+    DWORD start = GetTickCount();  // of the script, then of the last wait's end
+    size_t log_pos = 0;            // in the kept log: after the last wait's line
     for (const Step& step : script->steps) {
         DWORD elapsed = GetTickCount() - start;
         if (step.at_ms > elapsed) Sleep(step.at_ms - elapsed);
         switch (step.kind) {
+        case Kind::Wait: {
+            // The text isn't logged here: a later wait for it would match this line.
+            DWORD began = GetTickCount();
+            while (!log::find_kept(log_pos, step.text)) {
+                if (GetTickCount() - began > kWaitMs) {
+                    TOME_WARN("TOME_DEBUG_CLICKS: no log line with \"%s\" in %lu s; the script stops",
+                              step.text.c_str(), kWaitMs / 1000);
+                    log::keep_lines(false);
+                    delete script;
+                    return 0;
+                }
+                Sleep(50);
+            }
+            start = GetTickCount();
+            break;
+        }
         case Kind::Close:
             TOME_INFO("Debug close");
             PostMessageW(script->window, WM_CLOSE, 0, 0);
@@ -112,20 +137,38 @@ DWORD WINAPI run(LPVOID param) {
             break;
         }
     }
+    if (g_waits) log::keep_lines(false);
     delete script;
     return 0;
 }
 
+std::string script_spec() {
+    std::string spec(8192, '\0');
+    DWORD len = GetEnvironmentVariableA("TOME_DEBUG_CLICKS", spec.data(), static_cast<DWORD>(spec.size()));
+    if (len >= spec.size()) {
+        TOME_WARN("TOME_DEBUG_CLICKS: longer than %zu characters; ignored", spec.size() - 1);
+        len = 0;
+    }
+    spec.resize(len);
+    return spec;
+}
+
 } // namespace
 
-void start(HWND game_window) {
-    char spec[1024];
-    DWORD len = GetEnvironmentVariableA("TOME_DEBUG_CLICKS", spec, sizeof(spec));
-    if (len == 0 || len >= sizeof(spec)) return;
-
+void prepare() {
+    std::string spec = script_spec();
+    if (spec.empty()) return;
     std::vector<std::string> bad;
-    auto script = new Script{game_window, debug_script::parse(std::string_view(spec, len), bad)};
+    g_steps = debug_script::parse(spec, bad);
     for (const std::string& item : bad) TOME_WARN("TOME_DEBUG_CLICKS: can't parse \"%s\"", item.c_str());
+    for (const Step& step : g_steps) g_waits = g_waits || step.kind == Kind::Wait;
+    if (g_waits) log::keep_lines(true);
+}
+
+void start(HWND game_window) {
+    if (g_steps.empty()) return;
+    auto script = new Script{game_window, std::move(g_steps)};
+    g_steps.clear();
     HANDLE thread = CreateThread(nullptr, 0, run, script, 0, nullptr);
     if (thread) {
         CloseHandle(thread);

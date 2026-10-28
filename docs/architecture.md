@@ -96,6 +96,8 @@ tests/                    unit tests (run under Wine by CTest)
 tools/
   e2e-test.sh             end-to-end test in the real game
   game.sh                 start/stop/wait/screenshot helper
+  test-env.sh             where both run the game: a linked game folder, an own Wine prefix, Xvfb
+  container/              Containerfile with the whole toolchain (make container-test, container-e2e)
   gen-upcase.py           generates loader/src/core/upcase_table.inc (NTFS name folding)
   gen-rust-bindings.sh    regenerates sdk/rust/tome-sys/src/bindings.rs from tome.h (--check for the test)
   mpq/                    tome-mpq (StormLib), dev-only
@@ -739,6 +741,17 @@ reason to make a fix a patch rather than ship it as a mod.
   (`patch_bytes` refuses a mismatch): on a build that doesn't map the site or
   whose bytes differ it's skipped, logged as "unclamped", and the AFTER guard
   alone applies. Covers maps and mods alike.
+- **background-mute** (`patches/background_mute.cpp`, `docs/known-bugs.md`,
+  "Sound in the background"): the game keeps playing its sound after
+  Alt+Tab. The main-thread dispatcher passes the game window's
+  `WM_ACTIVATEAPP` to the patch (`main_thread::set_activate_hook`), which
+  mutes the game process's default Core Audio session (`ISimpleAudioVolume`)
+  on leaving and unmutes it on coming back, leaving a mute the user set alone
+  (`core/background_mute.*`, unit-tested). Windows keeps a session's mute
+  for the next run, so `tome/background-mute.flag` marks Tome's mute and
+  `patches::background_mute_start` (bootstrap, on the main thread) undoes a
+  mute that a crashed run left. Needs no game.dll symbols, so it covers any
+  build and runs everywhere. Reserves nothing.
 - **d3d-reset-lights** (`patches/d3d_reset_lights.cpp`, `docs/known-bugs.md`,
   "Under Wine"): works around a wined3d bug that leaks the active-light slots
   of every enabled light on `IDirect3DDevice9::Reset`, so the lights the game
@@ -1300,9 +1313,26 @@ API version 10: `popup`, `popup_close`, `restart_game`.
   seeds from `fuzz/make_seeds.py`, the corpus in `build-fuzz/corpus/`, and
   crashing inputs kept in `fuzz/regressions/<target>/`. They run 64-bit, so
   overflows only 32-bit `size_t` arithmetic would hit don't show up.
-- `tools/e2e-test.sh`: six real game launches with a temporary `TOME_HOME`.
-  `TOME_DEBUG_CLICKS` items can also be `type:<text>@ms`: Enter, the text
-  as WM_CHAR messages, Enter (a line in the in-game chat).
+- `tools/e2e-test.sh` (`make e2e`): six real game launches with a temporary `TOME_HOME`.
+  The game runs as `tools/test-env.sh` sets it up, the same on every
+  machine: a temporary game folder of symbolic links to `GAME_DIR`'s files
+  (which is only read) with the build's `tome.mix` and its own `Maps/`,
+  `save/`, `replay/`; a Wine prefix of the test's own (`build/test-env/wine`,
+  made once: 800x600, a profile called Tome, the intro movie seen), so
+  neither the user's prefix nor their settings matter; and, with
+  `HEADLESS=1` (the default), an Xvfb server of its own with Mesa's
+  software OpenGL, so the window always has the focus, `SetCursorPos`
+  moves only that server's pointer and no GPU is needed. Stopping uses
+  `wineserver -k` on the test prefix, and "is it running" looks for
+  `war3.exe` processes with that `WINEPREFIX`, so the user's own game is
+  never touched. `TOME_DEBUG_CLICKS` items can also be `type:<text>@ms`:
+  Enter, the text as WM_CHAR messages, Enter (a line in the in-game chat),
+  and `wait:<text>@ms`: the script waits for a `tome.log` line containing
+  the text (each wait searches after the line the last one matched; the
+  log keeps its lines in memory for this when the variable is set), and
+  later times count from the wait's end. Every part of every launch starts
+  with one (`Main menu set up`, `Screen: <name>`, `Game started: `,
+  `Mod menu opened`), so only short in-screen delays are fixed times.
   It covers:
   - build recognition and the signature check;
   - startup errors per mod;

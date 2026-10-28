@@ -27,6 +27,17 @@ void post(std::function<void()> fn);
 using KeyHook = bool (*)(UINT msg, WPARAM wparam, LPARAM lparam);
 void set_key_hook(KeyHook hook);
 
+// Called for every WM_ACTIVATEAPP of the game window (the game leaves or
+// gets back the foreground) before the game sees it. One hook
+// (patches/background_mute.cpp).
+using ActivateHook = void (*)(bool active);
+void set_activate_hook(ActivateHook hook);
+
+// Called on WM_DESTROY of the game window (the game quits) before the game
+// sees it. One hook (patches/background_mute.cpp).
+using DestroyHook = void (*)();
+void set_destroy_hook(DestroyHook hook);
+
 // Like post(), after at least `delay_ms` milliseconds.
 void post_delayed(unsigned delay_ms, std::function<void()> fn);
 

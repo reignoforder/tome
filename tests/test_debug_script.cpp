@@ -36,6 +36,20 @@ TEST(debug_script_reports_bad_items) {
     if (!bad.empty()) CHECK_EQ(bad[0], std::string("0.5,0.5"));
 }
 
+TEST(debug_script_wait) {
+    std::vector<std::string> bad;
+    auto steps = parse("wait:Screen: custom game@0;0.5,0.5@1500;wait:a@b@200;wait:x;wait:@5", bad);
+    CHECK_EQ(steps.size(), size_t(3));
+    if (steps.size() != 3) return;
+    CHECK(steps[0].kind == Kind::Wait);
+    CHECK_EQ(steps[0].text, std::string("Screen: custom game"));
+    CHECK_EQ(steps[0].at_ms, uint32_t(0));
+    CHECK(steps[2].kind == Kind::Wait);
+    CHECK_EQ(steps[2].text, std::string("a@b"));
+    CHECK_EQ(steps[2].at_ms, uint32_t(200));
+    CHECK_EQ(bad.size(), size_t(2));  // "wait:a" has no time, "wait:@5" no text
+}
+
 TEST(debug_script_empty) {
     std::vector<std::string> bad;
     CHECK(parse("", bad).empty());

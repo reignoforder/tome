@@ -27,14 +27,30 @@ What works today:
 
 ## Building
 
-Requires CMake, Ninja and a 32-bit MinGW-w64 toolchain (Warcraft III is a
-32-bit process). On Fedora:
+Requires CMake, Ninja (or make) and a 32-bit MinGW-w64 toolchain
+(Warcraft III is a 32-bit process); Wine runs the tests. On Fedora:
 
 ```sh
-sudo dnf install cmake ninja-build mingw32-gcc-c++ wine
+sudo dnf install cmake ninja-build mingw32-gcc-c++ wine xorg-x11-server-Xvfb
 ```
 
-Configure and build:
+On Debian or Ubuntu: `sudo dpkg --add-architecture i386 && sudo apt install
+cmake ninja-build g++-mingw-w64-i686 wine wine32 xvfb`.
+
+The `Makefile` wraps the usual steps (`make help` lists them all):
+
+```sh
+make            # configure (once) and build into build/
+make test       # unit tests
+make e2e        # the end-to-end test in the real game (see Testing)
+```
+
+Or with only a container engine (podman or docker), nothing else installed:
+`make container-test` / `make container-e2e` build an image with the whole
+toolchain, Wine and Xvfb (`tools/container/Containerfile`) and run the same
+targets in it, building into `build-container/`.
+
+By hand, configure and build:
 
 ```sh
 cmake -S . -B build -G Ninja \
@@ -91,10 +107,13 @@ When the game folder is `./WarCraft III` (the default), this builds and copies
 `tome.mix` in one step:
 
 ```sh
-cmake --build build --target deploy
+make deploy          # or: cmake --build build --target deploy
 ```
 
-Use `-DTOME_GAME_DIR=/path/to/Warcraft III` to point it somewhere else.
+Use `make deploy GAME_DIR=/path/to/Warcraft III` (or
+`-DTOME_GAME_DIR=...`) to point it somewhere else. Nothing else copies into
+your install: `make game` and the tests run the build from a folder of their
+own (see Testing).
 
 Run the game (`wine war3.exe -window -opengl` on Linux). The main menu gets a
 **Mods** button, the window title shows `[Tome 0.1.0]`, and `tome/tome.log`
@@ -136,26 +155,34 @@ the SDK in its own repository next to this one.
 | `TOME_HOME` | Use this folder (a Windows path) for `tome/` (and so `tome/mods/`) instead of the game folder. |
 | `TOME_DEBUG_APPROVE` | Allow these mods' code without turning them on in the menu: ids, comma-separated, or `*` for all. For tests. |
 | `TOME_DEBUG_OPEN_MOD_MENU=1` | Open the mod menu automatically once the main menu is up (screenshots). |
-| `TOME_DEBUG_CLICKS` | Post left clicks to the game window: `x,y@ms;...`, with x/y as fractions of the window; `type:text@ms` types a chat line, `text:abc@ms` types characters (no Enter), `key:Ctrl+J@ms` presses a key. Used by the e2e test. |
+| `TOME_DEBUG_CLICKS` | Post left clicks to the game window: `x,y@ms;...`, with x/y as fractions of the window; `type:text@ms` types a chat line, `text:abc@ms` types characters (no Enter), `key:Ctrl+J@ms` presses a key, `wait:text@ms` waits for a `tome.log` line containing the text (later times count from then). Used by the e2e test. |
 
 ## Testing
 
 ```sh
-cd build && ctest                  # unit tests (run under Wine)
-tools/e2e-test.sh                  # end-to-end in the real game
-HEADLESS=1 tools/e2e-test.sh       # the same, off screen
+make test                          # unit tests (cd build && ctest; run under Wine)
+make e2e                           # end-to-end in the real game (tools/e2e-test.sh)
+HEADLESS=0 make e2e                # the same, on your screen
+make game                          # the build in the game, to try things (tools/game.sh)
 ```
 
-With `HEADLESS=1` (for `tools/e2e-test.sh` and `tools/game.sh`), the game
-runs inside [gamescope](https://github.com/ValveSoftware/gamescope)'s headless
-backend: no window appears, and simulated key presses don't depend on the
-game window having the focus. The virtual screen takes the game's resolution
-setting (or `HEADLESS_SIZE=1280x720`); `tools/game.sh shot` then captures it
-through `gamescopectl`.
+The end-to-end test needs a Warcraft III 1.27b folder: `./WarCraft III`, or
+`GAME_DIR=/path/to/it`. It only reads it. Each launch runs from a temporary
+folder of links to the install's files, with the build's `tome.mix`, a test
+map (made from one of your melee maps when `tome-mpq` is built) and its own
+`tome/`, `save/` and `replay/`. The game runs in a Wine prefix of the
+test's own, made once in `build/test-env/wine` with fixed settings (800x600,
+a profile called Tome), so it looks the same on every machine whatever your
+own prefix's settings are.
 
-The end-to-end test launches the game three times (about a minute each). It
-runs Tome with `TOME_HOME` set to a temporary folder, so your own `tome/`
-folder and its mods are never touched; it only writes `tome.mix` and, temporarily, a test
-map under `Maps/TomeE2E/`. With `tome-mpq` built, the test map (made from one
-of your melee maps) checks the JASS natives from inside a running map. The
-last launch clicks through the mod menu. Close the game before running it.
+By default the game runs in its own X server (Xvfb) with Mesa's software
+OpenGL: no window appears, no GPU is needed, the game keeps the keyboard
+focus whatever you do, and its simulated clicks don't move your mouse. The
+simulated input (`TOME_DEBUG_CLICKS`) waits for log lines such as
+`Screen: custom game` or `Game started:` before each part instead of
+counting from the launch, so a slow machine only makes the test slower. The
+test launches the game six times, about five minutes in all.
+
+`make game` (`tools/game.sh start`) runs the build the same way, on your
+screen, from `build/test-env/game/`; put mods to try in its `tome/mods/`.
+`tools/game.sh shot file.png` takes a screenshot of the game's display.

@@ -309,6 +309,31 @@ Both are fixed by built-in patches:
   Checked on the main menu: no warning and the same colours after four
   Alt+Tabs. Not reported to Wine yet as far as we know.
 
+## Sound in the background
+
+The game keeps playing its music and sound effects after Alt+Tab, or
+whenever another window has the foreground, on Windows and under Wine.
+**Fixed in Tome (background-mute, built-in patch):** on `WM_ACTIVATEAPP`
+the game window's subclass mutes the game process's default Core Audio
+session (`ISimpleAudioVolume::SetMute`) and unmutes it when the game comes
+back, unless the user had muted it in the mixer already. Only the game's
+own session: other programs and the system volume stay as they are. The
+session covers everything Miles plays (2D mixer, 3D providers, music).
+
+Windows' volume mixer remembers an application's mute for its next run,
+so while Tome's mute is on, `tome/background-mute.flag` exists; if the game
+crashes or is killed while away, the next start unmutes the session and
+removes the flag. A normal quit doesn't need that: destroying the active
+window deactivates the game first (which mutes it), so the `WM_DESTROY` that
+follows undoes Tome's mute and removes the flag. Wine mutes inside its own mixer, so PipeWire/PulseAudio show the
+stream as not muted.
+
+Checked under Wine on the main menu by giving a second Wine program the
+foreground: the game's stream was silent (`parec --monitor-stream`, peak 0)
+and the flag existed; once the game was back, the music played again and the
+flag was gone. Killed while away, the next start removed the flag. Not checked on
+Windows yet.
+
 ## What Tome could do
 
 1. **Map script guard:** before a map's script runs, refuse or warn on

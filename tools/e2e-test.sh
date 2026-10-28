@@ -3,40 +3,47 @@
 # mods, changes things while it runs, and checks tome.log for the expected
 # behavior.
 #
-# Tome runs with TOME_HOME pointing at a temporary folder, so your own tome/
-# folder (with tome/mods/) is never touched. The only things written to the game
-# folder are tome.mix (the build under test) and, if tome-mpq was built
-# (-DTOME_BUILD_DEV_TOOLS=ON), a test map under Maps/TomeE2E/ that is removed
-# afterwards. The test map calls the JASS natives of the hello mod, its C++
-# version (hello-cpp) and its Rust version (hello-rs) if that was built
-# (sdk/rust: cargo and its i686-pc-windows-gnu target).
+# Nothing is written to your Warcraft III install or your Wine prefix: the
+# game runs from a temporary folder of links to the install's files, in a
+# Wine prefix of the test's own, with TOME_HOME in a temporary folder
+# (tools/test-env.sh). If tome-mpq was built (-DTOME_BUILD_DEV_TOOLS=ON), a
+# test map made from one of the install's melee maps calls the JASS natives
+# of the hello mod, its C++ version (hello-cpp) and its Rust version
+# (hello-rs) if that was built (sdk/rust: cargo and its i686-pc-windows-gnu
+# target).
 #
 # Usage: tools/e2e-test.sh [build-dir] [game-dir]
-# A game window opens six times, for up to a minute and a half each, unless
-# HEADLESS=1: then the game runs off screen in gamescope (tools/headless.sh).
+# The game is launched six times. By default it runs in its own X server
+# (Xvfb), off screen: it keeps the keyboard focus, and its clicks don't move
+# your mouse, so you can go on working. HEADLESS=0 shows it on your screen
+# instead (then leave it the focus: a single player game pauses without it).
+# The simulated input waits for log lines (TOME_DEBUG_CLICKS wait: steps),
+# not for fixed times, so a slow machine only makes the test slower.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-source "$ROOT/tools/headless.sh"
-BUILD="$(realpath "${1:-$ROOT/build}")"
-GAME="$(realpath "${2:-$ROOT/WarCraft III}")"
+BUILD="$(realpath "${1:-${BUILD:-$ROOT/build}}")"
+[[ -n "${2:-}" ]] && GAME_DIR="$(realpath "$2")"
+HEADLESS="${HEADLESS:-1}"
+source "$ROOT/tools/test-env.sh"
 FIXTURES="$ROOT/tests/e2e/mods"
 MPQ_TOOL="$BUILD/tools/mpq/tome-mpq.exe"
-TEST_MAP_DIR="$GAME/Maps/TomeE2E"
 
 die() { echo "e2e: $*" >&2; exit 2; }
-[[ -f "$GAME/war3.exe" ]] || die "no war3.exe in $GAME"
+env_check
 [[ -f "$BUILD/loader/tome.mix" ]] || die "build first: cmake --build $BUILD"
 [[ -f "$BUILD/mods/hello/hello.dll" ]] || die "hello example mod not built"
 [[ -f "$BUILD/mods/hello-cpp/hello-cpp.dll" ]] || die "hello-cpp example mod not built"
 [[ -f "$BUILD/mods/hook-a/hook-a.dll" && -f "$BUILD/mods/hook-b/hook-b.dll" ]] || die "hook test mods not built"
 [[ -f "$BUILD/mods/crash/crash.dll" ]] || die "crash test mod not built"
-command -v wine >/dev/null || die "wine not found"
-command -v winepath >/dev/null || die "winepath not found"
-# Matched by exact process name, never by command line, so this can't hit a shell.
-pgrep -x war3.exe >/dev/null && die "Warcraft III is already running; close it first"
+env_running && die "the test's Warcraft III is still running (tools/game.sh stop)"
+# Another copy of the game (yours, or tools/game.sh) would take the LAN port.
+pgrep -x war3.exe >/dev/null && echo "e2e: another Warcraft III is running; the LAN game (fifth launch) may fail"
+env_prefix
 
 WORK="$(mktemp -d)"          # scratch files; deleted at the end
+GAME="$WORK/game"            # the game folder: links to GAME_DIR's files
+TEST_MAP_DIR="$GAME/Maps/TomeE2E"
 HOME_DIR="$WORK/home"         # TOME_HOME: tome/ (with tome/mods/) for the test
 MODS="$HOME_DIR/tome/mods"
 STATE="$HOME_DIR/tome/state.json"
@@ -48,10 +55,7 @@ WINE_PID=""
 
 stop_game() {
     [[ -z "$WINE_PID" ]] && return
-    kill "$WINE_PID" 2>/dev/null
-    pkill -x war3.exe 2>/dev/null
-    for _ in 1 2 3 4 5 6 7 8 9 10; do pgrep -x war3.exe >/dev/null || break; sleep 0.5; done
-    pkill -9 -x war3.exe 2>/dev/null
+    env_stop
     wait "$WINE_PID" 2>/dev/null
     WINE_PID=""
     # Each launch starts a new tome.log; E2E_KEEP=1 keeps them all.
@@ -62,30 +66,20 @@ LAUNCHES=0
 
 cleanup() {
     stop_game
-    rm -rf "$TEST_MAP_DIR"
-    rm -rf "$GAME"/../TomeE2E-escape*  # only there if the path sanitizer failed
-    # The test map's saved game (SaveGame writes it under the current
-    # profile's CustomSaves\<map name>), and CustomSaves if the test made it.
-    for profile in "$GAME"/save/*/; do
-        rm -rf "$profile/CustomSaves/e2e"
-        [[ -n "${HAD_CUSTOM_SAVES[$profile]:-}" ]] || rmdir "$profile/CustomSaves" 2>/dev/null
-    done
+    env_display_stop
     if [[ "${E2E_KEEP:-0}" == 1 ]]; then
         echo "e2e: kept test files in $WORK"
     else
         rm -rf "$WORK"
     fi
 }
-declare -A HAD_CUSTOM_SAVES
-for profile in "$GAME"/save/*/; do
-    [[ -d "$profile/CustomSaves" ]] && HAD_CUSTOM_SAVES[$profile]=1
-done
 trap cleanup EXIT
 trap 'exit 1' INT TERM HUP
 
 # --- setup -------------------------------------------------------------------
 
-cp "$BUILD/loader/tome.mix" "$GAME/tome.mix"
+env_game "$GAME" "$BUILD/loader/tome.mix"
+env_display_start
 cp -r "$BUILD/mods/hello" "$BUILD/mods/hello-cpp" "$MODS/"
 RUST=0
 if [[ -f "$BUILD/mods/hello-rs/hello_rs.dll" ]]; then
@@ -124,9 +118,12 @@ MAP_ARG=()
 if [[ -f "$MPQ_TOOL" ]]; then
     SOURCE_MAP="$(find "$GAME/Maps" -maxdepth 1 -name '*.w3m' | sort | head -n 1)"
     [[ -n "$SOURCE_MAP" ]] || die "no melee map found in $GAME/Maps"
+    # A Maps/TomeE2E in the install (left by an older version of this test)
+    # is linked here: replace the link, or the map would be written there.
+    [[ -L "$TEST_MAP_DIR" ]] && rm "$TEST_MAP_DIR"
     mkdir -p "$TEST_MAP_DIR"
     cp "$SOURCE_MAP" "$TEST_MAP_DIR/e2e.w3m"
-    mpq() { WINEDEBUG=-all wine "$MPQ_TOOL" "$@" >/dev/null 2>&1; }
+    mpq() { wine "$MPQ_TOOL" "$@" >/dev/null 2>&1; }
     mpq extract "$TEST_MAP_DIR/e2e.w3m" war3map.j "$WORK/war3map.j" || die "couldn't extract war3map.j"
     EXAMPLE_ARGS=(--cpp)
     ((RUST)) && EXAMPLE_ARGS+=(--rust)
@@ -156,10 +153,21 @@ APPROVED="hello,hello-cpp,hello-rs,hook-a,hook-b,crash,wrong-arch,sync-test,asse
 
 launch() {
     rm -f "$LOG"
-    (cd "$GAME" && WINEDEBUG=-all TOME_HOME="$TOME_HOME_WIN" TOME_DEBUG_CLICKS="${TOME_DEBUG_CLICKS:-}" \
+    (cd "$GAME" && DISPLAY="$(env_display)" TOME_HOME="$TOME_HOME_WIN" TOME_DEBUG_CLICKS="${TOME_DEBUG_CLICKS:-}" \
         TOME_DEBUG_ASSET="$PROBE" TOME_DEBUG_APPROVE="$APPROVED" \
-        headless_exec wine war3.exe -window -opengl "${MAP_ARG[@]}" >/dev/null 2>&1) &
+        WINEDEBUG=err+module exec wine war3.exe -window -opengl "${MAP_ARG[@]}" >"$WORK/wine.log" 2>&1) &
     WINE_PID=$!
+    # Without Tome's log there's nothing to check: say why instead of
+    # timing out every check.
+    local deadline=$((SECONDS + 120))
+    until grep -q "Tome .* starting" "$LOG" 2>/dev/null; do
+        if ((SECONDS >= deadline)) || ! kill -0 "$WINE_PID" 2>/dev/null; then
+            echo "e2e: the game didn't start Tome; Wine's errors:" >&2
+            grep -E "err:" "$WORK/wine.log" | tail -n 20 >&2
+            exit 1
+        fi
+        sleep 0.5
+    done
 }
 
 set_enabled() {
@@ -246,7 +254,7 @@ check_absent() {
 
 # --- run 1: everything enabled -----------------------------------------------
 
-# In the test map's game (it starts about 4 s in; it saves at 6 s of game
+# In the test map's game, timed from its start (the map saves at 6 s of game
 # time, which holds the game up): the map's dialog, shown on "-dialog", pauses
 # the game until its hotkey T (pressed twice in case the dialog was late; T
 # does nothing for the selected units), then an arrow key; then B and O on a
@@ -255,9 +263,9 @@ check_absent() {
 # and Rust examples' chat commands, and the same commands making them throw
 # and panic.
 if ((${#MAP_ARG[@]})); then
-    TOME_DEBUG_CLICKS="type:-dialog@6500;key:T@8500;key:T@9500;key:Left@10500;type:-build@11000;key:B@12000;\
-key:Esc@12500;type:-skill@13000;key:O@14500;key:Esc@15000;type:/hellors e2e@16000;type:/hellors panic@17500;\
-type:/hellocpp e2e@19000;type:/hellocpp throw@20500" launch
+    TOME_DEBUG_CLICKS="wait:Game started: @0;type:-dialog@2500;key:T@4500;key:T@5500;key:Left@6500;\
+type:-build@7000;key:B@8000;key:Esc@8500;type:-skill@9000;key:O@10500;key:Esc@11000;type:/hellors e2e@12000;\
+type:/hellors panic@13500;type:/hellocpp e2e@15000;type:/hellocpp throw@16500" launch
 else
     launch
 fi
@@ -282,7 +290,7 @@ fi
 check "Assets at startup: $ASSET_FILES files from 3 mods \(0 overridden" "mods' assets mounted from DllMain"
 check "Asset probe .*: [0-9]+ bytes, fnv1a $PROBE_HASH" "the game reads the mod's texture instead of its own"
 check "Bootstrap complete" "bootstrap finished" 15
-check "Patches: 3 applied, 0 skipped: memhack-guard applied.*path-sanitizer applied.*blp-guard applied" "memhack guard, path sanitizer and BLP guard patches applied"
+check "Patches: [0-9]+ applied, 0 skipped: memhack-guard applied.*path-sanitizer applied.*blp-guard applied.*d3d-reset-lights applied.*gl-context-restore applied.*background-mute applied" "every built-in patch applied"
 check_absent "blp-guard.*unclamped" "the BLP header-copy clamp was applied"
 check "Main-thread dispatcher installed" "main-thread dispatcher installed"
 check "Events: hooked screens, map load, game start and end, frames, game ticks, shutdown, chat, pause, units, spells, damage, experience, players, resources, keys, menus, dialogs, levels and saved games" "event hooks installed"
@@ -525,7 +533,7 @@ check_count "Unloaded crash \(its DLL stays loaded" $(( ${#MAP_ARG[@]} ? 4 : 3 )
 crash_in load
 check "Failed to load crash: crashed in tome_mod_load: access violation" "a crash in tome_mod_load is a load failure"
 check "crash +1\.0\.0 +error: crashed in tome_mod_load" "and shows in its status"
-if pgrep -x war3.exe >/dev/null; then pass "the game survived every crash"; else fail "the game survived every crash"; fi
+if env_running; then pass "the game survived every crash"; else fail "the game survived every crash"; fi
 
 echo "live toggling"
 set_enabled hello false
@@ -655,7 +663,8 @@ open(sys.argv[1], "wb").write(h)
 PY
 # Click positions are fractions of the window: Mods button, row 0's toggle
 # (twice, once the panel has lowered), Done, then the hello mod's own button
-# (which was hidden and recreated by the toggling). Then the panel again:
+# (which was hidden and recreated by the toggling), timed from the main
+# menu's setup and then from the panel's opening. Then the panel again:
 # hello's Details, Settings, the Shout toggle (row 2: a setting takes two), the Greeting text box
 # (row 0: "Hello" replaced by "Howdy", Enter), Esc, Esc (back to the list);
 # Tome, Keybinds, row 1's key (Greet; row 0 is Tome's own), Ctrl+J for it,
@@ -664,12 +673,12 @@ PY
 # loader/src/core/main_menu_fdf.cpp and sdk/examples/hello/hello.c.
 SAVED_MAP_ARG=("${MAP_ARG[@]}")
 MAP_ARG=()
-TOME_DEBUG_CLICKS="0.874,0.84@4000;0.447,0.227@6500;0.447,0.227@8500;0.447,0.81@10500;0.5,0.892@12000;\
-0.874,0.84@13500;0.347,0.227@16000;0.209,0.81@17000;0.447,0.367@18000;0.403,0.227@18800;key:End@19200;\
-key:Backspace@19300;key:Backspace@19400;key:Backspace@19500;key:Backspace@19600;key:Backspace@19700;\
-text:Howdy@19900;key:Enter@20500;key:Esc@21500;key:Esc@22500;0.322,0.81@24000;0.209,0.81@25000;\
-0.447,0.297@26000;key:Ctrl+J@27000;key:Ctrl+J@29000;key:Esc@30000;key:Esc@31000;key:Esc@32000;\
-key:Ctrl+F10@34000" launch
+TOME_DEBUG_CLICKS="wait:Main menu set up@0;0.874,0.84@4000;wait:Mod menu opened@0;0.447,0.227@2500;\
+0.447,0.227@4500;0.447,0.81@6500;0.5,0.892@8000;0.874,0.84@9500;wait:Mod menu opened@9500;0.347,0.227@2500;\
+0.209,0.81@3500;0.447,0.367@4500;0.403,0.227@5300;key:End@5700;key:Backspace@5800;key:Backspace@5900;\
+key:Backspace@6000;key:Backspace@6100;key:Backspace@6200;text:Howdy@6400;key:Enter@7000;key:Esc@8000;\
+key:Esc@9000;0.322,0.81@10500;0.209,0.81@11500;0.447,0.297@12500;key:Ctrl+J@13500;key:Ctrl+J@15500;\
+key:Esc@16500;key:Esc@17500;key:Esc@18500;key:Ctrl+F10@20500" launch
 MAP_ARG=("${SAVED_MAP_ARG[@]}")
 check "Main menu set up; Mods button added" "Mods button added to the main menu" 30
 check "Quit moved to the lower slot" "Quit shares the bottom box with Mods"
@@ -743,15 +752,16 @@ PY
 # Mission; on the score screen OK; then Cancel twice back to the main menu.
 SAVED_MAP_ARG=("${MAP_ARG[@]}")
 MAP_ARG=()
-# In the game (from 28 s, leaving loading time even on a slow run), chat
-# commands, Esc, then the
-# hello mod's in-game button; in the Menu, Mods, Esc (back
-# to the menu), Esc (closes it), Ctrl+F10 (the menu with Mods open), Done.
-TOME_DEBUG_CLICKS="0.86,0.245@5000;0.5,0.892@6500;0.867,0.657@8000;0.875,0.80@12000;type:/hello e2e@28000;\
-type:/tome disable hello@30500;type:/hello ignored@33000;type:/tome enable hello@35000;type:/tome nonsense@37000;\
-key:Esc@38200;0.5,0.475@39000;0.163,0.018@40000;0.574,0.418@41000;key:Esc@41700;key:Esc@42200;key:Ctrl+F10@42700;\
-0.676,0.653@43400;0.5,0.541@44200;\
-0.5,0.29@46000;0.788,0.942@52000;0.859,0.925@60000;0.859,0.878@65000" launch
+# On the single player screen also the hello mod's button. In the game (timed
+# from its start), chat commands, Esc, then the hello mod's in-game button;
+# in the Menu, Mods, Esc (back to the menu), Esc (closes it), Ctrl+F10 (the
+# menu with Mods open), Done.
+TOME_DEBUG_CLICKS="wait:Main menu set up@0;0.86,0.245@5000;wait:Screen: single player@0;0.5,0.892@1500;\
+0.867,0.657@3000;wait:Screen: custom game@0;0.875,0.80@4000;wait:Game started: @0;type:/hello e2e@4000;\
+type:/tome disable hello@6500;type:/hello ignored@9000;type:/tome enable hello@11000;type:/tome nonsense@13000;\
+key:Esc@14200;0.5,0.475@15000;0.163,0.018@16000;0.574,0.418@17000;key:Esc@17700;key:Esc@18200;\
+key:Ctrl+F10@18700;0.676,0.653@19400;0.5,0.541@20200;0.5,0.29@22000;wait:Screen: score screen@0;\
+0.788,0.942@4000;wait:Screen: custom game@0;0.859,0.925@3000;wait:Screen: single player@0;0.859,0.878@3000" launch
 MAP_ARG=("${SAVED_MAP_ARG[@]}")
 check "Assets at startup: 2 files from 2 mods" "both mods' assets mounted" 30
 check "Engine initialized natives" "a game started from the main menu" 40
@@ -799,9 +809,10 @@ echo "LAN game (fifth launch)"
 # inside the game.
 SAVED_MAP_ARG=("${MAP_ARG[@]}")
 MAP_ARG=()
-TOME_DEBUG_CLICKS="0.855,0.434@5000;0.394,0.925@8000;0.862,0.845@11000;0.861,0.918@14000;0.394,0.925@17000;\
-0.862,0.845@20000;0.161,0.119@23000;0.101,0.214@24500;0.861,0.823@26500;0.5,0.475@40000;type:/hello focus@42000;\
-type:hi lan@44000;0.163,0.018@46000;0.5,0.541@49000;0.5,0.347@52000;0.414,0.484@54500" launch
+TOME_DEBUG_CLICKS="wait:Main menu set up@0;0.855,0.434@5000;wait:Screen: LAN@0;0.394,0.925@3000;\
+0.862,0.845@6000;0.861,0.918@9000;0.394,0.925@12000;0.862,0.845@15000;0.161,0.119@18000;0.101,0.214@19500;\
+0.861,0.823@21500;wait:Game started: @0;0.5,0.475@4000;type:/hello focus@6000;type:hi lan@8000;\
+0.163,0.018@10000;0.5,0.541@13000;0.5,0.347@16000;0.414,0.484@18500" launch
 MAP_ARG=("${SAVED_MAP_ARG[@]}")
 check "\[hello\] map load: " "map load for a LAN game" 45
 check_count "Map loading: " 1 "creating and cancelling a lobby is no map load"
@@ -812,8 +823,8 @@ check "\[hello\] /hello command: Howdy, focus!" "Enter opens the chat box again 
 check "\[hello\] chat from .+ \(player 1, to [0-3]\): hi lan" "chat event in a LAN game, with the sender" 10
 check "\[hello\] game end: " "game end when the program exits from a LAN game" 20
 check_count "\[hello\] game end: " 1 "the game ended once"
-for _ in $(seq 1 40); do pgrep -x war3.exe >/dev/null || break; sleep 0.5; done
-if pgrep -x war3.exe >/dev/null; then fail "the game exited"; else pass "the game exited"; fi
+for _ in $(seq 1 40); do env_running || break; sleep 0.5; done
+if env_running; then fail "the game exited"; else pass "the game exited"; fi
 check "Exiting: disabled and unloaded [0-9]+ mods?" "mods shut down at exit"
 if awk '/\[hello\] game end/ { e = NR } /\[hello\] disabled/ && e { d = NR } /\[hello\] unloading/ && d { u = NR } END { exit !(e && d && u) }' "$LOG"; then
     pass "at exit: game end, then tome_mod_disable, then tome_mod_unload"
@@ -830,7 +841,7 @@ touch "$HOME_DIR/tome/safe"
 # The Mods button, then row 0's toggle (hello) once the panel has lowered.
 SAVED_MAP_ARG=("${MAP_ARG[@]}")
 MAP_ARG=(-tomesafe)
-TOME_DEBUG_CLICKS="0.874,0.84@4000;0.447,0.227@6500" launch
+TOME_DEBUG_CLICKS="wait:Main menu set up@0;0.874,0.84@4000;0.447,0.227@6500" launch
 MAP_ARG=("${SAVED_MAP_ARG[@]}")
 check "Safe mode \(-tomesafe, tome/safe\): no mod starts this session" "-tomesafe and tome/safe turn safe mode on" 30
 check "Assets at startup: no mod assets" "no mod assets mounted"

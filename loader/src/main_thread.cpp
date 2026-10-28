@@ -14,6 +14,8 @@ WNDPROC g_original_proc = nullptr;
 bool g_unicode = false;
 UINT g_message = 0;
 KeyHook g_key_hook = nullptr;
+ActivateHook g_activate_hook = nullptr;
+DestroyHook g_destroy_hook = nullptr;
 
 SRWLOCK g_lock = SRWLOCK_INIT;
 std::deque<std::function<void()>> g_queue;
@@ -37,6 +39,8 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) 
         return 0;
     }
     if ((msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) && g_key_hook && g_key_hook(msg, wparam, lparam)) return 0;
+    if (msg == WM_ACTIVATEAPP && g_activate_hook) g_activate_hook(wparam != 0);
+    if (msg == WM_DESTROY && g_destroy_hook) g_destroy_hook();
     return g_unicode ? CallWindowProcW(g_original_proc, hwnd, msg, wparam, lparam)
                      : CallWindowProcA(g_original_proc, hwnd, msg, wparam, lparam);
 }
@@ -75,6 +79,14 @@ HWND window() {
 
 void set_key_hook(KeyHook hook) {
     g_key_hook = hook;
+}
+
+void set_activate_hook(ActivateHook hook) {
+    g_activate_hook = hook;
+}
+
+void set_destroy_hook(DestroyHook hook) {
+    g_destroy_hook = hook;
 }
 
 void post(std::function<void()> fn) {

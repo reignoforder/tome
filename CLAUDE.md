@@ -9,17 +9,22 @@ design document.
 ## Commands
 
 ```sh
-cmake -S . -B build -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-i686-mingw.cmake \
-      -DCMAKE_BUILD_TYPE=Release -DTOME_BUILD_DEV_TOOLS=ON
-cmake --build build --target deploy    # build and copy tome.mix into "WarCraft III/"
-cd build && ctest                        # unit tests (Wine)
-tools/e2e-test.sh                        # real game, 4 launches (~5 min); close the game first
-tools/game.sh start [VAR=val] / wait <regex> / shot <png> / stop / log
+make                                     # configure (once: Ninja, mingw toolchain, dev tools) and build
+make test                                # unit tests (ctest, Wine)
+make e2e                                 # real game, 6 launches (~5 min), off screen in Xvfb
+tools/game.sh start [VAR=val] / wait <regex> / shot <png> / stop / log / dir
 tools/fuzz.sh [seconds] [target...]      # libFuzzer + ASan/UBSan on the core parsers (host clang, build-fuzz/)
-HEADLESS=1 tools/e2e-test.sh             # either script, off screen in gamescope (tools/headless.sh)
 tools/gen-rust-bindings.sh               # after changing tome.h: regenerate sdk/rust/tome-sys (bindgen)
-cmake --build build --target sdk-dist    # build/tome-sdk-<version>.zip, the SDK for mod makers
+make sdk                                 # build/tome-sdk-<version>.zip, the SDK for mod makers
+make container-test / container-e2e      # the same in a podman/docker image (tools/container/)
+make deploy                              # copy tome.mix into GAME_DIR: only when asked to
 ```
+
+The game for testing (`tools/test-env.sh`) runs from a folder of links to
+`GAME_DIR` (default `./WarCraft III`, only read) in a Wine prefix of its own
+(`build/test-env/wine`: 800x600, profile Tome). `HEADLESS=1` (the e2e
+default) puts it in its own Xvfb; `tools/game.sh` shows it on screen unless
+`HEADLESS=1`. Its folder is `build/test-env/game/` (`tools/game.sh dir`).
 
 ## Rules
 
@@ -52,9 +57,10 @@ cmake --build build --target sdk-dist    # build/tome-sdk-<version>.zip, the SDK
 ## Pitfalls (each one cost time already)
 
 - **Never kill the game with `pkill -f`/`pgrep -f` and a pattern.** It also
-  matches your own shell. Use `pkill -x war3.exe` (or `tools/game.sh stop`).
-  SIGTERM sometimes isn't enough, so follow up with `-9`.
-- **Only one game instance at a time.** A second one can't open `tome.log`.
+  matches your own shell. Use `tools/game.sh stop`, which ends only the
+  test prefix's programs (`wineserver -k`), never the user's own game.
+- **One test game at a time** (the e2e test and `tools/game.sh` share the
+  test prefix). The user's own game may run alongside, but takes the LAN port.
 - **Tests must use `TOME_HOME`** (a temp folder), never the real `tome/mods/` folder.
 - **New mods with a DLL don't run until allowed** (approval, `core/mod_state.*`).
   A test that installs one sets `TOME_DEBUG_APPROVE=<ids>` (or `*`); for
@@ -70,13 +76,16 @@ cmake --build build --target sdk-dist    # build/tome-sdk-<version>.zip, the SDK
   game keeps the map open, `put` fails, and the old map loads as if
   nothing changed.
 - **UI opened from code** only shows once the menu has finished appearing (about 3 s after Setup).
-- **Screenshots:** `spectacle -b -n -f -o file.png` (KDE); `tools/game.sh shot`
-  uses gamescopectl instead when the game runs with `HEADLESS=1`. Simulate clicks with
-  `TOME_DEBUG_CLICKS="x,y@ms;..."` (fractions of the window).
+- **Screenshots:** `tools/game.sh shot file.png` (ImageMagick `import` of the
+  game's display). Simulate clicks with `TOME_DEBUG_CLICKS="x,y@ms;..."`
+  (fractions of the window). Start each part with `wait:<log text>@0`
+  (`Main menu set up`, `Screen: <name>`, `Game started: `): later times
+  count from the wait, so slow software rendering doesn't break the script.
 - **Check `ret N` before mapping a function's `sig`.** A hook pops what
   the signature says; one stack argument too few crashed the game.
 - **Keys in tests:** `TOME_DEBUG_CLICKS` items `key:Ctrl+J@ms` press a key
-  through `keybd_event` (real modifier state); the window needs the focus.
+  through `keybd_event` (real modifier state); the window needs the focus,
+  which it always has in Xvfb (`HEADLESS=1`), not always on screen.
 - **Mod callbacks run under the mod manager's lock** (enable, first load).
   API functions mods call there must not take it again (SRW locks aren't
   reentrant): settings have their own lock, keybinds get pushed their list.
