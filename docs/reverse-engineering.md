@@ -372,6 +372,11 @@ Wine (the separate `fps-unlock` mod is built on it):
 | maxfps | option `0x16` | Video\maxfps in the registry, default 200, also registered by name by `0x37AA70` with the callback `0x379E20` (store, then apply). Its case (`0x040607`) calls Scheduler::SetPeriod((int)(1000.0 / maxfps), 0). maxfps 60 gave 64.5 fps, 200 gave ~218, 1000 gave ~430 (vsync off, menu). |
 | GetTickCount | import slot `0xA7C148` | 118 calls through the thunk `0x092A10`, a few `call [slot]`. Windows advances it every 15.6 ms; frames can't come faster than that (Wine: 1 ms). Rounding it down to 16 ms steps under Wine dropped maxfps 200 to 62.5 fps, the classic ~64 cap. The net clock `0x092A20` uses QueryPerformanceCounter instead when `.data 0xD3D5C4` is set, else GetTickCount; the net client subtracts readings unsigned and caps its bank at 4000 ms (`0x32D812`), so a clock that steps back would run the game up to 4 s ahead. |
 | CGxDeviceD3d::BuildPresentParams | `0x13FED0` | `void __thiscall(D3DPRESENT_PARAMETERS*)`, `ret 4`. Callers: CreateDevice (`0x13FC20`, IDirect3D9 vtable `+0x40`) and the reset after a lost device (`0x1404DD`, IDirect3DDevice9 `+0x40`). PresentationInterval (`+0x34`) is always 0 (DEFAULT): vsync on. OpenGL never calls `wglSwapIntervalEXT`, so the driver decides. |
+| CGxDeviceD3d::CanDraw | `0x140410` | `bool __thiscall(device)`, plain `ret`. Device vtable `+0x3C`, before every frame. TestCooperativeLevel; on `D3DERR_DEVICENOTRESET` (or a resize pending at `+0x730`) ReleaseForReset(0), BuildPresentParams, `IDirect3DDevice9::Reset` (`+0x40`), RestoreState. False while the device is lost. |
+| CGxDeviceD3d::ReleaseForReset | `0x13FDC0` | `void __thiscall(device, int release_textures)`, `ret 4`. Clears the state caches (render states `+0x748`, 256 hashed `{kind, state, value}` slots of 12 bytes, which `0x142C60` checks before every SetRenderState; texture stages `+0x1348`/`+0x1358`; lights `+0x1B58`, 8 × `0x74`) and releases the surfaces at `+0x6C0..+0x6D8`; with 1 also the textures (`0x143B00`). Called with 0 before Reset (`0x1404D2`), with 1 by the teardown (`0x13FD2B`). The d3d-reset-lights patch hooks it. |
+| CGxDeviceD3d::RestoreState | `0x142E50` | `void __thiscall(device)`, plain `ret`. After CreateDevice (`0x13FC9A`) and Reset (`0x1404FA`): z, lighting and fog states, the 8 lights from `+0x3C0` (enabled 0–4 on the main menu), the cull mode, then SetGamma(gamma, force 1). |
+| CGxDeviceD3d::SetGamma | `0x13F870` | `void __thiscall(device, float exponent, int force)`, `ret 8`. Vtable `+0x1C`. Returns early if the exponent equals the cached one (`CGxDevice.gamma`, `+0xD8`) and force is 0. In fullscreen (`+0x9C` nonzero) with `D3DCAPS2_FULLSCREENGAMMA` (`0x20000` in `+0x594`) sends `SetGammaRamp` with `(i/255)^(exponent + rand()/32767/1000) × 65535`. The Gamma option g gives exponent `(100 − g)/100 + 0.2` (Options::Apply, `0x04057F`, through `0x136B80`). |
+| CGxDeviceD3d::WndProc | `0x140210` | `LRESULT __stdcall(hwnd, msg, wparam, lparam)`. Tracks focus in `.data 0xD54400`; on WM_SYSKEYUP Tab while focused (leaving with Alt+Tab) it sets a neutral ramp (SetGamma(1.0, 1)) for the desktop and puts the user's exponent back in the cache unapplied; RestoreState applies it after the Reset on return. |
 | CGxDeviceOpenGl::CanDraw | `0x1442F0` | `bool __thiscall(device)`, plain `ret`. Device vtable `+0x3C`, called before every frame (`0x1365C0`). True if the viewport (`+0xBE4..+0xBF0`) has an area: false while minimized. Nothing recovers on restore (Direct3D's `0x140410` resets the device). |
 | CGxDeviceOpenGl::ReleaseTextures | `0x13ED30` | `void __thiscall(device)`, plain `ret`. glDeleteTextures for the `+0x540` count / `+0x544` array of textures, clears each name (`+0x30`) and marks it dirty (`0x13A1E0`); the upload (vtable `+0x00`, `0x13EDB0`) makes new ones. |
 | CGxDeviceOpenGl::DestroyContext | `0x13AFA0` | `void __thiscall(device)`, plain `ret`. ReleaseTextures, wglMakeCurrent(0), wglDeleteContext (`+0x580`), release the DC (`+0x57C`). |
@@ -380,8 +385,34 @@ Wine (the separate `fps-unlock` mod is built on it):
 OpenGL fullscreen under Wine: minimizing makes Wine drop the driver's context
 (`wglMakeCurrent(NULL)` it issues itself) and restoring makes a new, empty one
 for the same HGLRC (`+wgl`: `win32u_wgl_context_reset`, `egldrv_context_create`),
-so every texture and all GL state are gone. fps-unlock runs DestroyContext +
-CreateContext on the first CanDraw true after a false.
+so every texture and all GL state are gone. The game also releases its
+textures and makes a new context of its own on the way back (the HGLRC
+changes, `0x21001` → `0x31001` in one run); textures uploaded before Wine's
+reset are lost but keep names the new context hands out again, so
+`glIsTexture` on them can't detect it. The gl-context-restore patch (and
+fps-unlock's first fix) runs DestroyContext + CreateContext on the first
+CanDraw true after a false, if the device was fullscreen meanwhile
+(`CGxDevice.fullscreen`, `+0x9C`: nonzero in fullscreen for both renderers;
+`0x138990` returns it negated, and the gamma setters `0x13F870` and
+`0x13AD60` send a ramp only when it's set). DestroyContext skips what's
+already gone (`+0x580`, `+0x57C` are 0), so it's safe after a failed
+CreateContext, which calls it itself; the patch retries the pair. The device's textures: count at `+0x540`, array
+at `+0x544`, each with its GL name at `+0x30` (`CGxDeviceOpenGl.texture_count`,
+`.textures`, `CGxOglTexture.gl_name`).
+
+Direct3D fullscreen under Wine: minimizing loses the device, and the reset on
+restore runs into a wined3d bug that leaks the active-light slots of the
+lights that were on (`wined3d_stateblock_reset` frees the lights but not its
+`light_state.lights[]` table). The game re-enables lights 0–4 after Reset and
+wined3d refuses the ones past the free slots ("Too many concurrently active
+lights" with `warn+d3d`), so the scene gets darker on each Alt+Tab. The game's
+D3D9 calls in a frame are the same before and after (`+d3d9` trace), and the
+gamma ramp is sent again by RestoreState. Tome's d3d-reset-lights patch
+disables the 8 lights before Reset (only on ReleaseForReset(0), not the
+teardown's ReleaseForReset(1)) (`docs/known-bugs.md`, "Under Wine"),
+through the `IDirect3DDevice9*` at `+0x584` (`CGxDeviceD3d.d3d_device`, 0
+before CreateDevice and after teardown). The device's window is at `+0x574`
+(`CGxDeviceD3d.window`: CanDraw's GetClientRect, DestroyWindow in `0x1401E0`).
 
 The renderer is picked once at startup (`0x044ED0`): Direct3D, unless the
 registry's `HKCU\Software\Blizzard Entertainment\Warcraft III\Gfx OpenGL`

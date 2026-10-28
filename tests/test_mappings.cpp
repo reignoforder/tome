@@ -201,6 +201,10 @@ TEST(mappings_embedded_files_are_complete) {
             CHECK_EQ(bound.play.spell_target_x_slot, 243u * 4);
             CHECK_EQ(bound.play.player_state_size, 0x10u);
             CHECK(bound.blp.open != 0);
+            CHECK_EQ(bound.d3d.device_offset, 0x584u);
+            CHECK_EQ(bound.gl.create_context, 0x0013af40u);
+            CHECK_EQ(bound.gl.destroy_context, 0x0013afa0u);
+            CHECK_EQ(bound.gl.fullscreen_offset, 0x9cu);
         }
     }
     CHECK(found_127b);

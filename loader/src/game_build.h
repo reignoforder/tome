@@ -23,4 +23,7 @@ struct GameBuild {
 // against the known builds. Returns false only if the module can't be read.
 bool identify_game_build(HMODULE game, GameBuild& out);
 
+// True when the game runs under Wine (ntdll exports wine_get_version).
+bool running_on_wine();
+
 } // namespace tome

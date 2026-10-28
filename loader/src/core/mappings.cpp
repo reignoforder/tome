@@ -533,6 +533,14 @@ bool bind_build(const mappings::Build& build, BuildMappings& out, std::vector<st
     bind_optional("CBLPFile.buffer", Kind::Offset, blp.buffer_offset);
     bind_optional("CBLPFile.size", Kind::Offset, blp.size_offset);
     bind_optional("CBLPFile.header_copy", Kind::Data, blp.header_copy);
+
+    auto& d3d = out.d3d;  // d3d-reset-lights' symbols (patches/d3d_reset_lights.cpp)
+    bind_optional("CGxDeviceD3d.d3d_device", Kind::Offset, d3d.device_offset);
+
+    auto& gl = out.gl;  // gl-context-restore's symbols (patches/gl_context_restore.cpp)
+    bind_optional("CGxDeviceOpenGl::DestroyContext", Kind::Function, gl.destroy_context);
+    bind_optional("CGxDeviceOpenGl::CreateContext", Kind::Function, gl.create_context);
+    bind_optional("CGxDevice.fullscreen", Kind::Offset, gl.fullscreen_offset);
     // The handshake writes the names into the action and reads the lobby's
     // text; each must leave room for its 0x100 bytes. (Only if they're all
     // mapped: a missing one is reported above.)

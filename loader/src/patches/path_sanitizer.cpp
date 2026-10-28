@@ -250,6 +250,7 @@ extern const Patch kPathSanitizer = {
     nullptr,    // any build that maps the symbols below
     kSymbols,   // symbols it needs mapped
     nullptr,    // reserves nothing: mods may still hook BindNative (see file header)
+    nullptr,    // needed everywhere
     install_path_sanitizer,
 };
 

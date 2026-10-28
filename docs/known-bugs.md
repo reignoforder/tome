@@ -270,6 +270,45 @@ Nothing reliable specific to 1.27b turned up. Client-side maphacks
 ship their own anti-hack launchers ([iCCup](https://www.winehq.org/pipermail/wine-bugs/2011-May/275877.html)).
 Most "1.27b hack" search results were spam or malware downloads.
 
+## Under Wine
+
+Fullscreen Alt+Tab, found while running the game under Wine 11 (both
+renderers lose the window's device or context when it's minimized).
+Both are fixed by built-in patches:
+
+- **OpenGL: textures gone.** Models, frames and text draw white after
+  coming back. On restore the game releases its textures and makes a new
+  context itself, and Wine also replaces the driver context behind an HGLRC
+  (`win32u_wgl_context_reset`, `+wgl`). Textures uploaded in between are
+  lost while the game keeps their names, and the new context hands the same
+  small names out again, so `glIsTexture` still says yes (measured on the
+  main menu: 29 of 118 textures came back). Reported as
+  [Wine bug 13547](https://www.winehq.org/pipermail/wine-bugs/2009-June/182765.html)
+  (2008). **Fixed in Tome (gl-context-restore, built-in patch, only under
+  Wine):** on the first frame `CGxDeviceOpenGl::CanDraw` is true again after
+  being false (minimized) in fullscreen, it runs the game's own
+  `DestroyContext` and `CreateContext`, so every texture uploads again. If
+  CreateContext fails, it's tried again on each frame until it works. Checked on the main menu,
+  with no mods: complete after three Alt+Tabs.
+- **Direct3D: the scene gets darker** after each Alt+Tab. The UI stays the
+  same; on the main menu the water and the ice lose their blue light
+  first, then the rest of the lighting. The cause isn't gamma: after the
+  device Reset, `CGxDeviceD3d::RestoreState` sends the ramp again, and the
+  game's D3D9 calls in a frame are the same before and after (`+d3d9`
+  trace). It's wined3d: `wined3d_stateblock_reset` frees every light but
+  doesn't clear its table of active lights (8 slots, outside the
+  `stateblock_state` it clears), so the lights that were on keep their
+  slots. When the game enables its lights again, wined3d refuses the ones
+  that don't fit (`warn+d3d`: "Too many concurrently active lights"). With 5
+  lights on, 2 are lost on the first reset, and more on each one after.
+  **Fixed in Tome (d3d-reset-lights, built-in patch, only under Wine):** a
+  BEFORE handler on `CGxDeviceD3d::ReleaseForReset`, which the game calls
+  right before Reset, disables lights 0–7, which frees their slots;
+  RestoreState enables them again. Not installed on Windows, where Reset
+  clears the lights anyway.
+  Checked on the main menu: no warning and the same colours after four
+  Alt+Tabs. Not reported to Wine yet as far as we know.
+
 ## What Tome could do
 
 1. **Map script guard:** before a map's script runs, refuse or warn on

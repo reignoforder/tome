@@ -64,4 +64,9 @@ bool identify_game_build(HMODULE game, GameBuild& out) {
     return true;
 }
 
+bool running_on_wine() {
+    HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+    return ntdll && GetProcAddress(ntdll, "wine_get_version");
+}
+
 } // namespace tome

@@ -10,11 +10,15 @@ namespace tome::patches {
 extern const Patch kMemhackGuard;
 extern const Patch kPathSanitizer;
 extern const Patch kBlpGuard;
+extern const Patch kD3dResetLights;
+extern const Patch kGlContextRestore;
 
 const Patch* const kAll[] = {
     &kMemhackGuard,
     &kPathSanitizer,
     &kBlpGuard,
+    &kD3dResetLights,
+    &kGlContextRestore,
 };
 
 namespace {
@@ -61,6 +65,11 @@ bool install(uintptr_t base, const BuildMappings& build, std::string& report) {
             continue;
         }
         std::string r;
+        if (p->needed && !p->needed(r)) {
+            note(std::string(p->name) + " skipped (" + r + ")");
+            ++skipped;
+            continue;
+        }
         if (p->install(base, build, r)) {
             // Lock the patch's functions against mod hooks, now that it's live.
             if (p->reserve) {

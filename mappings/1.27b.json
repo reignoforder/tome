@@ -864,10 +864,51 @@
       "bytes": "55 8b ec 83 ec 14 a1 ?? ?? ?? ?? 33 c5 89 45 fc 56 8b 75 08 57 6a",
       "doc": "Fills the D3DPRESENT_PARAMETERS for CreateDevice (call at 0x13FC2E) and for Reset after a lost device (0x1404DD). PresentationInterval (+0x34) is always 0, D3DPRESENT_INTERVAL_DEFAULT: vsync on. ret 4."
     },
+    "CGxDeviceD3d::CanDraw": {
+      "kind": "function", "rva": "0x00140410", "conv": "thiscall", "sig": "bool(CGxDeviceD3d* this)",
+      "bytes": "55 8b ec 83 ec 4c a1 ?? ?? ?? ?? 33 c5 89 45 fc 56 8b f1 57",
+      "doc": "Device vtable +0x3C, called before every frame (0x1365C0). TestCooperativeLevel; on D3DERR_DEVICENOTRESET (or a pending resize, +0x730) releases resources (0x13FDC0), BuildPresentParams, IDirect3DDevice9::Reset, then RestoreState. False while the device is lost or the window has no area. Plain ret."
+    },
+    "CGxDeviceD3d::RestoreState": {
+      "kind": "function", "rva": "0x00142e50", "conv": "thiscall", "sig": "void(CGxDeviceD3d* this)",
+      "bytes": "55 8b ec 83 e4 f8 83 ec 7c a1 ?? ?? ?? ?? 33 c4 89 44 24 78",
+      "doc": "Sets the device's render states, lights and so on again: called after CreateDevice (0x13FC9A) and after a successful Reset (0x1404FA). Ends with SetGamma(gamma, force 1), so the ramp is sent again after every Reset. Plain ret."
+    },
+    "CGxDeviceD3d::SetGamma": {
+      "kind": "function", "rva": "0x0013f870", "conv": "thiscall", "sig": "void(CGxDeviceD3d* this, float exponent, int force)",
+      "bytes": "55 8b ec 81 ec 08 06 00 00 a1 ?? ?? ?? ?? 33 c5 89 45 fc f3",
+      "doc": "Device vtable +0x1C. Returns at once if exponent is within 2.4e-7 of the cached one (CGxDevice.gamma) and force is 0; else caches it and, in fullscreen (+0x9C) with D3DCAPS2_FULLSCREENGAMMA (0x20000 in +0x594), sends IDirect3DDevice9::SetGammaRamp(0, 0, ramp) with ramp[i] = (i/255)^(exponent + rand()/32767/1000) * 65535. ret 8."
+    },
+    "CGxDeviceD3d::WndProc": {
+      "kind": "function", "rva": "0x00140210", "conv": "stdcall", "sig": "intptr_t(void* hwnd, uint32_t msg, uintptr_t wparam, intptr_t lparam)",
+      "bytes": "55 8b ec 51 56 6a eb ff 75 08 ff 15 ?? ?? ?? ??",
+      "doc": "The Direct3D window's procedure (device from GWL_USERDATA). Tracks WM_SETFOCUS/WM_KILLFOCUS in .data 0xD54400; on WM_SYSKEYUP with VK_TAB while focused (Alt+Tab away) it calls SetGamma(1.0, 1) to give the desktop a neutral ramp, writes the user's exponent back into CGxDevice.gamma without applying it, and calls the callback at +0x570 with 1. RestoreState applies it again after the device Reset that follows. ret 0x10."
+    },
+    "CGxDevice.gamma": {
+      "kind": "offset", "value": "0xd8",
+      "doc": "float: the gamma ramp exponent last passed to SetGamma (1.0 from the constructor). The Gamma option g (0-100) gives (100 - g) / 100 + 0.2."
+    },
+    "CGxDevice.fullscreen": {
+      "kind": "offset", "value": "0x9c",
+      "doc": "int: nonzero in fullscreen, 0 in a window (both renderers). 0x138990 returns it negated; the gamma setters (D3D 0x13F870, OpenGL 0x13AD60) send a ramp only when it's set. gl-context-restore reads it."
+    },
+    "CGxDeviceD3d.window": {
+      "kind": "offset", "value": "0x574",
+      "doc": "HWND: the device's window (CanDraw's GetClientRect, DestroyWindow in 0x1401E0)."
+    },
+    "CGxDeviceD3d.d3d_device": {
+      "kind": "offset", "value": "0x584",
+      "doc": "IDirect3DDevice9*: the device (0 before CreateDevice and after teardown)."
+    },
+    "CGxDeviceD3d::ReleaseForReset": {
+      "kind": "function", "rva": "0x0013fdc0", "conv": "thiscall", "sig": "void(CGxDeviceD3d* this, int release_textures)",
+      "bytes": "55 8b ec 81 ec 84 00 00 00 8b 55 fc 53 8b d9 b9 00 01 00 00",
+      "doc": "Clears the device's state caches (render states +0x748, 256 x 12 bytes; texture stages +0x1348/+0x1358; lights +0x1B58, 8 x 0x74) and releases the 7 surfaces at +0x6C0..+0x6D8; with release_textures != 0 also the textures (0x143B00). Called with 0 before IDirect3DDevice9::Reset (0x1404D2) and with 1 by the teardown (0x13FD2B). The d3d-reset-lights patch hooks it (BEFORE). ret 4."
+    },
     "CGxDeviceOpenGl::CanDraw": {
       "kind": "function", "rva": "0x001442f0", "conv": "thiscall", "sig": "bool(CGxDeviceOpenGl* this)",
       "bytes": "f3 0f 10 89 f0 0b 00 00 33 c0 f3 0f 10 81 ec 0b",
-      "doc": "Device vtable +0x3C, called by 0x1365C0 before every frame: true if the viewport (+0xBE4..+0xBF0) has an area. False while minimized. Unlike the Direct3D one (0x140410) it never recovers anything. Plain ret."
+      "doc": "Device vtable +0x3C, called by 0x1365C0 before every frame: true if the viewport (+0xBE4..+0xBF0) has an area. False while minimized. Unlike the Direct3D one (0x140410) it never recovers anything. The gl-context-restore patch hooks it (AFTER). Plain ret."
     },
     "CGxDeviceOpenGl::ReleaseTextures": {
       "kind": "function", "rva": "0x0013ed30", "conv": "thiscall", "sig": "void(CGxDeviceOpenGl* this)",
@@ -883,6 +924,18 @@
       "kind": "function", "rva": "0x0013af40", "conv": "thiscall", "sig": "bool(CGxDeviceOpenGl* this)",
       "bytes": "56 8b f1 ff b6 78 05 00 00 ff 15 ?? ?? ?? ?? 89",
       "doc": "Makes a GL context for the window at +0x578 (GetDC, wglCreateContext in 0x13F5C0), makes it current, queries the driver (0x13F2E0) and sets up the device's GL state (0x13DCC0). Returns 0 and destroys it on failure. Plain ret."
+    },
+    "CGxDeviceOpenGl.texture_count": {
+      "kind": "offset", "value": "0x540",
+      "doc": "uint32: how many textures the device has (ReleaseTextures walks them)."
+    },
+    "CGxDeviceOpenGl.textures": {
+      "kind": "offset", "value": "0x544",
+      "doc": "CGxOglTexture**: the device's textures; entries may be 0."
+    },
+    "CGxOglTexture.gl_name": {
+      "kind": "offset", "value": "0x30",
+      "doc": "GLuint: the texture's GL name, 0 until it's uploaded (ReleaseTextures deletes it and sets 0)."
     },
     "CBLPFile::Open": {
       "kind": "function", "rva": "0x008e9790", "conv": "thiscall",

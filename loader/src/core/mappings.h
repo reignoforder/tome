@@ -247,6 +247,20 @@ struct BuildMappings {
         uint32_t size_offset;   // CBLPFile.size
         uint32_t header_copy;   // CBLPFile.header_copy (patched by blp-guard)
     } blp;
+
+    // Optional: 0 when the build doesn't map them (d3d-reset-lights is then
+    // skipped). The hooked ReleaseForReset is found by name, not stored here.
+    struct {
+        uint32_t device_offset;  // CGxDeviceD3d.d3d_device
+    } d3d;
+
+    // Optional: 0 when the build doesn't map them (gl-context-restore is then
+    // skipped). The hooked CanDraw is found by name, not stored here.
+    struct {
+        uint32_t destroy_context;    // CGxDeviceOpenGl::DestroyContext
+        uint32_t create_context;     // CGxDeviceOpenGl::CreateContext
+        uint32_t fullscreen_offset;  // CGxDevice.fullscreen
+    } gl;
 };
 
 // The game's JASS event functions that events.cpp hooks by name (its

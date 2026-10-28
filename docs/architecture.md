@@ -50,7 +50,9 @@ loader/
     patches.*             built-in patches (always-on fixes); the registry and version gating
     patches/              one file per patch (memhack_guard: the JASS typecast fix;
                           path_sanitizer: file-writing native paths;
-                          blp_guard: malformed BLP textures)
+                          blp_guard: malformed BLP textures;
+                          d3d_reset_lights: Direct3D lights across a reset;
+                          gl_context_restore: the OpenGL context after Alt+Tab)
     natives.*             native registry, thunks, InitNatives hook, JASS strings and code
     hooks.*               inline hooks on mapped functions: patch, entry stub, dispatcher
     mod_manager.*         discovery, state.json, lifecycle, hot reload, crashed mods, safe mode
@@ -655,7 +657,9 @@ reason to make a fix a patch rather than ship it as a mod.
 
 - **A patch** is a `patches::Patch`: a name, a one-line summary, an optional
   `builds` allowlist (build names from `mappings/<build>.json`), the mapping
-  `symbols` it needs, and an `install(base, build, report)`. Each lives in its
+  `symbols` it needs, an optional `needed(report)` check of where the game
+  runs (the Wine-only fixes; a patch that isn't needed is counted and logged
+  as skipped, not applied), and an `install(base, build, report)`. Each lives in its
   own file under `patches/` and is listed in `patches.cpp`'s `kAll` table
   (an `extern const Patch`, so the registry references it across translation
   units without static-initializer ordering). A patch installs through the
@@ -735,6 +739,26 @@ reason to make a fix a patch rather than ship it as a mod.
   (`patch_bytes` refuses a mismatch): on a build that doesn't map the site or
   whose bytes differ it's skipped, logged as "unclamped", and the AFTER guard
   alone applies. Covers maps and mods alike.
+- **d3d-reset-lights** (`patches/d3d_reset_lights.cpp`, `docs/known-bugs.md`,
+  "Under Wine"): works around a wined3d bug that leaks the active-light slots
+  of every enabled light on `IDirect3DDevice9::Reset`, so the lights the game
+  enables again after Alt+Tab in Direct3D fullscreen are refused and the
+  scene gets darker each time. A BEFORE handler on
+  `CGxDeviceD3d::ReleaseForReset` calls `LightEnable(i, FALSE)` for lights
+  0–7 on the device at `CGxDeviceD3d.d3d_device` when it's called with 0
+  (right before Reset; the teardown's call with 1 is left alone), which frees
+  the slots; `RestoreState` enables them again. Skipped outside Wine
+  (`needed`). Reserves nothing.
+- **gl-context-restore** (`patches/gl_context_restore.cpp`,
+  `docs/known-bugs.md`, "Under Wine"): with the OpenGL renderer in
+  fullscreen under Wine, coming back from Alt+Tab leaves most textures
+  white (Wine replaces the driver context behind the game's HGLRC). An AFTER
+  handler on `CGxDeviceOpenGl::CanDraw` runs the game's own
+  `DestroyContext` and `CreateContext` on the first frame CanDraw is true
+  after being false while fullscreen (`CGxDevice.fullscreen`), so everything
+  uploads again; a CreateContext that fails is tried again on the next frame.
+  The decision is portable (`core/context_restore.*`, unit-tested). Skipped
+  outside Wine (`needed`: `wine_get_version` in ntdll). Reserves nothing.
 - **path-sanitizer** (`patches/path_sanitizer.cpp`, `docs/known-bugs.md`):
   refuses path traversal in every JASS native that takes a file path (38;
   `docs/known-bugs.md` lists them). The writes (`PreloadGenEnd`,

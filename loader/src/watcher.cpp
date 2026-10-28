@@ -1,6 +1,7 @@
 #include "watcher.h"
 
 #include "core/text.h"
+#include "game_build.h"
 #include "log.h"
 
 #include <windows.h>
@@ -20,11 +21,6 @@ constexpr DWORD kPollMs = 1500;
 // A poll lists every file under mods/; with large asset folders that takes a
 // while, so the next one waits at least this many times as long.
 constexpr DWORD kPollCostFactor = 50;
-
-bool running_on_wine() {
-    HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
-    return ntdll && GetProcAddress(ntdll, "wine_get_version");
-}
 
 struct Watch {
     std::wstring dir;

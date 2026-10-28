@@ -8,6 +8,7 @@ add_library(tome_core STATIC
     src/core/blp.cpp
     src/core/chat.cpp
     src/core/command_line.cpp
+    src/core/context_restore.cpp
     src/core/debug_script.cpp
     src/core/frames.cpp
     src/core/game_lock.cpp
@@ -65,6 +66,8 @@ add_library(tome_loader SHARED
     src/patch.cpp
     src/patches.cpp
     src/patches/blp_guard.cpp
+    src/patches/d3d_reset_lights.cpp
+    src/patches/gl_context_restore.cpp
     src/patches/memhack_guard.cpp
     src/patches/path_sanitizer.cpp
     src/paths.cpp

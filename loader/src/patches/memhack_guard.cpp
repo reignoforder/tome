@@ -156,6 +156,7 @@ extern const Patch kMemhackGuard = {
     nullptr,   // any build that maps the symbols below
     kSymbols,  // symbols it needs mapped
     kSymbols,  // and reserves: mods can't hook either compiler function
+    nullptr,    // needed everywhere
     install_memhack_guard,
 };
 

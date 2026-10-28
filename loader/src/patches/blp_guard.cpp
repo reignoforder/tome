@@ -171,6 +171,7 @@ extern const Patch kBlpGuard = {
     nullptr,    // any build that maps the symbols below
     kSymbols,
     kReserve,   // a mod mustn't be able to drop the guard (file header)
+    nullptr,    // needed everywhere
     install_blp_guard,
 };
 

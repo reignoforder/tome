@@ -34,6 +34,10 @@ struct Patch {
     // handler that interferes with the patch or try to drop it (hooks::reserve).
     // Usually the functions the patch hooks; null to reserve nothing.
     const char* const* reserve;
+    // Whether the patch is needed where the game runs (e.g. only under
+    // Wine), checked before `install`; null if always. Returns false, with
+    // the reason in `report`, to skip it: counted as skipped, not applied.
+    bool (*needed)(std::string& report);
     // Applies the patch; `base` is game.dll's load address. Returns false,
     // with a reason in `report`, if it couldn't be applied -- the game then
     // runs with this one patch absent, the others still in force.
