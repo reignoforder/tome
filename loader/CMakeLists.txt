@@ -21,6 +21,7 @@ add_library(tome_core STATIC
     src/core/metadata.cpp
     src/core/mod_menu_model.cpp
     src/core/mpq.cpp
+    src/core/path_guard.cpp
     src/core/pe.cpp
     src/core/popup.cpp
     src/core/resolver.cpp
@@ -59,6 +60,7 @@ add_library(tome_loader SHARED
     src/patch.cpp
     src/patches.cpp
     src/patches/memhack_guard.cpp
+    src/patches/path_sanitizer.cpp
     src/paths.cpp
     src/popups.cpp
     src/restart.cpp

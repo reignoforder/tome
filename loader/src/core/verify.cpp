@@ -1,5 +1,7 @@
 #include "verify.h"
 
+#include "text.h"
+
 #include <cstdio>
 #include <cstring>
 
@@ -68,15 +70,6 @@ std::string read_cstr(const uint8_t* image, size_t size, uint32_t offset) {
     return out;
 }
 
-bool same_ignoring_case(const std::string& a, const std::string& b) {
-    if (a.size() != b.size()) return false;
-    for (size_t i = 0; i < a.size(); ++i) {
-        auto lower = [](char c) { return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c; };
-        if (lower(a[i]) != lower(b[i])) return false;
-    }
-    return true;
-}
-
 // Finds the slot in the image's import directory and checks that it imports
 // sym.target ("module!function"). The names come from the import lookup
 // table, which the loader leaves alone (it overwrites the slots themselves).
@@ -103,7 +96,7 @@ void check_import(const Symbol& sym, const uint8_t* image, size_t size, std::vec
             const std::string actual_module = read_cstr(image, size, name);
             const std::string actual = entry & 0x80000000u ? "#" + std::to_string(entry & 0xFFFF)
                                                            : read_cstr(image, size, entry + 2);
-            if (!same_ignoring_case(actual_module, module) || actual != function) {
+            if (!text::iequals(actual_module, module) || actual != function) {
                 errors.push_back(where(sym) + ": imports " + actual_module + "!" + actual + ", expected " +
                                  sym.target);
             }

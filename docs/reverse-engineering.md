@@ -96,6 +96,19 @@ from C with handle ids.
 Signature letters: `I` integer, `R` real, `B` boolean, `S` string, `C` code,
 `V` nothing, `H<type>;` handle (e.g. `(Hunit;R)V`).
 
+**Wrapping a built-in native without its address (path-sanitizer patch).**
+`InitNatives` binds every built-in through `BindNative(fn, name, signature)`
+(mapped) on each map load, pushing the native's address as an immediate `fn`.
+Hooking `BindNative` and rewriting the `fn` argument for a chosen `name` makes
+the engine bind a wrapper of ours instead — so the engine's real native is
+captured (and called) at runtime and never has to be located in the binary.
+`loader/src/patches/path_sanitizer.cpp` uses this to sanitize the path
+arguments of every native that takes a file path (all 38 are listed in
+`docs/known-bugs.md`; the writes among them are rooted in the game folder on
+1.27b): the wrapper reads each path (string arg = `RCString*`, Native ABI
+above) and skips the call for a traversing/absolute name. Those natives' addresses are therefore deliberately **not** mapped;
+only `BindNative` and `RCString::GetText` are needed.
+
 ### JASS compiler (Jass2), for the memhack guard
 
 The map script (`war3map.j`, textual JASS) is compiled at runtime by the

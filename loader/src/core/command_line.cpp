@@ -1,22 +1,8 @@
 #include "command_line.h"
 
+#include "text.h"
+
 namespace tome::command_line {
-namespace {
-
-wchar_t lower(wchar_t c) {
-    return c >= L'A' && c <= L'Z' ? static_cast<wchar_t>(c - L'A' + L'a') : c;
-}
-
-bool equals_ignoring_case(std::wstring_view a, std::wstring_view b) {
-    if (a.size() != b.size()) return false;
-    for (size_t i = 0; i < a.size(); ++i) {
-        if (lower(a[i]) != lower(b[i])) return false;
-    }
-    return true;
-}
-
-} // namespace
-
 std::vector<std::wstring> split(std::wstring_view line) {
     std::vector<std::wstring> args;
     size_t i = 0;
@@ -65,7 +51,7 @@ std::vector<std::wstring> split(std::wstring_view line) {
 bool has_flag(std::wstring_view command_line, std::wstring_view flag) {
     std::vector<std::wstring> args = split(command_line);
     for (size_t i = 1; i < args.size(); ++i) {
-        if (equals_ignoring_case(args[i], flag)) return true;
+        if (text::iequals(args[i], flag)) return true;
     }
     return false;
 }

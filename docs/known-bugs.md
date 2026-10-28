@@ -22,7 +22,7 @@ No exploit code or cheat tools are included.
 | Return bug | A function with two `return`s of different types casts any handle to an integer and back | **Fixed in 1.24** (hashtables replaced it). CVE-2009-4768: a crafted map could run arbitrary code on 1.24b and earlier | Official ([JASS Tools](https://jass.sourceforge.net/doc/retbug.shtml), [CVE](https://cve.circl.lu/cve/CVE-2009-4768)) |
 | Local/global name shadowing | A local declared with a global's name changes the global's type while the script is parsed, which brings typecasting back | Reported working on 1.26 and 1.27 | Forum ([Hive](https://www.hiveworkshop.com/threads/we-are-back-to-square-one-warcraft-iii-is-unsafe-again.276196/)) |
 | `I2C` and raw bytecode | With the typecast, an integer becomes `code`, which runs hand-built JASS VM bytecode. That reads and writes process memory ("memhack"), and maps that use it are called virus or ACE (arbitrary code execution) maps | **Unclear.** One post says "after patch 1.27b the exploit has been fixed, and it's no longer possible to write to memory". Another says writes were fixed in the 1.28 patches. Read-only access was reportedly kept on purpose. All of it was gone by 1.29 | Forum ([memory thread](https://www.hiveworkshop.com/threads/accessing-memory-from-the-script-its-time-of-the-revolution.279262/), [memory hack](https://www.hiveworkshop.com/threads/memory-hack.289508/page-7), [ACE note](https://www.hiveworkshop.com/threads/playing-maps-that-only-works-in-1-26-in-warcraft-1-28-5.355596), [detecting viruses](https://www.hiveworkshop.com/threads/memhack-how-to-detect-if-map-has-a-virus.351435/)) |
-| `PreloadGenEnd` file writes | Maps write files through the preload natives. Until 1.28.1 they go to the game folder, not the user data folder | Open (path changed in 1.28.1) | Official ([1.28.1](https://warcraft.wiki.gg/wiki/Warcraft_III/Patch_1.28.1)) |
+| `PreloadGenEnd` file writes | Maps write files through the preload natives (and `InitGameCache` and the save-game natives). Until 1.28.1 they go to the game folder, not the user data folder, so a traversing/absolute name writes anywhere | **Fix implemented** for every native that takes a file path, reads included (path sanitizer, see below); path changed in 1.28.1 | Official ([1.28.1](https://warcraft.wiki.gg/wiki/Warcraft_III/Patch_1.28.1)) |
 
 Memhack libraries built on this (RenderEdge Memory Hack, XGM MemoryHackAPI)
 target 1.26a ([RenderEdge](https://www.hiveworkshop.com/threads/renderedge-memory-hack.299926/),
@@ -98,6 +98,66 @@ detector reports them, that the guard restores the global, that each
 function's last statement (`return`, `set`) still uses the local, and that a
 later function sees the `unit` global.
 
+### Natives that take a file path (`PreloadGenEnd`, `InitGameCache`, saves, assets)
+
+`PreloadGenEnd(string filename)` writes the accumulated `Preload` buffer to a
+file, `InitGameCache(string campaignFile)` opens/creates a cache file, and
+`SaveGame`, `CopySaveGame`, `RenameSaveDirectory` and `RemoveSaveDirectory`
+write, move and delete saves and save folders (1.27b has no
+`CreateSaveDirectory`). On 1.27b the write is rooted in the **game folder**
+(Blizzard moved it to the user-data folder in 1.28.1), so a map-controlled
+name that traverses (`..\..\...\Startup\x.bat`), is absolute (`C:\...`), or
+is a UNC/rooted path turns "write a file" into "plant a file anywhere the
+process can write" — a persistence / code-execution primitive, not just a
+cheat. The natives that read a file by name complete that chain or leak
+through it: `Preloader` runs a file as script, `LoadGame` and `ChangeLevel`
+load a save or a map, `StartMeleeAI`/`StartCampaignAI` load an AI script,
+`SaveGameExists` probes for a file, and the model, texture, movie, music and
+sound natives open assets by path.
+
+**Fix implemented (path sanitizer, built-in patch)** for every native in
+1.27b's `common.j` that takes a file path: the six writes above, the reads
+above, `Preload`, `SetDayNightModels`, `SetSkyModel`, `SetIntroShotModel`,
+`PlayModelCinematic`, `PlayCinematic`, `SetAltMinimapIcon`,
+`CreateTrackable`, `QuestSetIconPath`, `MultiboardSetItemsIcon`,
+`MultiboardSetItemIcon`, `SetCinematicCamera`, `SetCineFilterTexture`,
+`CreateSound`, `CreateSoundFilenameWithLabel`, `SetMapMusic`, `PlayMusic`,
+`PlayMusicEx`, `PlayThematicMusic`, `PlayThematicMusicEx`,
+`GetSoundFileDuration`, `AddSpecialEffect`, `AddSpecialEffectLoc`,
+`AddSpecialEffectTarget`, `AddSpellEffectTarget` and `CreateImage` (38 in
+all). Other string arguments (sound labels, lightning codes, ubersplat and
+ability names, attach points) are keys into the game's tables, not paths.
+Tome's own `BlzLoadTOCFile` checks its path the same way, and also every FDF
+path the TOC lists (`path_guard::toc_is_unsafe`), since the game loads those.
+
+`loader/src/patches/path_sanitizer.cpp` (always on; see `architecture.md`,
+"Patches") hooks the mapped `BindNative(fn, name, signature)` — called for
+every built-in native on each map load — and, when the engine binds one of
+these, remembers the engine's real `fn` and substitutes a sanitizing wrapper
+as the bound pointer. No native address is hardcoded: the patch keys off the
+native *name* at bind time, so any build that maps `BindNative` is covered.
+Each wrapper has its native's `__cdecl` ABI (one 32-bit word per parameter,
+the string argument an `RCString*` per `docs/reverse-engineering.md` "Native
+ABI"), reads every path argument, and, if `tome::path_guard::is_unsafe`
+rejects one, skips the call and returns 0 — nothing, `false`, 0 or a null
+handle. The e2e test checks that the cache natives take a refused
+`InitGameCache`'s null cache without crashing (`StoreInteger`,
+`GetStoredInteger` reads 0, `SaveGameCache` returns false). A plain relative
+name, subdirectories included (`Logs\\run.txt`), is untouched: that is these
+natives' intended use. `is_unsafe` rejects an empty name (for the writes;
+reads allow it, as maps pass `""` for an effect with no model), any `:` (drive
+letter or NTFS alternate data stream), a leading separator (absolute,
+drive-relative or UNC), any `..` component, and a reserved DOS device name
+(`CON`, `PRN`, `AUX`, `NUL`, `CONIN$`, `CONOUT$`, `COM1`–`COM9`,
+`LPT1`–`LPT9`, and `COM`/`LPT` with a superscript 1–3). It is portable and
+unit-tested (`loader/src/core/path_guard.*`, `tests/test_path_guard.cpp`).
+Refused calls are logged (`path-sanitizer: refused ...`; the first 20 in
+full, then every 1000th, the name cut to 160 characters with control
+characters replaced). The `BindNative` hook is **not** reserved: the threat
+is malicious maps, not mods, and a mod can bypass any API boundary anyway, so
+reserving it would only cost mods a useful hook. Content isn't touched — the
+escape vector is the path, not the bytes.
+
 ## Fixed only after 1.27b
 
 These are all still present in 1.27b.
@@ -162,7 +222,8 @@ Most "1.27b hack" search results were spam or malware downloads.
 2. **Measure the memhack on this build** with a test map, to settle
    whether 1.27b still lets scripts write memory.
 3. **Port the cheap 1.28 crash fixes:** ignore invalid command card
-   coordinates, and keep `PreloadGenEnd` out of the game folder.
+   coordinates. (Path traversal in `PreloadGenEnd` and every other native that
+   takes a file path is already handled by the path-sanitizer patch, above.)
 4. **Ambient sound:** confirm whether it's off and whether the game has
    a switch to turn it back on.
 5. **Raise the hashtable and game cache limits** as 1.29.1 did, if a

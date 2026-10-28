@@ -136,6 +136,7 @@ CALLS = """\
     call TomeLogInteger(9500 + TomeE2EShadowReturn())
     call TomeE2EShadowSet()
     call TomeE2EShadowAfter()
+    call TomeE2EPaths()
     call TomeLogInteger(9000 + CrashNative(1))
     call TomeLogInteger(9100 + CrashNative(2))
     call TomeLogInteger(8999)
@@ -170,6 +171,52 @@ function TomeE2EShadowAfter takes nothing returns nothing
     if tome_e2e_shadow == null then
         call TomeLogInteger(9510)
     endif
+endfunction
+
+// The path-sanitizer patch: each name escapes the data folder, so each call
+// is refused (logged) and returns 0. A refused InitGameCache gives a null
+// gamecache, which the cache natives must take without crashing (9600 shows
+// GetStoredInteger read 0 from it). 9609 shows the function ran to its end.
+function TomeE2EPaths takes nothing returns nothing
+    local gamecache cache = InitGameCache("..\\\\TomeE2E-escape.w3v")
+    call StoreInteger(cache, "e2e", "x", 1)
+    call TomeLogInteger(9600 + GetStoredInteger(cache, "e2e", "x"))
+    if not SaveGameCache(cache) then
+        call TomeLogInteger(9601)
+    endif
+    call FlushGameCache(cache)
+    call PreloadGenClear()
+    call Preload("e2e")
+    call PreloadGenEnd("..\\\\TomeE2E-escape.txt")
+    call SaveGame("..\\\\..\\\\TomeE2E-escape.w3z")
+    if not CopySaveGame("TomeE2E.w3z", "..\\\\..\\\\TomeE2E-escape.w3z") then
+        call TomeLogInteger(9602)
+    endif
+    if not RenameSaveDirectory("..\\\\TomeE2E-escape", "..\\\\TomeE2E-escape2") then
+        call TomeLogInteger(9603)
+    endif
+    if not RemoveSaveDirectory("..\\\\TomeE2E-escape") then
+        call TomeLogInteger(9604)
+    endif
+    // Natives that read a file by name are refused the same way, except that
+    // an empty name (a special effect with no model) is fine.
+    call Preloader("..\\\\TomeE2E-escape.pld")
+    if not SaveGameExists("..\\\\..\\\\TomeE2E-escape.w3z") then
+        call TomeLogInteger(9605)
+    endif
+    if AddSpecialEffect("C:\\\\TomeE2E-escape.mdx", 0.0, 0.0) == null then
+        call TomeLogInteger(9606)
+    endif
+    if CreateSound("..\\\\TomeE2E-escape.wav", false, false, false, 10, 10, "") == null then
+        call TomeLogInteger(9607)
+    endif
+    call StartMeleeAI(Player(1), "..\\\\TomeE2E-escape.ai")
+    call PlayMusic("..\\\\TomeE2E-escape.mp3")
+    call DestroyEffect(AddSpecialEffect("", 0.0, 0.0))
+    if not BlzLoadTOCFile("..\\\\TomeE2E-escape.toc") then
+        call TomeLogInteger(9608)
+    endif
+    call TomeLogInteger(9609)
 endfunction
 
 // Called by the hello mod through code arguments.

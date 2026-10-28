@@ -45,7 +45,8 @@ loader/
     game_build.*, sha256.*  build identification
     patch.*               call-site and pointer patching, verified before writing
     patches.*             built-in patches (always-on fixes); the registry and version gating
-    patches/              one file per patch (memhack_guard: the JASS typecast fix)
+    patches/              one file per patch (memhack_guard: the JASS typecast fix;
+                          path_sanitizer: file-writing native paths)
     natives.*             native registry, thunks, InitNatives hook, JASS strings and code
     hooks.*               inline hooks on mapped functions: patch, entry stub, dispatcher
     mod_manager.*         discovery, state.json, lifecycle, hot reload, crashed mods, safe mode
@@ -585,6 +586,34 @@ reason to make a fix a patch rather than ship it as a mod.
   at game start (`display_text`), and gives mods the count in
   `tome_event_info.script_shadows` and the details through
   `map_script_shadows` (API version 13).
+- **path-sanitizer** (`patches/path_sanitizer.cpp`, `docs/known-bugs.md`):
+  refuses path traversal in every JASS native that takes a file path (38;
+  `docs/known-bugs.md` lists them). The writes (`PreloadGenEnd`,
+  `InitGameCache` and the save natives) are rooted in the game folder on
+  1.27b, so a map-controlled name like `..\..\Start Menu\...\x.bat` could
+  plant a file anywhere the process can write; the reads could run or load
+  a planted file. It hooks the mapped `BindNative(fn, name,
+  signature)` (which the engine calls for every built-in native on each map
+  load), and when it binds one of those it remembers the engine's real
+  `fn` and substitutes a sanitizing wrapper as the bound pointer — so no native
+  address is hardcoded and any build that maps `BindNative` is covered. The
+  wrapper (same `__cdecl` ABI as the native, string arg as an `RCString*`)
+  reads each path through `RCString::GetText` (bound by the patch itself),
+  and either calls the real native or, for a name that
+  `path_guard::is_unsafe` rejects (absolute, drive or NTFS stream `:`,
+  UNC/rooted, any `..` component, a reserved DOS device name; empty, for the
+  writes), skips the call and returns 0 (nothing / false / 0 / a null
+  handle). One template wrapper per entry of a table of name, argument count
+  and path arguments, so covering another native is one table line.
+  `BlzLoadTOCFile` checks its TOC path and the FDF paths listed in it
+  (`path_guard::toc_is_unsafe`).
+  The decision logic is portable and unit-tested (`core/path_guard.*`,
+  `tests/test_path_guard.cpp`). Unlike memhack-guard this BEFORE handler runs
+  at the *lowest* priority (`INT32_MIN`), not the highest, so mods' BEFORE
+  handlers of higher priority can't undo the substitution (a mod's own
+  `INT32_MIN` or REPLACE handler still runs later). It reserves nothing — the threat is
+  malicious maps, not mods, and a mod is native code that bypasses any API
+  boundary anyway, so reserving `BindNative` would only cost mods a useful hook.
 
 ## Multiplayer handshake
 

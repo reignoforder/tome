@@ -1,11 +1,11 @@
 #include "watcher.h"
 
+#include "core/text.h"
 #include "log.h"
 
 #include <windows.h>
 
 #include <algorithm>
-#include <cwctype>
 #include <string>
 
 namespace tome {
@@ -48,14 +48,6 @@ bool arm(Watch& w) {
                                  nullptr, &w.overlapped, nullptr);
 }
 
-bool iequals(const std::wstring& a, const wchar_t* b) {
-    size_t i = 0;
-    for (; i < a.size() && b[i]; ++i) {
-        if (std::towlower(a[i]) != std::towlower(b[i])) return false;
-    }
-    return i == a.size() && b[i] == L'\0';
-}
-
 // True if the completed notification batch contains a change we care about.
 bool relevant(Watch& w, DWORD bytes) {
     if (bytes == 0) {
@@ -68,7 +60,7 @@ bool relevant(Watch& w, DWORD bytes) {
     for (;;) {
         auto info = reinterpret_cast<FILE_NOTIFY_INFORMATION*>(p);
         std::wstring name(info->FileName, info->FileNameLength / sizeof(wchar_t));
-        if (iequals(name, w.only_file)) return true;
+        if (text::iequals(name, w.only_file)) return true;
         if (info->NextEntryOffset == 0) return false;
         p += info->NextEntryOffset;
     }

@@ -1,6 +1,7 @@
 #include "bootstrap.h"
 
 #include "core/command_line.h"
+#include "core/text.h"
 #include "debug_input.h"
 #include "events.h"
 #include "frames.h"
@@ -17,7 +18,6 @@
 #include "paths.h"
 #include "watcher.h"
 
-#include <cwctype>
 #include <string>
 #include <vector>
 
@@ -50,16 +50,6 @@ DWORD g_attach_thread = 0;
 Paths g_paths;
 GameBuild g_build;
 std::string g_safe_mode;  // why safe mode is on (from DllMain); empty if it isn't
-
-bool iequals(const std::wstring& a, const wchar_t* b) {
-    size_t i = 0;
-    for (; i < a.size() && b[i]; ++i) {
-        if (std::towlower(a[i]) != std::towlower(b[i])) {
-            return false;
-        }
-    }
-    return i == a.size() && b[i] == L'\0';
-}
 
 // Safe mode (docs/research.md §9): the -tomesafe flag, Shift held while the
 // game starts, or a tome/safe file. Returns what asked for it, or "".
@@ -138,7 +128,7 @@ DWORD bootstrap() {
     TOME_INFO("game.dll already loaded when tome.mix was attached: %s",
               g_game_loaded_at_attach ? "yes" : "no");
 
-    if (iequals(g_paths.host_exe, L"worldedit.exe")) {
+    if (text::iequals(g_paths.host_exe, L"worldedit.exe")) {
         TOME_INFO("Running inside the World Editor; editor support isn't implemented yet. Tome is idle.");
         return 0;
     }

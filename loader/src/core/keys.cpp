@@ -1,5 +1,7 @@
 #include "keys.h"
 
+#include "text.h"
+
 #include <cctype>
 #include <cstdio>
 
@@ -36,16 +38,6 @@ const Named kAliases[] = {
     {"LeftBracket", 0xDB}, {"RightBracket", 0xDD},
 };
 
-bool equal_ignoring_case(std::string_view a, std::string_view b) {
-    if (a.size() != b.size()) return false;
-    for (size_t i = 0; i < a.size(); ++i) {
-        if (std::tolower(static_cast<unsigned char>(a[i])) != std::tolower(static_cast<unsigned char>(b[i]))) {
-            return false;
-        }
-    }
-    return true;
-}
-
 std::string_view trim(std::string_view s) {
     while (!s.empty() && s.front() == ' ') s.remove_prefix(1);
     while (!s.empty() && s.back() == ' ') s.remove_suffix(1);
@@ -67,14 +59,14 @@ uint8_t parse_key_name(std::string_view name) {
         }
         if (digits && n >= 1 && n <= 24) return static_cast<uint8_t>(kVkF1 + n - 1);
     }
-    if (name.size() == 4 && equal_ignoring_case(name.substr(0, 3), "Num") && name[3] >= '0' && name[3] <= '9') {
+    if (name.size() == 4 && text::iequals(name.substr(0, 3), "Num") && name[3] >= '0' && name[3] <= '9') {
         return static_cast<uint8_t>(kVkNumpad0 + (name[3] - '0'));
     }
     for (const Named& n : kNamed) {
-        if (equal_ignoring_case(name, n.name)) return n.vk;
+        if (text::iequals(name, n.name)) return n.vk;
     }
     for (const Named& n : kAliases) {
-        if (equal_ignoring_case(name, n.name)) return n.vk;
+        if (text::iequals(name, n.name)) return n.vk;
     }
     return 0;
 }
@@ -106,7 +98,7 @@ std::string key_name(uint8_t vk) {
 
 bool parse(std::string_view text, Key& out) {
     text = trim(text);
-    if (text.empty() || equal_ignoring_case(text, "None")) {
+    if (text.empty() || text::iequals(text, "None")) {
         out = {};
         return true;
     }
@@ -119,9 +111,9 @@ bool parse(std::string_view text, Key& out) {
                                                                                        : plus - start));
         bool last = plus == std::string_view::npos;
         if (!last) {
-            if (equal_ignoring_case(part, "Ctrl") || equal_ignoring_case(part, "Control")) key.mods |= kCtrl;
-            else if (equal_ignoring_case(part, "Shift")) key.mods |= kShift;
-            else if (equal_ignoring_case(part, "Alt")) key.mods |= kAlt;
+            if (text::iequals(part, "Ctrl") || text::iequals(part, "Control")) key.mods |= kCtrl;
+            else if (text::iequals(part, "Shift")) key.mods |= kShift;
+            else if (text::iequals(part, "Alt")) key.mods |= kAlt;
             else return false;
             start = plus + 1;
             continue;
@@ -168,7 +160,7 @@ CustomKeys parse_custom_keys(std::string_view text) {
         size_t eq = line.find('=');
         if (eq == std::string_view::npos) continue;
         std::string_view name = trim(line.substr(0, eq));
-        if (name.size() < 6 || !equal_ignoring_case(name.substr(name.size() - 6), "hotkey")) continue;
+        if (name.size() < 6 || !text::iequals(name.substr(name.size() - 6), "hotkey")) continue;
         std::string_view values = line.substr(eq + 1);
         size_t start = 0;
         for (;;) {

@@ -60,6 +60,7 @@ LAUNCHES=0
 cleanup() {
     stop_game
     rm -rf "$TEST_MAP_DIR"
+    rm -rf "$GAME"/../TomeE2E-escape*  # only there if the path sanitizer failed
     # The test map's saved game (SaveGame writes it under the current
     # profile's CustomSaves\<map name>), and CustomSaves if the test made it.
     for profile in "$GAME"/save/*/; do
@@ -252,7 +253,7 @@ fi
 check "Assets at startup: $ASSET_FILES files from 3 mods \(0 overridden" "mods' assets mounted from DllMain"
 check "Asset probe .*: [0-9]+ bytes, fnv1a $PROBE_HASH" "the game reads the mod's texture instead of its own"
 check "Bootstrap complete" "bootstrap finished" 15
-check "Patches: 1 applied, 0 skipped: memhack-guard applied" "memhack guard patch applied"
+check "Patches: 2 applied, 0 skipped: memhack-guard applied.*path-sanitizer applied" "memhack guard and path sanitizer patches applied"
 check "Main-thread dispatcher installed" "main-thread dispatcher installed"
 check "Events: hooked screens, map load, game start and end, frames, game ticks, shutdown, chat, pause, units, spells, damage, experience, players, resources, keys, menus, dialogs, levels and saved games" "event hooks installed"
 check "\[hello\] 100 ticks" "tick events reach mods"
@@ -274,6 +275,24 @@ if ((${#MAP_ARG[@]})); then
     check "\[map\] TomeLogInteger\(9510\)" "the global keeps its own type in later functions"
     check "\[hello\] map script shadows: 2, 2 listed \(first: local integer tome_e2e_shadow on line [0-9]+, global unit\)" "mods get the findings (script_shadows, map_script_shadows)"
     check "Map script guard: told the player" "the player is told at game start" 30
+    echo "path sanitizer (map script)"
+    for native in InitGameCache PreloadGenEnd SaveGame CopySaveGame RenameSaveDirectory RemoveSaveDirectory \
+        Preloader SaveGameExists CreateSound StartMeleeAI PlayMusic; do
+        check "path-sanitizer: refused $native\(\"\.\.\\\\" "$native refused a name outside the data folder"
+    done
+    check "path-sanitizer: refused AddSpecialEffect\(\"C:" "AddSpecialEffect refused an absolute path"
+    check_absent "path-sanitizer: refused AddSpecialEffect\(\"\"" "an empty model name isn't refused"
+    check "BlzLoadTOCFile: refused" "BlzLoadTOCFile refused a TOC outside the data folder"
+    check "\[map\] TomeLogInteger\(9600\)" "a refused InitGameCache gives a null cache that reads 0"
+    for n in 9601 9602 9603 9604 9605 9606 9607 9608; do
+        check "\[map\] TomeLogInteger\($n\)" "refused call $n returned false or null"
+    done
+    check "\[map\] TomeLogInteger\(9609\)" "the script carried on after the refused calls"
+    if compgen -G "$GAME/../TomeE2E-escape*" >/dev/null; then
+        fail "a file was written outside the game folder"
+    else
+        pass "nothing was written outside the game folder"
+    fi
     echo "game events (-loadfile)"
     check "\[hello\] map load: .+ \(Maps\\\\TomeE2E\\\\e2e\.w3m\)" "map load event with the map's name and path"
     check "\[hello\] game start: " "game start event" 30

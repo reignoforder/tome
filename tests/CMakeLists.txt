@@ -18,10 +18,12 @@ add_executable(tome_tests
     test_metadata.cpp
     test_mod_menu_model.cpp
     test_mpq.cpp
+    test_path_guard.cpp
     test_popup.cpp
     test_resolver.cpp
     test_rtti.cpp
     test_settings.cpp
+    test_text.cpp
     test_units.cpp
     test_utf8.cpp
     test_verify.cpp

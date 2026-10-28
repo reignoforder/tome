@@ -1,6 +1,7 @@
 #include "frames.h"
 
 #include "core/frames.h"
+#include "core/path_guard.h"
 #include "core/rtti.h"
 #include "guard.h"
 #include "log.h"
@@ -9,6 +10,7 @@
 #include "overlay.h"
 #include "paths.h"
 #include "popups.h"
+#include "storm.h"
 #include "unwind.h"
 
 #include <windows.h>
@@ -538,9 +540,21 @@ int32_t native_frame_set_visible(int32_t frame, int32_t visible) {
 }
 
 // native BlzLoadTOCFile takes string TOCFile returns boolean
+// The TOC's path and the FDF paths it lists come from the map: each is
+// refused like the built-in file natives' paths (patches/path_sanitizer.cpp)
+// if it leaves the data folder. Logged once, so a map can't flood the log.
 int32_t native_load_toc_file(const void* path) {
     const char* text = jass_string(path);
-    return text && *text && load_toc(text) ? 1 : 0;
+    if (!text || !*text) return 0;
+    std::string toc;
+    if (path_guard::is_unsafe(text) || !storm::init() || !storm::read_file(text, toc) ||
+        path_guard::toc_is_unsafe(toc)) {
+        static bool logged = false;
+        if (!logged) TOME_WARN("BlzLoadTOCFile: refused a TOC outside the data folder or listing a file outside it");
+        logged = true;
+        return 0;
+    }
+    return load_toc(text) ? 1 : 0;
 }
 
 struct NativeDef {
