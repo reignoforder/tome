@@ -68,10 +68,14 @@ public:
         }
         pos_ += size;
     }
+    // Writes `header` over the placeholder at the start; pos() stays the
+    // archive's size (the manifest records it, and the next start checks it).
     void write_header(const std::string& header) {
         LARGE_INTEGER zero{};
         if (!SetFilePointerEx(file_, zero, nullptr, FILE_BEGIN)) ok_ = false;
+        const uint64_t end = pos_;
         write(header.data(), header.size());
+        pos_ = end;
     }
     // Copies `size` bytes from `in` at its current position; pads with zeros
     // if the file turns out shorter, so the archive stays consistent.
@@ -445,8 +449,13 @@ bool mount_assets(const std::vector<ModSource>& mods, std::string& summary) {
     if (!out.ok()) DeleteFileW(path.c_str());
     if (ok) {
         g_mounted_entries = std::move(entries);
-        // Only an archive with every file in it is worth mounting again.
-        if (problems.empty()) {
+        // Only an archive built from the mods' folders with every file in it
+        // is worth mounting again: files copied from the previous archive
+        // (keep_previous) may lack some, under a fingerprint that still
+        // matches the folder's (the previous build may have skipped a file).
+        const bool from_folders =
+            std::none_of(mods.begin(), mods.end(), [](const ModSource& m) { return m.keep_previous; });
+        if (problems.empty() && from_folders) {
             write_manifest(path, out.pos(), mods);
         } else {
             DeleteFileW((g_cache + L"\\" + kManifest).c_str());

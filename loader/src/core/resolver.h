@@ -51,6 +51,15 @@ ResolveResult resolve(const std::vector<ResolveInput>& inputs, const ResolveEnvi
 std::vector<size_t> dependents_of(const std::vector<ResolveInput>& inputs, const ResolveEnvironment& env,
                                   size_t target);
 
+// The mods `result` turned off only because they need one of `waiting`
+// (inputs left out of resolve() as not user_enabled for now: they wait for a
+// multiplayer game to end, core/game_lock.h), directly or through other such
+// mods: user-enabled mods in DependencyInactive whose every dependency no
+// active mod meets is one a waiting mod could meet. Indices in input order,
+// without `waiting` itself.
+std::vector<size_t> waiting_dependents(const std::vector<ResolveInput>& inputs, const ResolveResult& result,
+                                       const std::vector<size_t>& waiting);
+
 const char* to_string(ModState state);
 
 } // namespace tome

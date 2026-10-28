@@ -58,7 +58,7 @@ using RegList = std::vector<RegPtr>;
 
 // The highest tome_event: g_handlers has a slot for each, and on_event refuses
 // anything above it. Raise it with every new event.
-constexpr int kEventCount = TOME_EVENT_UNIT_OWNER_CHANGED;
+constexpr int kEventCount = TOME_EVENT_NIGHT;
 
 SRWLOCK g_lock = SRWLOCK_INIT;  // registration may happen on any thread
 std::shared_ptr<const RegList> g_handlers[kEventCount + 1];  // copy-on-write, by event
@@ -82,6 +82,9 @@ std::string g_map_name, g_map_path, g_map_description;
 units::Selection g_selection;  // the local selection as of the last frame
 bool g_paused = false;
 units::Results g_results;      // victories, defeats and leaves reported this game
+units::ResourceWatch g_resources;  // players' resources as of the last game tick
+double g_time_of_day = -1;         // as of the last game tick; -1 for none
+int g_reset_depth = 0;             // inside CGameWar3::Reset (its BEFORE ran, its AFTER not yet)
 LARGE_INTEGER g_frequency, g_last_tick;
 uint32_t g_frames = 0;
 
@@ -153,6 +156,30 @@ const char* event_name(int32_t event) {
     case TOME_EVENT_ITEM_SOLD: return "(item sold)";
     case TOME_EVENT_ITEM_PAWNED: return "(item pawned)";
     case TOME_EVENT_UNIT_OWNER_CHANGED: return "(unit owner changed)";
+    case TOME_EVENT_SPELL_CHANNEL: return "(spell channel)";
+    case TOME_EVENT_SPELL_CAST: return "(spell cast)";
+    case TOME_EVENT_SPELL_EFFECT: return "(spell effect)";
+    case TOME_EVENT_SPELL_FINISH: return "(spell finish)";
+    case TOME_EVENT_SPELL_END_CAST: return "(spell end cast)";
+    case TOME_EVENT_UNIT_DAMAGED: return "(unit damaged)";
+    case TOME_EVENT_UNIT_ACQUIRED_TARGET: return "(unit acquired target)";
+    case TOME_EVENT_UNIT_DECAY: return "(unit decay)";
+    case TOME_EVENT_UNIT_DETECTED: return "(unit detected)";
+    case TOME_EVENT_UNIT_HIDDEN: return "(unit hidden)";
+    case TOME_EVENT_ESC_PRESSED: return "(Esc pressed)";
+    case TOME_EVENT_ARROW_KEY: return "(arrow key)";
+    case TOME_EVENT_DESTRUCTABLE_DEATH: return "(destructable death)";
+    case TOME_EVENT_ITEM_DEATH: return "(item death)";
+    case TOME_EVENT_DIALOG_CLICK: return "(dialog click)";
+    case TOME_EVENT_SKILL_MENU: return "(skill menu)";
+    case TOME_EVENT_BUILD_MENU: return "(build menu)";
+    case TOME_EVENT_LEVEL_END: return "(level end)";
+    case TOME_EVENT_UNIT_CREATED: return "(unit created)";
+    case TOME_EVENT_UNIT_REMOVED: return "(unit removed)";
+    case TOME_EVENT_HERO_XP: return "(hero experience)";
+    case TOME_EVENT_PLAYER_RESOURCE: return "(player resource)";
+    case TOME_EVENT_DAY: return "(day)";
+    case TOME_EVENT_NIGHT: return "(night)";
     default: return nullptr;
     }
 }
@@ -216,6 +243,8 @@ void end_game() {
     g_selection = {};
     g_paused = false;
     g_results.reset();
+    g_resources.reset();
+    g_time_of_day = -1;
 }
 
 int32_t ui_event_for_screen(uint32_t screen) {
@@ -355,6 +384,7 @@ bool handle_chat(const char* text) {
 // the map's script and files are read.
 void map_load() {
     end_game();  // a game that never went back to a menu
+    g_reset_depth = 0;  // in case a Reset was abandoned (a crash guard further out) before its AFTER ran
     g_map_name.clear();
     g_map_path.clear();
     g_map_description.clear();
@@ -380,9 +410,17 @@ void TOME_CALL after_set_screen(tome_mod*, tome_hook_call* call, void*) {
 }
 
 // Reset runs when a game is left, but also when a lobby is created or left
-// and while a saved game loads, so it only ends a game that started.
+// and while a saved game loads, so it only ends a game that started. It
+// removes every unit left (CUnit::Remove): that's teardown, not
+// UNIT_REMOVED, even when no game started (a load that was abandoned after
+// creating units leaves g_map_loaded set), hence g_reset_depth.
 void TOME_CALL before_reset(tome_mod*, tome_hook_call*, void*) {
+    ++g_reset_depth;
     end_game();
+}
+
+void TOME_CALL after_reset(tome_mod*, tome_hook_call*, void*) {
+    if (g_reset_depth > 0) --g_reset_depth;
 }
 
 void TOME_CALL after_enter_game(tome_mod*, tome_hook_call*, void*) {
@@ -392,6 +430,8 @@ void TOME_CALL after_enter_game(tome_mod*, tome_hook_call*, void*) {
     g_game_time = 0;
     g_selection = units::read_selection();
     g_paused = false;
+    g_resources.reset();
+    g_time_of_day = -1;
     read_map(current_game());  // a saved game's map info is only complete now
     TOME_INFO("Game started: %s", g_map_name.c_str());
     if (void* game_ui = g_game_ui_get(0, 0)) frames::on_screen(TOME_UI_GAME, game_ui);
@@ -429,6 +469,47 @@ void TOME_CALL before_present(tome_mod*, tome_hook_call*, void*) {
     popups::on_frame();
 }
 
+// Resources change in many places (mining, spending, bounties, upkeep,
+// triggers), so they're compared every game tick while a mod listens: 16
+// players, 4 values. Without listeners nothing is read, and the next first
+// reading only sets the baseline.
+void check_resources() {
+    if (!has_handlers(TOME_EVENT_PLAYER_RESOURCE)) {
+        g_resources.reset();
+        return;
+    }
+    for (int32_t slot = 0; slot < units::ResourceWatch::kSlots; ++slot) {
+        for (int32_t resource : units::kWatchedResources) {
+            int32_t value, previous;
+            if (!units::player_resource(slot, resource, value)) continue;
+            if (!g_resources.update(slot, resource, value, previous)) continue;
+            std::string name = units::player_name(slot);
+            OnUnwind release_name([&] { std::string().swap(name); });
+            tome_event_info info = make_info(TOME_EVENT_PLAYER_RESOURCE, 0);
+            info.player = slot;
+            info.player_name = name.c_str();
+            info.resource = resource;
+            info.amount = value;
+            info.previous = previous;
+            fire_info(info);
+        }
+    }
+}
+
+void check_time_of_day() {
+    if (!has_handlers(TOME_EVENT_DAY) && !has_handlers(TOME_EVENT_NIGHT)) {
+        g_time_of_day = -1;
+        return;
+    }
+    double now = units::time_of_day();
+    int32_t change = units::day_change(g_time_of_day, now);
+    g_time_of_day = now;
+    if (!change) return;
+    tome_event_info info = make_info(change > 0 ? TOME_EVENT_DAY : TOME_EVENT_NIGHT, 0);
+    info.amount = now;
+    fire_info(info);
+}
+
 void TOME_CALL before_game_tick(tome_mod*, tome_hook_call* call, void*) {
     if (!g_game_started) return;
     float step;
@@ -439,6 +520,8 @@ void TOME_CALL before_game_tick(tome_mod*, tome_hook_call* call, void*) {
     g_game_time += step;
     handshake::on_game_tick(g_game_time);
     if (g_game_tick_handlers.load(std::memory_order_relaxed) > 0) fire(TOME_EVENT_GAME_TICK, step);
+    check_resources();
+    check_time_of_day();
 }
 
 // After the main loop, before the game tears its systems down. The game was
@@ -495,7 +578,7 @@ void TOME_CALL after_set_paused(tome_mod*, tome_hook_call* call, void*) {
 // player whose event it is.
 
 // Which argument (index into args, -1 for none) holds what.
-enum class Special { None, HeroLevel, PreviousOwner };
+enum class Special { None, HeroLevel, PreviousOwner, ThisPlayer };
 
 struct UnitEventSpec {
     int32_t event;
@@ -517,6 +600,25 @@ void set_object(tome_event_info& info, uint32_t id) {
     info.object_name = units::object_name(id);
 }
 
+void set_item(tome_event_info& info, void* item) {
+    info.item = item;
+    info.item_handle = units::handle_of(item);
+    set_object(info, units::item_type(item));
+}
+
+void set_destructable(tome_event_info& info, void* destructable) {
+    info.destructable = destructable;
+    info.destructable_handle = units::handle_of(destructable);
+    set_object(info, units::destructable_type(destructable));
+}
+
+// A player event's player (this) by name; `player_object` is a CPlayerWar3.
+void set_player(tome_event_info& info, std::string& name, const void* player_object) {
+    info.player = units::player_slot(player_object);
+    name = units::player_name(info.player);
+    info.player_name = name.c_str();
+}
+
 void TOME_CALL before_unit_event(tome_mod*, tome_hook_call* call, void* user) {
     const auto& spec = *static_cast<const UnitEventSpec*>(user);
     // From the loading screen on: a map's script runs its setup (creating
@@ -534,15 +636,26 @@ void TOME_CALL before_unit_event(tome_mod*, tome_hook_call* call, void* user) {
     info.unit = &unit;
     info.other = other_object ? &other : nullptr;
     info.third = third_object ? &third : nullptr;
-    if (spec.item >= 0) {
-        info.item = arg_ptr(call, spec.item);
-        set_object(info, units::item_type(info.item));
-    }
+    if (spec.item >= 0) set_item(info, arg_ptr(call, spec.item));
     if (spec.type >= 0) set_object(info, call->args[spec.type]);
     if (spec.level >= 0) info.level = static_cast<int32_t>(call->args[spec.level]);
     if (spec.special == Special::HeroLevel) info.level = units::hero_level(unit_object);
     if (spec.special == Special::PreviousOwner) info.player = static_cast<int32_t>(call->args[2] & 0xFFFF);
+    std::string name;
+    OnUnwind release_name([&] { std::string().swap(name); });
+    if (spec.special == Special::ThisPlayer) set_player(info, name, arg_ptr(call, 0));
     fire_info(info);
+}
+
+// A target widget: a unit as other (described into `unit`), an item or a
+// destructable.
+void set_target(tome_event_info& info, tome_unit& unit, const units::Widget& target) {
+    if (target.unit) {
+        units::describe_unit(target.unit, unit);
+        info.other = &unit;
+    }
+    if (target.item) set_item(info, target.item);
+    if (target.destructable) set_destructable(info, target.destructable);
 }
 
 // CUnit::On*Order (this = the unit, args[1] = the order), before they check
@@ -555,18 +668,177 @@ void TOME_CALL before_order(tome_mod*, tome_hook_call* call, void* user) {
     units::Order o = units::read_order(order, static_cast<int32_t>(reinterpret_cast<intptr_t>(user)));
     tome_unit unit, target;
     units::describe_unit(unit_object, unit);
-    if (o.target_unit) units::describe_unit(o.target_unit, target);
     tome_event_info info = make_info(TOME_EVENT_UNIT_ORDER, 0);
     info.unit = &unit;
-    info.other = o.target_unit ? &target : nullptr;
+    set_target(info, target, o.target);
     info.order_id = o.id;
     info.order_type = o.type;
     info.x = o.x;
     info.y = o.y;
-    if (o.target_item) {
-        info.item = o.target_item;
-        set_object(info, units::item_type(o.target_item));
-    }
+    fire_info(info);
+}
+
+// CUnit::OnSpell* (this = the caster, args[1] = the CAbility), before they
+// check whether a trigger listens. user is the tome_event.
+void TOME_CALL before_spell(tome_mod*, tome_hook_call* call, void* user) {
+    auto event = static_cast<int32_t>(reinterpret_cast<intptr_t>(user));
+    if (!g_map_loaded || !has_handlers(event)) return;
+    void* unit_object = arg_ptr(call, 0);
+    if (!unit_object) return;
+    units::Spell spell = units::read_spell(arg_ptr(call, 1));
+    tome_unit unit, target;
+    units::describe_unit(unit_object, unit);
+    tome_event_info info = make_info(event, 0);
+    info.unit = &unit;
+    set_target(info, target, spell.target);
+    set_object(info, spell.ability_id);  // after the target: an item target sets it too
+    info.x = spell.x;
+    info.y = spell.y;
+    fire_info(info);
+}
+
+// CUnit::OnDamaged(this = the target, float* damage, CUnit* source).
+void TOME_CALL before_damaged(tome_mod*, tome_hook_call* call, void*) {
+    if (!g_map_loaded || !has_handlers(TOME_EVENT_UNIT_DAMAGED)) return;
+    void* unit_object = arg_ptr(call, 0);
+    auto damage = static_cast<const float*>(arg_ptr(call, 1));
+    void* source_object = arg_ptr(call, 2);
+    if (!unit_object || !damage) return;
+    tome_unit unit, source;
+    units::describe_unit(unit_object, unit);
+    if (source_object) units::describe_unit(source_object, source);
+    tome_event_info info = make_info(TOME_EVENT_UNIT_DAMAGED, 0);
+    info.unit = &unit;
+    info.other = source_object ? &source : nullptr;
+    info.amount = *damage;
+    fire_info(info);
+}
+
+// CUnit::OnAcquireTarget(this = the unit, CWidget* target).
+void TOME_CALL before_acquire(tome_mod*, tome_hook_call* call, void*) {
+    if (!g_map_loaded || !has_handlers(TOME_EVENT_UNIT_ACQUIRED_TARGET)) return;
+    void* unit_object = arg_ptr(call, 0);
+    if (!unit_object) return;
+    tome_unit unit, target;
+    units::describe_unit(unit_object, unit);
+    tome_event_info info = make_info(TOME_EVENT_UNIT_ACQUIRED_TARGET, 0);
+    info.unit = &unit;
+    set_target(info, target, units::classify_widget(arg_ptr(call, 1)));
+    fire_info(info);
+}
+
+// CPlayerWar3::OnEndCinematic (this = the player who pressed Esc).
+void TOME_CALL before_end_cinematic(tome_mod*, tome_hook_call* call, void*) {
+    if (!g_map_loaded || !has_handlers(TOME_EVENT_ESC_PRESSED)) return;
+    std::string name;
+    OnUnwind release_name([&] { std::string().swap(name); });
+    tome_event_info info = make_info(TOME_EVENT_ESC_PRESSED, 0);
+    set_player(info, name, arg_ptr(call, 0));
+    fire_info(info);
+}
+
+// CPlayerWar3::OnArrowKey(this = the player, the JASS event id + 0x80200).
+void TOME_CALL before_arrow_key(tome_mod*, tome_hook_call* call, void*) {
+    if (!g_map_loaded || !has_handlers(TOME_EVENT_ARROW_KEY)) return;
+    tome_event_info info = make_info(TOME_EVENT_ARROW_KEY, 0);
+    if (!units::arrow_key(call->args[1], info.key, info.pressed)) return;
+    std::string name;
+    OnUnwind release_name([&] { std::string().swap(name); });
+    set_player(info, name, arg_ptr(call, 0));
+    fire_info(info);
+}
+
+// CWidget::OnDeath (this = any widget). Units have TOME_EVENT_UNIT_DEATH,
+// with the killer, from their own function.
+void TOME_CALL before_widget_death(tome_mod*, tome_hook_call* call, void*) {
+    if (!g_map_loaded) return;
+    units::Widget widget = units::classify_widget(arg_ptr(call, 0));
+    int32_t event = widget.item ? TOME_EVENT_ITEM_DEATH : widget.destructable ? TOME_EVENT_DESTRUCTABLE_DEATH : 0;
+    if (!event || !has_handlers(event)) return;
+    tome_event_info info = make_info(event, 0);
+    if (widget.item) set_item(info, widget.item);
+    if (widget.destructable) set_destructable(info, widget.destructable);
+    fire_info(info);
+}
+
+// CScriptDialog::OnClick(this = the dialog, the button, the player's slot).
+void TOME_CALL before_dialog_click(tome_mod*, tome_hook_call* call, void*) {
+    if (!g_map_loaded || !has_handlers(TOME_EVENT_DIALOG_CLICK)) return;
+    tome_event_info info = make_info(TOME_EVENT_DIALOG_CLICK, 0);
+    info.dialog = units::handle_of(arg_ptr(call, 0));
+    info.button = units::handle_of(arg_ptr(call, 1));
+    info.player = static_cast<int32_t>(call->args[2] & 0xFF);
+    std::string name = units::player_name(info.player);
+    OnUnwind release_name([&] { std::string().swap(name); });
+    info.player_name = name.c_str();
+    fire_info(info);
+}
+
+// The network action handlers for the command card's skill and build menus
+// (args[0] = the action, its sender's slot at CNetEvent.sender). user is the
+// tome_event.
+void TOME_CALL before_menu_action(tome_mod*, tome_hook_call* call, void* user) {
+    auto event = static_cast<int32_t>(reinterpret_cast<intptr_t>(user));
+    const char* action = static_cast<const char*>(arg_ptr(call, 0));
+    if (!g_game_started || !action || !has_handlers(event)) return;
+    tome_event_info info = make_info(event, 0);
+    info.player = static_cast<uint8_t>(action[g_build->play.net_event_sender_offset]);
+    std::string name = units::player_name(info.player);
+    OnUnwind release_name([&] { std::string().swap(name); });
+    info.player_name = name.c_str();
+    fire_info(info);
+}
+
+void TOME_CALL before_end_level(tome_mod*, tome_hook_call*, void*) {
+    if (g_game_started) fire(TOME_EVENT_LEVEL_END);
+}
+
+void fire_unit(int32_t event, const void* unit_object) {
+    if (!g_map_loaded || g_reset_depth > 0 || !unit_object || !has_handlers(event)) return;
+    tome_unit unit;
+    units::describe_unit(unit_object, unit);
+    tome_event_info info = make_info(event, 0);
+    info.unit = &unit;
+    fire_info(info);
+}
+
+// CreateUnitObject returns the new unit.
+void TOME_CALL after_create_unit(tome_mod*, tome_hook_call* call, void*) {
+    fire_unit(TOME_EVENT_UNIT_CREATED, reinterpret_cast<const void*>(static_cast<uintptr_t>(call->result)));
+}
+
+void TOME_CALL before_remove_unit(tome_mod*, tome_hook_call* call, void*) {
+    fire_unit(TOME_EVENT_UNIT_REMOVED, arg_ptr(call, 0));
+}
+
+// CAbilityHero::AddXP (this = the hero ability): the experience before the
+// call, kept until the AFTER handler compares. Nothing is added at the
+// maximum level, and the amount may be scaled, so the difference is what
+// the hero gained. A stack, in case one call leads to another (the game
+// simulation runs on the main thread).
+int32_t g_xp_before[8];
+size_t g_xp_depth = 0;
+
+void TOME_CALL before_add_xp(tome_mod*, tome_hook_call* call, void*) {
+    if (g_xp_depth < std::size(g_xp_before)) g_xp_before[g_xp_depth] = units::hero_xp(arg_ptr(call, 0));
+    ++g_xp_depth;
+}
+
+void TOME_CALL after_add_xp(tome_mod*, tome_hook_call* call, void*) {
+    if (g_xp_depth == 0) return;
+    --g_xp_depth;
+    if (g_xp_depth >= std::size(g_xp_before)) return;
+    int32_t before = g_xp_before[g_xp_depth];
+    const void* ability = arg_ptr(call, 0);
+    void* hero = units::ability_owner(ability);
+    int32_t gained = units::hero_xp(ability) - before;
+    if (!g_map_loaded || !hero || gained <= 0 || !has_handlers(TOME_EVENT_HERO_XP)) return;
+    tome_unit unit;
+    units::describe_unit(hero, unit);
+    tome_event_info info = make_info(TOME_EVENT_HERO_XP, 0);
+    info.unit = &unit;
+    info.amount = gained;
+    info.level = units::hero_level(hero);
     fire_info(info);
 }
 
@@ -629,6 +901,10 @@ void* order_user(int32_t type) {
     return reinterpret_cast<void*>(static_cast<intptr_t>(type));
 }
 
+void* event_user(int32_t event) {
+    return reinterpret_cast<void*>(static_cast<intptr_t>(event));
+}
+
 // The game's event functions and which argument is which (see the
 // mapping's signatures; args[0] is this).
 struct UnitHook {
@@ -666,6 +942,10 @@ const UnitHook kUnitHooks[] = {
     {"CPlayerWar3::OnItemSell", {.event = TOME_EVENT_ITEM_SOLD, .other = 2, .item = 3}},
     {"CPlayerWar3::OnItemPawn", {.event = TOME_EVENT_ITEM_PAWNED, .other = 2, .item = 3}},
     {"CPlayerWar3::OnUnitChangeOwner", {.event = TOME_EVENT_UNIT_OWNER_CHANGED, .special = Special::PreviousOwner}},
+    {"CPlayerWar3::OnUnitDecay", {.event = TOME_EVENT_UNIT_DECAY}},
+    // this is the detecting player, not the unit's owner.
+    {"CPlayerWar3::OnUnitDetected", {.event = TOME_EVENT_UNIT_DETECTED, .special = Special::ThisPlayer}},
+    {"CPlayerWar3::OnUnitHidden", {.event = TOME_EVENT_UNIT_HIDDEN, .special = Special::ThisPlayer}},
     // A CUnit function (this = the loaded unit): its player function is
     // only called when a trigger listens.
     {"CUnit::OnLoaded", {.event = TOME_EVENT_UNIT_LOADED, .unit = 0, .other = 1}},
@@ -791,6 +1071,7 @@ bool install(uintptr_t game_base, const BuildMappings& build, std::string& repor
     std::vector<HookSpec> specs = {
         {"CGlueMgr::SetScreen", TOME_HOOK_AFTER, after_set_screen},
         {"CGameWar3::Reset", TOME_HOOK_BEFORE, before_reset},
+        {"CGameWar3::Reset", TOME_HOOK_AFTER, after_reset},
         {"CGlueMgr::EnterGame", TOME_HOOK_AFTER, after_enter_game},
         {"PresentFrame", TOME_HOOK_BEFORE, before_present},
         {"OnNetGameTick", TOME_HOOK_BEFORE, before_game_tick},
@@ -805,6 +1086,24 @@ bool install(uintptr_t game_base, const BuildMappings& build, std::string& repor
         {"CPlayerWar3::OnLeave", TOME_HOOK_BEFORE, before_leave},
         {"CGameWar3::SaveGame", TOME_HOOK_BEFORE, before_game_save},
         {"HandleManager::FireGameLoaded", TOME_HOOK_BEFORE, before_game_loaded},
+        {"CUnit::OnSpellChannel", TOME_HOOK_BEFORE, before_spell, event_user(TOME_EVENT_SPELL_CHANNEL)},
+        {"CUnit::OnSpellCast", TOME_HOOK_BEFORE, before_spell, event_user(TOME_EVENT_SPELL_CAST)},
+        {"CUnit::OnSpellEffect", TOME_HOOK_BEFORE, before_spell, event_user(TOME_EVENT_SPELL_EFFECT)},
+        {"CUnit::OnSpellFinish", TOME_HOOK_BEFORE, before_spell, event_user(TOME_EVENT_SPELL_FINISH)},
+        {"CUnit::OnSpellEndCast", TOME_HOOK_BEFORE, before_spell, event_user(TOME_EVENT_SPELL_END_CAST)},
+        {"CUnit::OnDamaged", TOME_HOOK_BEFORE, before_damaged},
+        {"CUnit::OnAcquireTarget", TOME_HOOK_BEFORE, before_acquire},
+        {"CPlayerWar3::OnEndCinematic", TOME_HOOK_BEFORE, before_end_cinematic},
+        {"CPlayerWar3::OnArrowKey", TOME_HOOK_BEFORE, before_arrow_key},
+        {"CWidget::OnDeath", TOME_HOOK_BEFORE, before_widget_death},
+        {"CScriptDialog::OnClick", TOME_HOOK_BEFORE, before_dialog_click},
+        {"OnNetShowSkillMenu", TOME_HOOK_BEFORE, before_menu_action, event_user(TOME_EVENT_SKILL_MENU)},
+        {"OnNetShowBuildMenu", TOME_HOOK_BEFORE, before_menu_action, event_user(TOME_EVENT_BUILD_MENU)},
+        {"HandleManager::FireEndLevel", TOME_HOOK_BEFORE, before_end_level},
+        {"CreateUnitObject", TOME_HOOK_AFTER, after_create_unit},
+        {"CUnit::Remove", TOME_HOOK_BEFORE, before_remove_unit},
+        {"CAbilityHero::AddXP", TOME_HOOK_BEFORE, before_add_xp},
+        {"CAbilityHero::AddXP", TOME_HOOK_AFTER, after_add_xp},
     };
     for (const UnitHook& h : kUnitHooks) {
         specs.push_back({h.name, TOME_HOOK_BEFORE, before_unit_event, const_cast<UnitEventSpec*>(&h.spec)});
@@ -830,7 +1129,7 @@ bool install(uintptr_t game_base, const BuildMappings& build, std::string& repor
     }
     g_ready = true;
     report = "hooked screens, map load, game start and end, frames, game ticks, shutdown, chat, pause, units, "
-             "players and saved games";
+             "spells, damage, experience, players, resources, keys, menus, dialogs, levels and saved games";
     return true;
 }
 

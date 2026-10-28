@@ -479,6 +479,19 @@ bool bind_build(const mappings::Build& build, BuildMappings& out, std::vector<st
     bind("CUnit.vtable", Kind::Data, play.unit_vtable);
     bind("CItem.vtable", Kind::Data, play.item_vtable);
     bind("CPlayerWar3.controller", Kind::Offset, play.player_controller_offset);
+    bind("CDestructable.vtable", Kind::Data, play.destructable_vtable);
+    bind("CDestructable.type_id", Kind::Offset, play.destructable_type_offset);
+    bind("CAbility.type_id", Kind::Offset, play.ability_type_offset);
+    bind("CAbilitySpell.vtable.GetTargetWidget", Kind::Offset, play.spell_target_slot);
+    bind("CAbilitySpell.vtable.GetTargetX", Kind::Offset, play.spell_target_x_slot);
+    bind("CAbilitySpell.vtable.GetTargetY", Kind::Offset, play.spell_target_y_slot);
+    bind("CNetEvent.sender", Kind::Offset, play.net_event_sender_offset);
+    bind("CAbility.owner", Kind::Offset, play.ability_owner_offset);
+    bind("CAbilityHero.xp", Kind::Offset, play.hero_xp_offset);
+    bind("CPlayerWar3.states", Kind::Offset, play.player_states_offset);
+    bind("PlayerState.size", Kind::Constant, play.player_state_size);
+    bind("SyncedInt::Get", Kind::Function, play.synced_int_get);
+    bind("GetFloatGameState", Kind::Function, play.get_float_game_state);
 
     auto& net = out.net;
     bind("GlueScreen.game_chatroom", Kind::Constant, net.screen_game_chatroom);

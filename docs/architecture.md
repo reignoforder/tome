@@ -404,7 +404,9 @@ menu code uses the same helpers.
 `register_command`, `display_text`, `ui_root`); the selection, chat,
 pause, unit, item, player result and saved game events and `selection` are
 API version 8 (`loader/src/units.cpp`,
-`core/units.cpp`). Every event comes from one
+`core/units.cpp`); spells, damage, acquired targets, decay, detection, Esc
+and arrow keys, destructable and item deaths and dialog clicks are API
+version 12. Every event comes from one
 of Tome's own handlers on a mapped function, added through the hook manager
 (below) with no mod and no gate, at the highest priority in BEFORE and the
 lowest in AFTER. `events::install` runs from DllMain after `frames::init`,
@@ -414,15 +416,25 @@ before adding any handler. Everything runs on the main thread.
 | Hook | Does |
 |------|------|
 | `CGlueMgr::SetScreen` (after) | maps the GlueScreen id to a `tome_ui_event` and calls `frames::on_screen` with `[mgr+CGlueMgr.screen]`; the main menu keeps its Setup hook. The loading screen is the map load: it reads the map's name and path, applies `reload: map` asset changes (`ModManager::on_map_load`, `assets::Moment::MapLoad`) and fires `TOME_EVENT_MAP_LOAD`. The natives are bound by then (CGameWar3::Reset), the map's files aren't read yet. The score screen ends the game. |
-| `CGameWar3::Reset` (before) | ends a game that started and never showed a score screen: `TOME_EVENT_GAME_END` |
+| `CGameWar3::Reset` (before and after) | ends a game that started and never showed a score screen: `TOME_EVENT_GAME_END`; while it runs (it removes every unit left, also after a load that was abandoned), no `UNIT_CREATED` or `UNIT_REMOVED` |
 | `CGlueMgr::EnterGame` (after) | `TOME_UI_GAME` for `CGameUI::Get(0, 0)`, then `TOME_EVENT_GAME_START` |
 | `PresentFrame` (before) | counts frames and measures the time between them (QueryPerformanceCounter); `TOME_EVENT_TICK` only if a handler is registered |
 | `OnNetGameTick` (before) | in a game: adds the step (`CNetEventGameTick.step`, game seconds) to the game time and fires `TOME_EVENT_GAME_TICK`, only if a handler is registered. Follows the game speed, stops while paused. |
 | `GameShutdown` (before) | ends a game that's still running when the program exits (exiting from a game normally runs Reset first, so this is a fallback), then disables and unloads the mods |
 | `CGameUI::HandleSlashCommand` (before) | `/tome ...` and mods' commands: runs the handler, then skips the game's function and returns 1, so the game closes the chat box and sends nothing |
 | `CGameUI::DisplayChatMessage` (before) | in a game: `TOME_EVENT_CHAT` with the sender's slot and name (`CPlayerWar3.name`, read without `GetName`, which writes a default), the text and the recipient |
-| `CPlayerWar3::On*` (before): 29 of the JASS player-unit events (death, attacked, rescued, construction/upgrade/training/research start, cancel and finish, hero level, skill, revivable and revival, summon, items, sales, owner change), and `CUnit::OnLoaded` | the game's own functions for its JASS player-unit events, hooked before they check whether a trigger listens, so they fire for every unit whether or not the map listens. One handler driven by a table (`kUnitHooks`: for each function, which argument is the unit, the other unit, a third unit, the item, the type id and the level, plus two special cases); `bind_build` checks the names (`kEventFunctions`). From the loading screen on (map scripts set units up while loading); `tome_unit`s built only if a handler is registered |
-| `CUnit::OnOrder`, `OnPointOrder`, `OnTargetOrder` (before) | `TOME_EVENT_UNIT_ORDER` with `COrder.id`, the point and the target (a unit or an item by vtable). The player functions are only called when a trigger listens, so the `CUnit` ones are hooked |
+| `CPlayerWar3::On*` (before): 32 of the JASS player-unit events (death, attacked, rescued, construction/upgrade/training/research start, cancel and finish, hero level, skill, revivable and revival, summon, items, sales, owner change, decay, detected, hidden), and `CUnit::OnLoaded` | the game's own functions for its JASS player-unit events, hooked before they check whether a trigger listens, so they fire for every unit whether or not the map listens. One handler driven by a table (`kUnitHooks`: for each function, which argument is the unit, the other unit, a third unit, the item, the type id and the level, plus two special cases); `bind_build` checks the names (`kEventFunctions`). From the loading screen on (map scripts set units up while loading); `tome_unit`s built only if a handler is registered |
+| `CUnit::OnOrder`, `OnPointOrder`, `OnTargetOrder` (before) | `TOME_EVENT_UNIT_ORDER` with `COrder.id`, the point and the target (a unit, an item or a destructable by vtable, `units::classify_widget`). The player functions are only called when a trigger listens, so the `CUnit` ones are hooked |
+| `CUnit::OnSpellChannel`, `OnSpellCast`, `OnSpellEffect`, `OnSpellFinish`, `OnSpellEndCast` (before) | the five spell events, for the same reason: unit, the ability's type (`CAbility.type_id`), its target widget and point through the spell ability's virtual functions (`CAbilitySpell.vtable.*`, as `GetSpellTargetUnit` and `GetSpellTargetX` call them) |
+| `CUnit::OnDamaged`, `OnAcquireTarget` (before) | JASS has these as unit events only (no player version); the `CUnit` functions check the registration themselves and are called unconditionally. Damage: the amount from the `float*` argument, before the unit's life goes down |
+| `CPlayerWar3::OnEndCinematic`, `OnArrowKey` (before) | `TOME_EVENT_ESC_PRESSED` and `TOME_EVENT_ARROW_KEY` (key and direction from the event id, `units::arrow_key`), from the network action handlers, so every player's keys reach every client. Esc is always sent; a player's arrow keys only while the map has a trigger on them (the sender checks) |
+| `CWidget::OnDeath` (before) | `TOME_EVENT_DESTRUCTABLE_DEATH` and `TOME_EVENT_ITEM_DEATH` by the widget's vtable; units are left to `UNIT_DEATH` |
+| `CScriptDialog::OnClick` (before) | `TOME_EVENT_DIALOG_CLICK` with the dialog's and button's handle ids and the player, from the network action handler |
+| `OnNetShowSkillMenu`, `OnNetShowBuildMenu` (before) | `TOME_EVENT_SKILL_MENU` and `BUILD_MENU` with the player (`CNetEvent.sender`): the network action handlers, since the command card sends the action on every click |
+| `HandleManager::FireEndLevel` (before) | `TOME_EVENT_LEVEL_END`, in a started game |
+| `CreateUnitObject` (after), `CUnit::Remove` (before) | `TOME_EVENT_UNIT_CREATED` with the new unit (the result; its JASS handle is made after this, so `unit->handle` is 0), `UNIT_REMOVED` with `this`; from the loading screen on, not inside `CGameWar3::Reset` |
+| `CAbilityHero::AddXP` (before and after) | `TOME_EVENT_HERO_XP`: the hero ability's experience (`CAbilityHero.xp`) is kept before the call (a small stack) and compared after it, so only what was really added is reported; the hero is `CAbility.owner` |
+| every game tick, while a mod listens | `TOME_EVENT_PLAYER_RESOURCE`: gold, lumber, food cap and food used of the 16 player slots (`CPlayerWar3.states`, `SyncedInt::Get`, scaled by `units::player_state_scale`), compared with the last tick's (`units::ResourceWatch`; the first reading after a game starts or a mod starts listening only sets the baseline). `TOME_EVENT_DAY` and `NIGHT`: the time of day (`GetFloatGameState`) crossing 6:00 or 18:00 (`units::day_change`) |
 | `CPlayerWar3::RemovePlayer` (before), `OnLeave` (before) | victory and defeat (results 0 and 1, only while `CPlayerWar3.game_state` is 1) and leaving; each once per player and game (`units::Results`) |
 | `CGameWar3::SaveGame` (before) | `TOME_EVENT_GAME_SAVE` with the path, before the game is written; both the `SaveGame` native and the Esc menu's Save Game end here |
 | `HandleManager::FireGameLoaded` (before) | inside the saved game loader, before EnterGame: `TOME_EVENT_GAME_LOADED` with `CGameWar3.load_path` (or the map's path if the load request didn't leave one) |
@@ -448,11 +460,17 @@ before adding any handler. Everything runs on the main thread.
   game's simulation, the same on every client; a mod that changes the game
   from them on one client only desyncs a multiplayer game, as with any
   client-side change.
-- **Not here:** spells (their caller checks the registration itself and
-  makes a handle first, `reverse-engineering.md`), damage, ties.
+- **Not here:** ties; the synced selection events (`EVENT_PLAYER_UNIT_SELECTED`,
+  `DESELECTED`: the game sends the network action only while a trigger
+  listens, so other clients never hear of it; the local selection is
+  `TOME_EVENT_SELECTION`); alliance changes; trackables (local only);
+  regions, timers and state limits (they need a registration's values;
+  resources and the time of day are covered by polling); the tournament
+  events (Battle.net tournaments only); buffs and missiles (not found).
 - **Adding an event:** a `tome_event` value at the end, `kEventCount` in
   `events.cpp` raised to it (the handler lists are indexed by event), the
-  mapping, a `kUnitHooks` row and its name in `kEventFunctions`.
+  mapping, and a `kUnitHooks` row (or a handler in `install`'s list) and its
+  name in `kEventFunctions`.
 - **Registrations** are shared `Registration`s in copy-on-write lists (one
   per event; commands in a map by lowercase name) behind an SRW lock. Firing
   takes a snapshot; a revoker sets `revoked` (on the main thread, before
@@ -563,15 +581,23 @@ report on both sides and in a replay. Not in `tools/e2e-test.sh` yet; see
   not, by id or `provides`) keep running as they were enabled: toggles,
   `/tome reload`, a changed DLL or `tome.mod.json`, or a removed folder
   don't stop or reload them, and their assets stay as mounted
-  (`assets::plan`'s `frozen`). Required mods that weren't running, and mods
-  that need one of them while no mod that runs meets that need, don't start
-  (state `waiting`; `game_lock::plan_start`). A mod whose DLL is known to
-  fail shows its error instead, and a mod that's running keeps running.
-  Toggles still go into
+  (`assets::plan`'s `frozen`). Mods that can't start before the game ends
+  wait (state `waiting`): required mods that weren't running, mods that
+  could meet what a locked mod depends on (so a locked mod never comes to
+  rely on a mod that may still stop), mods a locked mod `breaks` (as it was
+  enabled), and a new id in a locked mod's folder (its DLL would run twice)
+  (`game_lock::waits`). A refresh leaves them out of the resolver, as if
+  turned off, so they can't turn running mods off (one that breaks them, a
+  load order cycle) or stand in for a dependency; what needs them while
+  nothing that runs meets that need waits too (`waiting_dependents`;
+  `game_lock::plan_start` holds the same as a backstop). A mod whose DLL is
+  known to fail shows its error instead, and a mod that's running keeps
+  running. `provides` meets a dependency only on any version, as in the
+  resolver. Toggles still go into
   `state.json`; the mod list shows a note (`ModStatus.locked`), and the
   version, `sync` and handshake hash stay those the game started with (a
   locked mod whose folder is gone or unreadable stays listed as it started,
-  so the handshake still counts it). When the game
+  so the handshake still counts it, and keeps its settings and keybinds). When the game
   ends, a refresh from the message loop applies what waited. Only a crash
   stops a locked mod (logged: the game may desync). A single player game,
   alone or against computers, isn't locked. Unit-tested; verified in a replay

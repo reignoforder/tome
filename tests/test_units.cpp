@@ -46,6 +46,55 @@ TEST(units_pause_player) {
     CHECK_EQ(pause_player(0, 1), -1);  // PauseGame passes the local player
 }
 
+TEST(units_arrow_key) {
+    int32_t key = -1, pressed = -1;
+    CHECK(arrow_key(0x80305, key, pressed));  // EVENT_PLAYER_ARROW_LEFT_DOWN
+    CHECK_EQ(key, int32_t(TOME_ARROW_LEFT));
+    CHECK_EQ(pressed, 1);
+    CHECK(arrow_key(0x80308, key, pressed));  // RIGHT_UP
+    CHECK_EQ(key, int32_t(TOME_ARROW_RIGHT));
+    CHECK_EQ(pressed, 0);
+    CHECK(arrow_key(0x8030B, key, pressed));  // UP_DOWN
+    CHECK_EQ(key, int32_t(TOME_ARROW_UP));
+    CHECK_EQ(pressed, 1);
+    CHECK(!arrow_key(0x80304, key, pressed));
+    CHECK(!arrow_key(0x8030D, key, pressed));  // EVENT_PLAYER_UNIT_SELL
+}
+
+TEST(units_player_state_scale) {
+    CHECK_EQ(player_state_scale(TOME_RESOURCE_GOLD), 10);
+    CHECK_EQ(player_state_scale(TOME_RESOURCE_LUMBER), 10);
+    CHECK_EQ(player_state_scale(TOME_RESOURCE_FOOD_USED), 1);
+    CHECK_EQ(player_state_scale(16), 10);  // PLAYER_STATE_LUMBER_GATHERED
+}
+
+TEST(units_resource_watch) {
+    ResourceWatch watch;
+    int32_t previous = -1;
+    CHECK(!watch.update(0, TOME_RESOURCE_GOLD, 500, previous));  // the first reading
+    CHECK(!watch.update(0, TOME_RESOURCE_GOLD, 500, previous));
+    CHECK(watch.update(0, TOME_RESOURCE_GOLD, 1000, previous));
+    CHECK_EQ(previous, 500);
+    CHECK(!watch.update(1, TOME_RESOURCE_GOLD, 1000, previous));  // another player's first
+    CHECK(!watch.update(0, TOME_RESOURCE_LUMBER, 1000, previous));
+    CHECK(!watch.update(0, 3, 1, previous));  // not watched
+    CHECK(!watch.update(16, TOME_RESOURCE_GOLD, 1, previous));
+    watch.reset();
+    CHECK(!watch.update(0, TOME_RESOURCE_GOLD, 0, previous));
+    CHECK(watch.update(0, TOME_RESOURCE_GOLD, 5, previous));
+    CHECK_EQ(previous, 0);
+}
+
+TEST(units_day_change) {
+    CHECK_EQ(day_change(-1.0, 12.0), 0);
+    CHECK_EQ(day_change(5.99, 6.0), 1);
+    CHECK_EQ(day_change(17.99, 18.0), -1);
+    CHECK_EQ(day_change(12.0, 12.5), 0);
+    CHECK_EQ(day_change(23.9, 0.1), 0);   // midnight
+    CHECK_EQ(day_change(20.0, 12.0), 1);  // SetTimeOfDay into the day
+    CHECK_EQ(day_change(12.0, 3.0), -1);
+}
+
 TEST(units_selection_compare) {
     Selection a, b;
     CHECK(a == b);

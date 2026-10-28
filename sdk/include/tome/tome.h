@@ -28,8 +28,11 @@ extern "C" {
 /* 1: initial table. 2: resolve. 3: frames. 4: hooks. 5: events, chat commands, every screen.
  * 6: JASS strings and code. 7: settings and keybinds. 8: gameplay events (selection, chat, pause,
  * units, items, results, saved games) and selection(). 9: hooks on game.dll's imports
- * (TOME_SYMBOL_IMPORT). 10: popups and restart_game. 11: services and messages between mods. */
-#define TOME_API_VERSION 11
+ * (TOME_SYMBOL_IMPORT). 10: popups and restart_game. 11: services and messages between mods.
+ * 12: more events (spells, damage, target acquired, decay, detection, Esc and arrow keys,
+ * destructable and item deaths, dialog clicks, skill and build menus, level end, units
+ * created and removed, hero experience, player resources, day and night). */
+#define TOME_API_VERSION 12
 
 #define TOME_CALL __cdecl
 /* C linkage in C++ too: Tome looks the lifecycle functions up by their plain names. */
@@ -279,6 +282,7 @@ typedef enum tome_event {
      * order_id, order_type; a point order's target x, y; a target order's
      * target as other (a unit) or item (NULL for a destructable), and the
      * target's position as x, y when the game records it (else 0, 0).
+     * API version 12: a destructable target as destructable.
      * Orders are frequent (AI and creeps too): keep the handler cheap. */
     TOME_EVENT_UNIT_ORDER = 40,
     /* A unit was loaded into a transport: unit, other = the transport. */
@@ -293,8 +297,100 @@ typedef enum tome_event {
     TOME_EVENT_ITEM_PAWNED = 44,
     /* A unit changed owner: unit (with its new owner), player = the
      * previous owner. */
-    TOME_EVENT_UNIT_OWNER_CHANGED = 45
+    TOME_EVENT_UNIT_OWNER_CHANGED = 45,
+    /* API version 12. Like the unit events above, these run inside the
+     * game's simulation, for every player, whether or not the map listens. */
+    /* A unit began channeling a spell, began casting it, the spell took
+     * effect, finished, or the unit stopped casting (finished or not):
+     * unit = the caster, object_id and object_name = the ability; the
+     * target: other (a unit), item or destructable, else none; x, y = the
+     * target point (0, 0 for spells without one). Item abilities count too
+     * (using a potion casts its ability). */
+    TOME_EVENT_SPELL_CHANNEL = 46,
+    TOME_EVENT_SPELL_CAST = 47,
+    TOME_EVENT_SPELL_EFFECT = 48,
+    TOME_EVENT_SPELL_FINISH = 49,
+    TOME_EVENT_SPELL_END_CAST = 50,
+    /* A unit takes damage, before its life goes down: unit = the target,
+     * other = the source (NULL if none), amount = the damage. Frequent in
+     * fights. */
+    TOME_EVENT_UNIT_DAMAGED = 51,
+    /* A unit acquired a target to attack on its own: unit, and the target
+     * as other (a unit), item or destructable. */
+    TOME_EVENT_UNIT_ACQUIRED_TARGET = 52,
+    /* A dead unit's corpse began to decay: unit. */
+    TOME_EVENT_UNIT_DECAY = 53,
+    /* A player detected an invisible unit: unit, player = the detecting
+     * player. UNIT_HIDDEN is the game's EVENT_PLAYER_UNIT_HIDDEN, the same
+     * way round. */
+    TOME_EVENT_UNIT_DETECTED = 54,
+    TOME_EVENT_UNIT_HIDDEN = 55,
+    /* A player pressed Esc (in a cinematic or not; the JASS
+     * EVENT_PLAYER_END_CINEMATIC): player, player_name. Every player's
+     * press reaches every client. */
+    TOME_EVENT_ESC_PRESSED = 56,
+    /* A player pressed or released an arrow key: player, player_name, key
+     * (tome_arrow_key), pressed (1 pressed, 0 released). Only while the
+     * map listens for that player's arrow keys: the game doesn't send them
+     * otherwise. For the local player's keys on any map, use a keybind. */
+    TOME_EVENT_ARROW_KEY = 57,
+    /* A destructable (tree, gate, crate...) was destroyed: destructable,
+     * destructable_handle, object_id and object_name = its type. */
+    TOME_EVENT_DESTRUCTABLE_DEATH = 58,
+    /* An item was destroyed (its life ran out): item, item_handle,
+     * object_id and object_name. Not when an item is used up or removed. */
+    TOME_EVENT_ITEM_DEATH = 59,
+    /* A player clicked a dialog button (DialogCreate, DialogAddButton):
+     * player, player_name, dialog and button = their JASS handle ids. */
+    TOME_EVENT_DIALOG_CLICK = 60,
+    /* A player opened a hero's skill menu or a worker's build menu on the
+     * command card (EVENT_GAME_SHOW_SKILL, EVENT_GAME_BUILD_SUBMENU):
+     * player, player_name. Every player's clicks reach every client. */
+    TOME_EVENT_SKILL_MENU = 61,
+    TOME_EVENT_BUILD_MENU = 62,
+    /* The current level ends (EVENT_GAME_END_LEVEL): ChangeLevel, LoadGame
+     * from a script, or a restart, before the game is torn down. */
+    TOME_EVENT_LEVEL_END = 63,
+    /* A unit was created, by a script, training, a summon or the map: unit.
+     * Units placed on the map are created while it loads, after MAP_LOAD.
+     * unit->handle is usually 0 here: the event comes while the game
+     * creates the unit, before a script's CreateUnit gets its handle
+     * (compare `object` in later events instead). */
+    TOME_EVENT_UNIT_CREATED = 64,
+    /* A unit was taken out of the game (RemoveUnit, and abilities that
+     * replace units): unit. Not when a corpse finishes decaying. */
+    TOME_EVENT_UNIT_REMOVED = 65,
+    /* A hero gained experience (kills, AddHeroXP, SetHeroLevel...): unit,
+     * amount = the experience gained, level = the hero's level after it. */
+    TOME_EVENT_HERO_XP = 66,
+    /* A player's gold, lumber or food changed: player, player_name,
+     * resource (tome_resource), amount = the new value, previous = the
+     * value before. Checked every game tick, so several changes within one
+     * tick come as one. */
+    TOME_EVENT_PLAYER_RESOURCE = 67,
+    /* The time of day passed 6:00 (day) or 18:00 (night), or a script set
+     * it across one: amount = the time of day in hours. Checked every game
+     * tick. */
+    TOME_EVENT_DAY = 68,
+    TOME_EVENT_NIGHT = 69
 } tome_event;
+
+/* tome_event_info.resource for TOME_EVENT_PLAYER_RESOURCE (the JASS
+ * playerstate values). */
+typedef enum tome_resource {
+    TOME_RESOURCE_GOLD = 1,
+    TOME_RESOURCE_LUMBER = 2,
+    TOME_RESOURCE_FOOD_CAP = 4,   /* food provided (farms...), up to the ceiling */
+    TOME_RESOURCE_FOOD_USED = 5
+} tome_resource;
+
+/* tome_event_info.key for TOME_EVENT_ARROW_KEY. */
+typedef enum tome_arrow_key {
+    TOME_ARROW_LEFT = 0,
+    TOME_ARROW_RIGHT = 1,
+    TOME_ARROW_DOWN = 2,
+    TOME_ARROW_UP = 3
+} tome_arrow_key;
 
 /* tome_event_info.order_type for TOME_EVENT_UNIT_ORDER. */
 typedef enum tome_order_type {
@@ -318,8 +414,9 @@ typedef struct tome_unit {
     void* object;
     /* The unit's JASS handle id, for natives, if the map script has one
      * for it (it does for every unit the script created or got from an
-     * event or a group), else 0. Tome never makes one: a handle made on one
-     * client only would shift every later handle id there. */
+     * event or a group, once the native that created it returned: not yet
+     * in TOME_EVENT_UNIT_CREATED), else 0. Tome never makes one: a handle
+     * made on one client only would shift every later handle id there. */
     uint32_t handle;
     uint32_t type_id;   /* the unit type, e.g. 'hpea' (tome_type_code makes "hpea") */
     const char* name;   /* the type's name in the game's language, e.g. "Peasant" */
@@ -381,7 +478,7 @@ typedef struct tome_event_info {
      * in the game's language; else 0 and "". */
     uint32_t object_id;
     const char* object_name;
-    /* HERO_LEVEL: the hero's new level. HERO_SKILL: the skill's level. */
+    /* HERO_LEVEL, HERO_XP: the hero's new level. HERO_SKILL: the skill's level. */
     int32_t level;
     /* GAME_SAVE, GAME_LOADED: the saved game, as the game names it. */
     const char* save_name;
@@ -393,6 +490,27 @@ typedef struct tome_event_info {
     int32_t order_type;
     double x;
     double y;
+    /* API version 12: check `size` before reading these. */
+    /* UNIT_DAMAGED: the damage. HERO_XP: the experience gained.
+     * PLAYER_RESOURCE: the new value. DAY, NIGHT: the time of day. */
+    double amount;
+    /* A destructable an event is about (DESTRUCTABLE_DEATH; a spell's,
+     * order's or acquired target): the game's object, valid during the
+     * call, else NULL. */
+    void* destructable;
+    /* The JASS handle ids of `item` and `destructable`, if the map script
+     * has one (see tome_unit.handle), else 0. */
+    uint32_t item_handle;
+    uint32_t destructable_handle;
+    /* ARROW_KEY: the key (tome_arrow_key) and 1 if pressed, 0 if released. */
+    int32_t key;
+    int32_t pressed;
+    /* DIALOG_CLICK: the dialog's and the clicked button's JASS handle ids. */
+    uint32_t dialog;
+    uint32_t button;
+    /* PLAYER_RESOURCE: which one (tome_resource) and its value before. */
+    int32_t resource;
+    double previous;
 } tome_event_info;
 
 typedef void (TOME_CALL *tome_event_fn)(tome_mod* mod, const tome_event_info* info, void* user);
@@ -997,6 +1115,12 @@ static inline int tome_has_settings(const tome_api* api) {
 /* True if the running Tome has the gameplay events and selection() (version 8). */
 static inline int tome_has_units(const tome_api* api) {
     return api->api_version >= 8 && api->size >= offsetof(tome_api, selection) + sizeof(api->selection);
+}
+
+/* True if the running Tome has the version 12 events (spells, damage, keys, dialogs...);
+ * on_event refuses them before. */
+static inline int tome_has_more_events(const tome_api* api) {
+    return api->api_version >= 12;
 }
 
 /* True if the running Tome can hook imports (version 9). hook() is older, so check this first. */

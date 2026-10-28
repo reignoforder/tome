@@ -193,6 +193,19 @@ struct BuildMappings {
         uint32_t order_id_offset, order_x_offset, order_y_offset;  // COrder.*
         uint32_t unit_vtable, item_vtable;  // CUnit.vtable, CItem.vtable
         uint32_t player_controller_offset;  // CPlayerWar3.controller
+        uint32_t destructable_vtable;       // CDestructable.vtable
+        uint32_t destructable_type_offset;  // CDestructable.type_id
+        uint32_t ability_type_offset;       // CAbility.type_id
+        uint32_t spell_target_slot;         // CAbilitySpell.vtable.GetTargetWidget
+        uint32_t spell_target_x_slot;       // CAbilitySpell.vtable.GetTargetX
+        uint32_t spell_target_y_slot;       // CAbilitySpell.vtable.GetTargetY
+        uint32_t net_event_sender_offset;   // CNetEvent.sender
+        uint32_t ability_owner_offset;      // CAbility.owner
+        uint32_t hero_xp_offset;            // CAbilityHero.xp
+        uint32_t player_states_offset;      // CPlayerWar3.states
+        uint32_t player_state_size;         // PlayerState.size
+        uint32_t synced_int_get;            // SyncedInt::Get
+        uint32_t get_float_game_state;      // GetFloatGameState
     } play;
 
     // The multiplayer handshake (handshake.cpp): the lobby's chat and Start
@@ -229,7 +242,8 @@ struct BuildMappings {
 };
 
 // The game's JASS event functions that events.cpp hooks by name (its
-// kUnitHooks table, plus OnLeave and the orders); bind_build checks that
+// kUnitHooks table, plus OnLeave, the orders and the other hooks in
+// install); bind_build checks that
 // each is a mapped function.
 inline constexpr const char* kEventFunctions[] = {
     "CPlayerWar3::OnUnitDeath", "CPlayerWar3::OnTrainFinish", "CPlayerWar3::OnConstructFinish",
@@ -242,7 +256,12 @@ inline constexpr const char* kEventFunctions[] = {
     "CPlayerWar3::OnHeroReviveStart", "CPlayerWar3::OnHeroReviveCancel", "CPlayerWar3::OnHeroReviveFinish",
     "CPlayerWar3::OnUnitSell", "CPlayerWar3::OnItemSell", "CPlayerWar3::OnItemPawn",
     "CPlayerWar3::OnUnitChangeOwner", "CPlayerWar3::OnLeave", "CUnit::OnLoaded", "CUnit::OnOrder",
-    "CUnit::OnPointOrder", "CUnit::OnTargetOrder",
+    "CUnit::OnPointOrder", "CUnit::OnTargetOrder", "CUnit::OnSpellChannel", "CUnit::OnSpellCast",
+    "CUnit::OnSpellEffect", "CUnit::OnSpellFinish", "CUnit::OnSpellEndCast", "CUnit::OnDamaged",
+    "CUnit::OnAcquireTarget", "CPlayerWar3::OnUnitDecay", "CPlayerWar3::OnUnitDetected",
+    "CPlayerWar3::OnUnitHidden", "CPlayerWar3::OnEndCinematic", "CPlayerWar3::OnArrowKey", "CWidget::OnDeath",
+    "CScriptDialog::OnClick", "OnNetShowSkillMenu", "OnNetShowBuildMenu", "HandleManager::FireEndLevel",
+    "CreateUnitObject", "CUnit::Remove", "CAbilityHero::AddXP",
 };
 
 // Fills `out` from `build`. Fails if any symbol is missing or has the wrong

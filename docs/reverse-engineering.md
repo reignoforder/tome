@@ -325,6 +325,10 @@ the registration check itself; its arguments go to the event data through
 | HERO_REVIVABLE, REVIVE_START, CANCEL, FINISH (43–46) | `0x25FF60`, `0x260260`, `0x260060`, `0x260160` | hero, `ret 4` | `0x26AD96`, `0x67A660`, `0x67A440`, `0x67A550` |
 | UNIT_SELL (269), SELL_ITEM (271), PAWN_ITEM (277) | `0x261AF0`, `0x261C00`, `0x2612D0` | shop, sold, buyer / shop, buyer, item / seller, shop, item, `ret 0xC` | `0x67C8D0`, `0x67CA00`, `0x67C100` |
 | UNIT_CHANGE_OWNER (270) | `0x2606B0` | unit, previous owner (low 16 bits), `ret 8` | `0x67B400` |
+| UNIT_DECAY (21) | `0x260BC0` | unit, `ret 4` | `0x67B9C0` |
+| UNIT_DETECTED, HIDDEN (22, 23) | `0x260DC0`, `0x260FC0` | unit, `ret 4`; `this` is the **detecting** player (the `CUnit` caller gets it as its argument) | `0x67BAD0`, `0x67BBF0` |
+| END_CINEMATIC (17) | `0x25FD70` | none, `ret` (Esc, in a cinematic or not) | network handler `0x26F240` |
+| ARROW_* (261–268) | `0x25FA10` | the event id (`0x80305`–`0x8030C`: left, right, down, up, each down then up), `ret 4` | network handler `0x26EE00`; the sender (`0x26FF80`, from the key handlers `0x36F870`/`0x36FF10`) sends the action **only if the local player has that event registered** (Esc, by contrast, is always sent) |
 
 The event data's fields (and so the roles above): `0x26AFE0` writes the
 triggering unit's agent id to `+0x2C`, `0x26AC20` the other unit to `+0x38`,
@@ -347,11 +351,83 @@ under construction had 0, 0), target from `0x686810` (the agent id at
 a destructable (`0xB7D708`). The player functions are `0x2610C0`,
 `0x2614E0`, `0x262360` and `0x2611D0`.
 
+**Spells, damage, acquired targets.** The spell events go through `CUnit`
+functions that check the registrations (unit and player) themselves and
+make a handle for their data, so Tome hooks those, like the orders:
+`CUnit::OnSpellChannel` (`0x67CCB0`), `OnSpellCast` (`0x67CB30`),
+`OnSpellEffect` (`0x67CE30`), `OnSpellFinish` (`0x67D130`), `OnSpellEndCast`
+(`0x67CFB0`), each `(this = caster, CAbility*)`, `ret 4`; the player
+functions are `0x261E20`, `0x261D10`, `0x261F30`, `0x262150`, `0x262040`
+(JASS 272–276, internal `0x80310`–`0x80314`). The ability's type id is at
+`CAbility+0x34` (`0x684140`). `GetSpellTargetUnit` (`0x202D00`) and
+`GetSpellTargetX`/`Y` (`0x202E30`, `0x202F10`) call the ability's virtual
+functions `+0x3C8` (the target widget, thiscall), `+0x3CC` and `+0x3D0`
+(`float*(float* out)`, `ret 4`); `CAbilitySpell` and its subclasses
+(`CAbilityItemHeal` too) have them, `CAbility` itself doesn't, and
+`CAbilitySpell`'s own return no widget and 0, 0. Damage and acquired
+targets are unit events only (52, 60): `CUnit::OnDamaged` (`0x67B740`,
+`(float* damage, CUnit* source)`, `ret 8`, called unconditionally by
+`0x69CA80`, which applies the damage afterwards) and `CUnit::OnAcquireTarget`
+(`0x67B1D0`, `(CWidget* target)`, `ret 4`, from the attack AI). The
+selection events (24, 25: `0x2619F0`, `0x260CC0`) come from `CUnit`
+vtable functions (`0x67AF30`, `0x679E70`, `(slot, now)`) that, unless
+`now`, send a network action (`0x6BD200`) **only if a trigger listens**,
+so other clients never see a selection nobody listens for.
+
+**Widget deaths and dialogs.** `CWidget::OnDeath` (`0x650D80`, thiscall, no
+arguments) posts `EVENT_WIDGET_DEATH` (89) for units, items and
+destructables alike (`CDestructable` vtable `0xB7D708`, type id at `+0x30`,
+`GetDestructableTypeId` `0x1FFA70`). `CScriptDialog::OnClick` (`0x22E540`,
+`(button, player slot)`, `ret 8`) posts `EVENT_DIALOG_CLICK` (91) to the
+dialog and the button event (90) to the button; the network handler
+`0x26EFF0` calls it. Widget positions (`GetWidgetX`, `0x2041B0`) go through
+the vtable `+0xB8` and a sprite transform (`0x058900`), not a field. Alliance
+changes (12) are posted from somewhere `SetPlayerAlliance` (`0x213CC0`)
+reaches indirectly; not found yet.
+
+**Game events.** `HandleManager` (`CGameWar3+0x1C`) fires the game events
+through `0x284A70` (`(event id, widget)`, `ret 8`): `0x284B90` and
+`0x284BA0` post `EVENT_GAME_SHOW_SKILL` (9) and `EVENT_GAME_BUILD_SUBMENU`
+(10), `0x2831B0` `EVENT_GAME_END_LEVEL` (1, from the end of `0x1E7630`, which
+`ChangeLevel` `0x1F89E0`, `LoadGame` `0x20E070` and the restart path
+`0x1E7370` go through), `0x284810` and `0x2848F0` the tournament events
+(257, 258; Battle.net tournaments only). The two menus are network actions:
+the command card (`0x392C90`, `0x393AF0`, `0x3BCB90`) sends action `0x66`
+(skill menu, `0x2705D0`) or `0x67` (build menu, `0x270640`) on **every**
+click, and their handlers `0x26F610` and `0x26F5E0` (fastcall, the action in
+`ecx`, its sender's slot at `+0x15` as for every action) call the
+`HandleManager` functions. Tome hooks the handlers, for the player.
+
+**Units created and removed, experience.** `0x677870` (`CUnit*
+__fastcall(int player, uint32_t type, const float* x, const float* y, const
+float* facing, flags, int, int)`, `ret 0x18`) creates and places every
+unit: the `CreateUnit` natives (through `0x64E650`, flags `0x502`),
+training (`0x600E60`), summons and the map's units, 31 callers in all.
+`RemoveUnit` (`0x210C10`) calls the unit's vtable `+0x84`, then
+`CUnit::Remove` (`0x694690`, `(1, 1)`, `ret 8`), which also has a few
+ability callers; it sends the unit message `0xD0164` to itself (nothing
+else sends it) and clears the unit's orders (`0x67DF00`). A corpse that
+finishes decaying is freed some other way. Experience: the hero ability
+(`CUnit+0x1F0`, its unit at `CAbility+0x30`) keeps it at `+0x8C`
+(`GetHeroXP` `0x687440`); `CAbilityHero::AddXP` (`0x528110`, `(const
+float* xp, 5 ints)`, `ret 0x18`) is where kills (`0x527B90`), the natives
+(through `CUnit` `0x680630`) and `0x52AE10` all arrive. Tome compares the
+experience before and after it.
+
+**Player resources and the time of day** have no single event function
+(mining, spending, upkeep and bounties each change gold), so Tome reads
+them every game tick while a mod listens. `GetPlayerState` (`0x201AD0`):
+each state is a synced value at `CPlayerWar3+0x40+state*0x10`, read with
+`0x056A40` (thiscall: the agent from the ids at `+8`, then `+0x78`); gold
+and lumber (1, 2, and gathered, 15, 16) are stored times 10.
+`GetFloatGameState` (`0x1FFF40`, cdecl) gives the time of day for state 2
+(hours, as the real's bits in `eax`, like every native).
+
+**Not mapped:** buffs (`CBuff` has some 200 subclasses; adding one goes
+through ability code with no single entry found yet) and missiles.
+
 `ReviveHero` fires revive start and finish; an altar's revive order
-(`IssueImmediateOrderById(altar, 'Hpal')`) was refused in testing. The spell
-events (272–276) don't fit: their `CUnit` caller (`0x67CE30`)
-checks the registration itself and makes a handle before calling the player
-function. `CUnit::GetHeroLevel` is `0x685150` (thiscall, no arguments). Items
+(`IssueImmediateOrderById(altar, 'Hpal')`) was refused in testing. `CUnit::GetHeroLevel` is `0x685150` (thiscall, no arguments). Items
 (`CItem`) keep their type id at `+0x30`, and `GetUnitTypeName` names items
 and research ids too (`GetItemName`, `GetObjectName`).
 

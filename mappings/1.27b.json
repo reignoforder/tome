@@ -222,6 +222,12 @@
     "COrder.y": { "kind": "offset", "value": "0x50", "doc": "float: the order's target point, y." },
     "CUnit.vtable": { "kind": "data", "rva": "0x00b77eb0", "doc": "CUnit's vtable (RTTI), to tell a unit from other widgets." },
     "CItem.vtable": { "kind": "data", "rva": "0x00b77aa8", "doc": "CItem's vtable (RTTI)." },
+    "CDestructable.vtable": { "kind": "data", "rva": "0x00b7d708", "doc": "CDestructable's vtable (RTTI)." },
+    "CDestructable.type_id": { "kind": "offset", "value": "0x30", "doc": "uint32_t: the destructable type, e.g. 'LTlt' (GetDestructableTypeId, 0x1FFA70); GetUnitTypeName names it too." },
+    "CAbility.type_id": { "kind": "offset", "value": "0x34", "doc": "uint32_t: the ability's type, e.g. 'AHwe' (GetSpellAbilityId reads it through 0x684140)." },
+    "CAbilitySpell.vtable.GetTargetWidget": { "kind": "offset", "value": "0x3c8", "doc": "vtable slot: CWidget*(CAbility* this), thiscall: the spell's target widget or null (GetSpellTargetUnit, 0x202D00). Spell abilities only (CAbilitySpell and its subclasses, e.g. CAbilityItemHeal); every ability a spell event passes is one." },
+    "CAbilitySpell.vtable.GetTargetX": { "kind": "offset", "value": "0x3cc", "doc": "vtable slot: float*(CAbility* this, float* out), thiscall, ret 4: the target point's x (GetSpellTargetX, 0x202E30). CAbilitySpell itself returns 0." },
+    "CAbilitySpell.vtable.GetTargetY": { "kind": "offset", "value": "0x3d0", "doc": "vtable slot: like GetTargetX, for y (GetSpellTargetY, 0x202F10)." },
     "CUnit.type_id": { "kind": "offset", "value": "0x30", "doc": "uint32_t: the unit type, e.g. 'hpea' (GetUnitTypeId)." },
     "CUnit.owner": { "kind": "offset", "value": "0x58", "doc": "int: the owner's player slot (the unit's vtable +0xEC returns it; GetOwningPlayer)." },
     "CUnit.flags": { "kind": "offset", "value": "0x5c", "doc": "uint32_t flags; see UnitFlag.*." },
@@ -508,6 +514,141 @@
       "sig": "void(CUnit* this, CUnit* transport)",
       "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 44 a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b f9 8b 45 08",
       "doc": "A unit was loaded into a transport (GetLoadedUnit: this, GetTransportUnit): EVENT_UNIT_LOADED (0x80258) and the owner's EVENT_PLAYER_UNIT_LOADED (0x80233, CPlayerWar3 0x2611D0), but only if a trigger listens for one of them. One caller, 0x59FCE4. ret 4."
+    },
+    "CUnit::OnSpellChannel": {
+      "kind": "function", "rva": "0x0067ccb0", "conv": "thiscall",
+      "sig": "void(CUnit* this, CAbility* ability)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 40 a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b f9 e8 de 92",
+      "doc": "A unit began channeling a spell: EVENT_UNIT_SPELL_CHANNEL (0x80322) and the owner's EVENT_PLAYER_UNIT_SPELL_CHANNEL (0x80310, CPlayerWar3 0x261E20). Checks both registrations itself and returns early unless a trigger listens (it makes a handle for the event data), so Tome hooks this instead of the player function. The ability goes to the event data through 0x697E50 (GetSpellAbility). One caller, 0x3FBB80. ret 4."
+    },
+    "CUnit::OnSpellCast": {
+      "kind": "function", "rva": "0x0067cb30", "conv": "thiscall",
+      "sig": "void(CUnit* this, CAbility* ability)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 40 a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b f9 e8 5e 94",
+      "doc": "A unit began casting a spell (EVENT_PLAYER_UNIT_SPELL_CAST 0x80311, CPlayerWar3 0x261D10; the unit event 0x80321), like CUnit::OnSpellChannel. One caller, 0x3FB5D0. ret 4."
+    },
+    "CUnit::OnSpellEffect": {
+      "kind": "function", "rva": "0x0067ce30", "conv": "thiscall",
+      "sig": "void(CUnit* this, CAbility* ability)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 40 a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b f9 e8 5e 91",
+      "doc": "A spell took effect (EVENT_PLAYER_UNIT_SPELL_EFFECT 0x80312, CPlayerWar3 0x261F30; the unit event 0x80323), like CUnit::OnSpellChannel. Callers 0x3F8C30, 0x40B380, 0x5617F0. ret 4."
+    },
+    "CUnit::OnSpellFinish": {
+      "kind": "function", "rva": "0x0067d130", "conv": "thiscall",
+      "sig": "void(CUnit* this, CAbility* ability)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 40 a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b f9 e8 5e 8e",
+      "doc": "A spell finished (EVENT_PLAYER_UNIT_SPELL_FINISH 0x80313, CPlayerWar3 0x262150; the unit event 0x80325), like CUnit::OnSpellChannel. One caller, 0x40E030. ret 4."
+    },
+    "CUnit::OnSpellEndCast": {
+      "kind": "function", "rva": "0x0067cfb0", "conv": "thiscall",
+      "sig": "void(CUnit* this, CAbility* ability)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 40 a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b f9 e8 de 8f",
+      "doc": "A unit stopped casting, finished or not (EVENT_PLAYER_UNIT_SPELL_ENDCAST 0x80314, CPlayerWar3 0x262040; the unit event 0x80324), like CUnit::OnSpellChannel. One caller, 0x40C3F0. ret 4."
+    },
+    "CUnit::OnDamaged": {
+      "kind": "function", "rva": "0x0067b740", "conv": "thiscall",
+      "sig": "void(CUnit* this, float* damage, CUnit* source)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 3c a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b d9 8b 45 08 68 34",
+      "doc": "A unit takes damage, before its life goes down: EVENT_UNIT_DAMAGED (0x80234, a unit event only; GetEventDamage reads the amount from event data +0x30, GetEventDamageSource the source). Checks the registration itself; called unconditionally by 0x69CA80 (ecx = unit, edx = &source, stack: float* damage, flag), which then applies the damage. source may be null. ret 8."
+    },
+    "CUnit::OnAcquireTarget": {
+      "kind": "function", "rva": "0x0067b1d0", "conv": "thiscall",
+      "sig": "void(CUnit* this, CWidget* target)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 38 a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b d9 68 3c",
+      "doc": "A unit acquired a target: EVENT_UNIT_ACQUIRED_TARGET (0x8023C, a unit event only; GetEventTargetUnit). Checks the registration itself; called unconditionally by the attack AI (0x4935E0, 0x493FF0, 0x49E130). ret 4."
+    },
+    "CPlayerWar3::OnUnitDecay": {
+      "kind": "function", "rva": "0x00260bc0", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* unit)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 3c a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b d9 8b 45 08 68 15",
+      "doc": "A dead unit of this player began to decay (GetDecayingUnit). Fires the JASS EVENT_PLAYER_UNIT_DECAY (0x80215), registration checked inside (0x072190); called unconditionally by CUnit 0x67B9C0, which then fires the unit event (0x80236). ret 4."
+    },
+    "CPlayerWar3::OnUnitDetected": {
+      "kind": "function", "rva": "0x00260dc0", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* unit)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 3c a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b d9 8b 45 08 68 16",
+      "doc": "This player detected an invisible unit (GetDetectedUnit, GetEventDetectingPlayer: this). Fires the JASS EVENT_PLAYER_UNIT_DETECTED (0x80216) for the detecting player, registration checked inside; called by CUnit 0x67BAD0 (this = the unit, the player as its argument) whenever it has a player. ret 4."
+    },
+    "CPlayerWar3::OnUnitHidden": {
+      "kind": "function", "rva": "0x00260fc0", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* unit)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 3c a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b d9 8b 45 08 68 17",
+      "doc": "EVENT_PLAYER_UNIT_HIDDEN (0x80217) for this player, registration checked inside; called by CUnit 0x67BBF0 like OnUnitDetected. ret 4."
+    },
+    "CPlayerWar3::OnEndCinematic": {
+      "kind": "function", "rva": "0x0025fd70", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 38 a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b d9 68 11",
+      "doc": "The player pressed Esc (cinematic mode or not): EVENT_PLAYER_END_CINEMATIC (0x80211), registration checked inside. Called by the network action handler 0x26F240 with the action's player (+0x15). ret."
+    },
+    "CPlayerWar3::OnArrowKey": {
+      "kind": "function", "rva": "0x0025fa10", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, int event)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 53 56 57 a1 ?? ?? ?? ?? 33 c5 50 8d 45 f4 64 a3 00 00 00 00 8b d9 8b 7d 08 8d",
+      "doc": "The player pressed or released an arrow key: event is the JASS event id + 0x80200, EVENT_PLAYER_ARROW_LEFT_DOWN (0x80305) to EVENT_PLAYER_ARROW_UP_UP (0x8030C): left, right, down, up, each down then up. Registration checked inside. Called by the network action handler 0x26EE00. ret 4."
+    },
+    "CWidget::OnDeath": {
+      "kind": "function", "rva": "0x00650d80", "conv": "thiscall",
+      "sig": "void(CWidget* this)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 10 56 a1 ?? ?? ?? ?? 33 c5 50 8d 45 f4 64 a3 00 00 00 00 8b f1 8b 0d ?? ?? ?? ?? 56 0f b7 41 28 50 e8 e7",
+      "doc": "A widget (unit, item or destructable) died: posts EVENT_WIDGET_DEATH (0x80259) to the local player (0x262DF0) and to the widget itself. Callers: CDestructable 0x657770 (KillDestructable, damage), CItem 0x6C0870, CUnit 0x679AC0 and others. ret."
+    },
+    "CScriptDialog::OnClick": {
+      "kind": "function", "rva": "0x0022e540", "conv": "thiscall",
+      "sig": "void(CScriptDialog* this, CScriptDialogButton* button, int player)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 24 53 56 57 a1 ?? ?? ?? ?? 33 c5 50 8d 45 f4 64 a3 00 00 00 00 8b f9 c7 45 dc 00 00 00 00 33",
+      "doc": "A player clicked a dialog button (GetClickedDialog, GetClickedButton, GetTriggerPlayer): posts EVENT_DIALOG_CLICK (0x8025B) to the dialog and EVENT_DIALOG_BUTTON_CLICK to the button. Called by the network action handler 0x26EFF0 (player from the action's +0x15) and 0x22E460. ret 8."
+    },
+    "OnNetShowSkillMenu": {
+      "kind": "function", "rva": "0x0026f610", "conv": "fastcall", "sig": "int(CNetEvent* event)",
+      "bytes": "8b 0d ?? ?? ?? ?? e8 55 17 f7 ff 85 c0 75 0a 6a",
+      "doc": "Handler of action 0x66 (registered by 0x271400): a player opened a hero's skill menu. Fires EVENT_GAME_SHOW_SKILL (0x80209, HandleManager 0x284B90, registration checked there). The sender (0x2705D0) is called by the command card (0x392C90, 0x393AF0, 0x3BCB90) on every click of the button, whether or not a trigger listens. The event's player is CNetEvent.sender. Plain ret."
+    },
+    "OnNetShowBuildMenu": {
+      "kind": "function", "rva": "0x0026f5e0", "conv": "fastcall", "sig": "int(CNetEvent* event)",
+      "bytes": "8b 0d ?? ?? ?? ?? e8 85 17 f7 ff 85 c0 75 0a 6a",
+      "doc": "Handler of action 0x67: a player opened a worker's build menu. Fires EVENT_GAME_BUILD_SUBMENU (0x8020A, 0x284BA0). Sent like OnNetShowSkillMenu (0x270640). Plain ret."
+    },
+    "CNetEvent.sender": { "kind": "offset", "value": "0x15", "doc": "uint8_t: the player slot that sent a network action, as received (every action; see CNetEventSyncStoredInteger.sender)." },
+    "HandleManager::FireEndLevel": {
+      "kind": "function", "rva": "0x002831b0", "conv": "thiscall",
+      "sig": "void(HandleManager* this)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 10 56 a1 ?? ?? ?? ?? 33 c5 50 8d 45 f4 64 a3 00 00 00 00 8b f1 c7 45 e8 00 00 00 00 c7 45 e4",
+      "doc": "Fires EVENT_GAME_END_LEVEL (0x80201). Called once, at the end of 0x1E7630, which the ChangeLevel (0x1F89E0) and LoadGame (0x20E070) natives and the restart path (0x1E7370: RestartGame, the menus' Restart) go through before the current game is torn down. Plain ret."
+    },
+    "CreateUnitObject": {
+      "kind": "function", "rva": "0x00677870", "conv": "fastcall",
+      "sig": "CUnit*(int player, uint32_t type_id, const float* x, const float* y, const float* facing, uint32_t flags, int a, int b)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 81 ec ec 01",
+      "doc": "Creates a unit and places it: every unit the game makes goes through it (31 callers: the CreateUnit natives through 0x64E650 with flags 0x502, training 0x600E60, summons, preplaced units). Returns the CUnit, or null. ret 0x18."
+    },
+    "CUnit::Remove": {
+      "kind": "function", "rva": "0x00694690", "conv": "thiscall",
+      "sig": "void(CUnit* this, int a, int b)",
+      "bytes": "55 8b ec 56 8b f1 0f b6 46 33 83 c0 bf 83 f8 19",
+      "doc": "Takes a unit out of the game: RemoveUnit (0x210C10) calls it with (1, 1), as do ReplaceUnit-style paths (0x1FB4F0) and a few abilities (0x543E50, 0x5CD500, 0x5D6BF0, 0x641530). Sends the unit message 0xD0164 to itself (no other function sends it) and clears its orders (0x67DF00). A corpse that finishes decaying doesn't come here. ret 8."
+    },
+    "CAbilityHero::AddXP": {
+      "kind": "function", "rva": "0x00528110", "conv": "thiscall",
+      "sig": "void(CAbilityHero* this, const float* xp, int a, int b, int c, int d, int e)",
+      "bytes": "55 8b ec 83 ec 14 53 57 8b f9 89 7d f0 8b 47 30",
+      "doc": "Gives a hero experience: the hero ability (CUnit +0x1F0; its unit at CAbility.owner) adds *xp to CAbilityHero.xp and levels the hero up. Every way in comes here: kills (0x527B90), AddHeroXP/SetHeroXP/SetHeroLevel (through CUnit 0x680630) and 0x52AE10. Nothing is added at the maximum level. ret 0x18."
+    },
+    "CAbility.owner": { "kind": "offset", "value": "0x30", "doc": "CUnit*: the unit that has the ability (0x528110 reads it; 0x055CC0 looks it up when it's null)." },
+    "CAbilityHero.xp": { "kind": "offset", "value": "0x8c", "doc": "int: the hero's experience (GetHeroXP, 0x687440)." },
+    "CPlayerWar3.states": { "kind": "offset", "value": "0x40", "doc": "The player's states (GetPlayerState 0x201AD0, SetPlayerState 0x213FB0 through 0x1E98E0): one PlayerState.size record per JASS playerstate, read with SyncedInt::Get. Gold and lumber (states 1 and 2, and 15 and 16, gathered) are stored times 10." },
+    "PlayerState.size": { "kind": "constant", "value": "0x10", "doc": "Bytes per record in CPlayerWar3.states." },
+    "SyncedInt::Get": {
+      "kind": "function", "rva": "0x00056a40", "conv": "thiscall",
+      "sig": "int(const SyncedInt* this)",
+      "bytes": "8b 51 0c 8b 49 08 e8 e5 da ff ff 8b 40 78 c3 cc",
+      "doc": "The integer a synced value holds: looks up its agent (ids at +8, 0x054530) and reads +0x78. Player states and other synced game values use it. Plain ret."
+    },
+    "GetFloatGameState": {
+      "kind": "function", "rva": "0x001fff40", "conv": "cdecl",
+      "sig": "uint32_t(int state)",
+      "bytes": "55 8b ec 8b 0d ?? ?? ?? ?? e8 22 0e fe ff 8b 55",
+      "doc": "The JASS native: state 2 (GAME_STATE_TIME_OF_DAY) is the time of day in hours (0-24); others return 0. The real comes back as its bits in eax, like every native. Needs a game. Plain ret."
     },
     "COrder::GetTarget": {
       "kind": "function", "rva": "0x00686810", "conv": "thiscall",

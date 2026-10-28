@@ -51,7 +51,11 @@ stop_game() {
     pkill -9 -x war3.exe 2>/dev/null
     wait "$WINE_PID" 2>/dev/null
     WINE_PID=""
+    # Each launch starts a new tome.log; E2E_KEEP=1 keeps them all.
+    LAUNCHES=$((LAUNCHES + 1))
+    [[ "${E2E_KEEP:-0}" == 1 && -f "$LOG" ]] && cp "$LOG" "$WORK/tome.$LAUNCHES.log"
 }
+LAUNCHES=0
 
 cleanup() {
     stop_game
@@ -220,7 +224,18 @@ check_absent() {
 
 # --- run 1: everything enabled -----------------------------------------------
 
-launch
+# In the test map's game (it starts about 4 s in; it saves at 6 s of game
+# time, which holds the game up): the map's dialog, shown on "-dialog", pauses
+# the game until its hotkey T (pressed twice in case the dialog was late; T
+# does nothing for the selected units), then an arrow key; then B and O on a
+# worker and a hero the map selects on "-build" and "-skill" (menu events;
+# Esc closes the build menu first, or O isn't a hotkey there).
+if ((${#MAP_ARG[@]})); then
+    TOME_DEBUG_CLICKS="type:-dialog@6500;key:T@8500;key:T@9500;key:Left@10500;type:-build@11000;key:B@12000;\
+key:Esc@12500;type:-skill@13000;key:O@14500" launch
+else
+    launch
+fi
 
 echo "startup"
 check "Recognized Warcraft III 1\.27b \([0-9]+ mapped symbols\)" "game build recognized from the mapping database" 30
@@ -238,7 +253,7 @@ check "Assets at startup: $ASSET_FILES files from 3 mods \(0 overridden" "mods' 
 check "Asset probe .*: [0-9]+ bytes, fnv1a $PROBE_HASH" "the game reads the mod's texture instead of its own"
 check "Bootstrap complete" "bootstrap finished" 15
 check "Main-thread dispatcher installed" "main-thread dispatcher installed"
-check "Events: hooked screens, map load, game start and end, frames, game ticks, shutdown, chat, pause, units, players and saved games" "event hooks installed"
+check "Events: hooked screens, map load, game start and end, frames, game ticks, shutdown, chat, pause, units, spells, damage, experience, players, resources, keys, menus, dialogs, levels and saved games" "event hooks installed"
 check "\[hello\] 100 ticks" "tick events reach mods"
 MAIN_TID=$(grep -oE "main thread [0-9]+" "$LOG" | head -n 1 | grep -oE "[0-9]+$")
 
@@ -287,6 +302,26 @@ if ((${#MAP_ARG[@]})); then
     check "\[hello\] revival started: Paladin \(Hpal\) of player 1" "revival started event" 10
     check "\[hello\] revived: Paladin \(Hpal\) of player 1" "revived event"
     check "\[hello\] saving the game: Save\\\\.+\\\\TomeE2E\.w3z" "save event with the saved game's path" 15
+    check "\[hello\] Archmage \(Hamg\) of player 1 begins casting Summon Water Elemental \(AHwe\)" "spell cast event, with the ability"
+    check "\[hello\] Archmage \(Hamg\) of player 1 gets the effect of Summon Water Elemental \(AHwe\)" "spell effect event"
+    check "\[hello\] Archmage \(Hamg\) of player 1 stops casting Summon Water Elemental \(AHwe\)" "spell end cast event"
+    check "\[hello\] Footman \(hfoo\) of player 1 takes [0-9.]+ damage from Archmage \(Hamg\) of player 1" "damage event, with the source and amount"
+    check "\[hello\] .+ \(LTlt\) destroyed, handle 0x1[0-9a-f]{5}" "destructable death event, with its handle" 10
+    check "\[hello\] .+ \(ratf\) destroyed, handle 0x1[0-9a-f]{5}" "item death event, with its handle"
+    check "\[hello\] (Gnoll \(ngno\) of player 13 acquired .+|.+ acquired Gnoll \(ngno\) of player 13)" "acquired target event" 10
+    check "\[hello\] Footman \(hfoo\) of player 1 decays" "decay event" 20
+    check "\[hello\] .+ clicked dialog 0x1[0-9a-f]{5} button 0x1[0-9a-f]{5}" "dialog click event (simulated hotkey), with the handles" 10
+    check "\[hello\] .+ pressed Left" "arrow key pressed event (the map listens for it)"
+    check "\[hello\] .+ released Left" "arrow key released event"
+    check "\[hello\] .+ opened the build menu" "build menu event (simulated B on a selected worker)" 10
+    check "\[hello\] .+ opened the skill menu" "skill menu event (simulated O on a selected hero)" 10
+    check "\[hello\] created Rifleman \(hrif\) of player 1" "unit created event"
+    check "\[hello\] removed Rifleman \(hrif\) of player 1" "unit removed event (RemoveUnit)"
+    check "\[hello\] Archmage \(Hamg\) of player 1 gained [0-9]+ experience \(level 3\)" "hero experience event, with the level"
+    check "\[hello\] .+'s gold: [0-9]+ -> 777" "resource event (SetPlayerState), with the new value"
+    check "\[hello\] .+'s food used: [0-9]+ -> [0-9]+" "resource event for food"
+    check "\[hello\] night falls at 18\.[0-9]+" "night event (the time of day passed 18:00)"
+    check "\[hello\] day breaks at 12\.00" "day event (a script set the time of day to noon)"
     check "\[hello\] player 1 \(.+\) won" "victory event (melee, from RemovePlayer)" 20
     echo "frame natives (map script)"
     check "\[map\] TomeLogInteger\(7001\)" "BlzLoadTOCFile read its string argument and loaded the TOC"
@@ -434,6 +469,7 @@ if ((${#MAP_ARG[@]})); then
     set_enabled hello true
     check "\[hello\] enabled" "hello enabled mid-game" 15
     check "Saving the game: Save\\\\.+\\\\TomeE2E\.w3z" "the map saved the game" 20
+    check "\[hello\] the level ends" "level end event (LoadGame from the script)" 30
     check "\[hello\] loaded a saved game: Save\\\\.+\\\\TomeE2E\.w3z" "loaded event with the saved game's path" 30
     check_count "Game started: " 2 "the loaded game started" 30
     check "\[map\] TomeLogInteger\(8604\)" "the loaded game's timers run (and don't load again)" 15
@@ -533,11 +569,12 @@ PY
 SAVED_MAP_ARG=("${MAP_ARG[@]}")
 MAP_ARG=()
 # In the game (from 28 s, leaving loading time even on a slow run), chat
-# commands, then the hello mod's in-game button; in the Menu, Mods, Esc (back
+# commands, Esc, then the
+# hello mod's in-game button; in the Menu, Mods, Esc (back
 # to the menu), Esc (closes it), Ctrl+F10 (the menu with Mods open), Done.
 TOME_DEBUG_CLICKS="0.86,0.245@5000;0.5,0.892@6500;0.867,0.657@8000;0.875,0.80@12000;type:/hello e2e@28000;\
 type:/tome disable hello@30500;type:/hello ignored@33000;type:/tome enable hello@35000;type:/tome nonsense@37000;\
-0.5,0.475@39000;0.163,0.018@40000;0.574,0.418@41000;key:Esc@41700;key:Esc@42200;key:Ctrl+F10@42700;\
+key:Esc@38200;0.5,0.475@39000;0.163,0.018@40000;0.574,0.418@41000;key:Esc@41700;key:Esc@42200;key:Ctrl+F10@42700;\
 0.676,0.653@43400;0.5,0.541@44200;\
 0.5,0.29@46000;0.788,0.942@52000;0.859,0.925@60000;0.859,0.878@65000" launch
 MAP_ARG=("${SAVED_MAP_ARG[@]}")
@@ -561,6 +598,7 @@ check_count "\[hello\] added a Hello button to the game" 2 "re-enabling mid-game
 check_count "\[hello\] game start: " 2 "a mod enabled mid-game gets the game start"
 check "Chat command: /tome nonsense" "unknown /tome subcommands are still swallowed" 10
 check_absent "Hello, ignored" "a disabled mod's command doesn't run"
+check "\[hello\] .+ pressed Esc" "Esc event (sent whether or not the map listens)"
 check "\[hello\] Hello button clicked \(2\)" "click on an in-game button" 10
 check "Esc menu set up; Mods button added" "the Esc menu has a Mods button"
 check "\[hello\] game paused by .+" "the Esc menu pauses a single player game: pause event with the player" 10

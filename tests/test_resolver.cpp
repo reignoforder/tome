@@ -290,3 +290,65 @@ TEST(resolver_dependents_of_only_counts_mods_that_run) {
     g.add("user", R"("depends":{"lib":"*"})");
     CHECK(dependents_of(g.inputs, g.env, off).empty());
 }
+
+TEST(resolver_breaks_ring_doesnt_depend_on_folder_order) {
+    // Two mods breaking each other: the same one runs whatever the folder
+    // order (the first by id gives way), so players with the same mods agree.
+    for (int flip = 0; flip < 2; ++flip) {
+        Fixture f;
+        size_t a = 0, b = 0;
+        if (flip) b = f.add("bb", R"("breaks":{"aa":"*"})");
+        a = f.add("aa", R"("breaks":{"bb":"*"})");
+        if (!flip) b = f.add("bb", R"("breaks":{"aa":"*"})");
+        auto r = f.run();
+        CHECK(r.mods[a].state == ModState::Breaks);
+        CHECK(r.mods[b].state == ModState::Active);
+    }
+    // aa breaks bb, which breaks cc and back: the ring is decided first (bb
+    // gives way), so aa and cc both run, in every folder order.
+    const char* order[][3] = {{"aa", "bb", "cc"}, {"bb", "aa", "cc"}, {"cc", "bb", "aa"}};
+    for (const auto& names : order) {
+        Fixture f;
+        size_t a = 0, b = 0, c = 0;
+        for (const char* name : names) {
+            std::string id = name;
+            if (id == "aa") a = f.add("aa", R"("breaks":{"bb":"*"})");
+            if (id == "bb") b = f.add("bb", R"("breaks":{"cc":"*"})");
+            if (id == "cc") c = f.add("cc", R"("breaks":{"bb":"*"})");
+        }
+        auto r = f.run();
+        CHECK(r.mods[a].state == ModState::Active);
+        CHECK(r.mods[b].state == ModState::Breaks);
+        CHECK(r.mods[c].state == ModState::Active);
+    }
+}
+
+TEST(resolver_dependents_of_ignores_breaks_cascades) {
+    // Turning tt off lets yy run, which turns nn off, which stops mm; but mm
+    // doesn't need tt, so it isn't one of tt's dependents.
+    Fixture f;
+    size_t tt = f.add("tt");
+    f.add("yy", R"("breaks":{"tt":"*"})");
+    f.add("nn", R"("breaks":{"yy":"*"})");
+    f.add("mm", R"("depends":{"nn":"*"})");
+    size_t user = f.add("user", R"("depends":{"tt":"*"})");
+    CHECK(dependents_of(f.inputs, f.env, tt) == std::vector<size_t>({user}));
+}
+
+TEST(resolver_waiting_dependents) {
+    // req waits for a multiplayer game to end (left out, as if disabled): hud
+    // needs it and top needs hud, so both wait. alt needs "hp-bars", which
+    // bars (running) provides too: it runs. bad also needs a mod that isn't
+    // installed, so it can't run after the game either: it shows its error.
+    Fixture f;
+    size_t req = f.add("req", R"("provides":["hp-bars"])", false);
+    size_t hud = f.add("hud", R"("depends":{"req":"*"})");
+    size_t top = f.add("top", R"("depends":{"hud":"*"})");
+    f.add("bars", R"("provides":["hp-bars"])");
+    size_t alt = f.add("alt", R"("depends":{"hp-bars":"*"})");
+    f.add("bad", R"("depends":{"req":"*","ghost":"*"})");
+    auto r = f.run();
+    CHECK(r.mods[alt].state == ModState::Active);
+    CHECK(waiting_dependents(f.inputs, r, {req}) == std::vector<size_t>({hud, top}));
+    CHECK(waiting_dependents(f.inputs, r, {}).empty());
+}

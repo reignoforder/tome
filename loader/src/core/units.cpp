@@ -41,6 +41,47 @@ int32_t pause_player(uint32_t player, uint32_t by_trigger) {
     return static_cast<int32_t>(player);
 }
 
+bool arrow_key(uint32_t raw_event, int32_t& key, int32_t& pressed) {
+    // common.j: EVENT_PLAYER_ARROW_LEFT_DOWN is 261, then LEFT_UP, RIGHT_DOWN,
+    // RIGHT_UP, DOWN_DOWN, DOWN_UP, UP_DOWN, UP_UP; the game adds 0x80200.
+    constexpr uint32_t kFirst = 0x80200 + 261;
+    if (raw_event < kFirst || raw_event >= kFirst + 8) return false;
+    uint32_t index = raw_event - kFirst;
+    key = static_cast<int32_t>(index / 2);  // left, right, down, up: tome_arrow_key's order
+    pressed = index % 2 == 0;
+    return true;
+}
+
+int32_t player_state_scale(int32_t state) {
+    // GetPlayerState (0x201AD0) divides these by 10.
+    return state == 1 || state == 2 || state == 15 || state == 16 ? 10 : 1;
+}
+
+bool ResourceWatch::update(int32_t slot, int32_t resource, int32_t value, int32_t& previous) {
+    if (slot < 0 || slot >= kSlots) return false;
+    int32_t index = 0;
+    while (index < kResources && kWatchedResources[index] != resource) ++index;
+    if (index == kResources) return false;
+    bool known = known_[slot][index];
+    previous = values_[slot][index];
+    values_[slot][index] = value;
+    known_[slot][index] = true;
+    return known && previous != value;
+}
+
+void ResourceWatch::reset() {
+    for (auto& row : known_) {
+        for (bool& known : row) known = false;
+    }
+}
+
+int32_t day_change(double before, double now) {
+    if (before < 0) return 0;
+    auto is_day = [](double hours) { return hours >= 6.0 && hours < 18.0; };
+    if (is_day(before) == is_day(now)) return 0;
+    return is_day(now) ? 1 : -1;
+}
+
 bool Results::first(int32_t event, int32_t player) {
     std::pair<int32_t, int32_t> key(event, player);
     for (const auto& seen : seen_) {

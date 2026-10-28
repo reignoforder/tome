@@ -20,6 +20,10 @@ using TypeNameFn = const char*(__fastcall*)(uint32_t type_id, uint32_t index);
 using StringTextFn = const char*(__thiscall*)(const void* string);
 using HeroLevelFn = int(__thiscall*)(const void* unit);
 using OrderTargetFn = void*(__thiscall*)(const void* order);
+using SpellTargetFn = void*(__thiscall*)(void* ability);
+using SpellPointFn = const float*(__thiscall*)(void* ability, float* out);
+using SyncedIntGetFn = int(__thiscall*)(const void* value);
+using FloatGameStateFn = uint32_t(__cdecl*)(int state);
 
 // The selection holds at most this many (CSelectionWar3, 0x28DBE0); more
 // would mean the list isn't what it should be.
@@ -32,7 +36,9 @@ TypeNameFn g_type_name = nullptr;
 StringTextFn g_string_text = nullptr;
 HeroLevelFn g_hero_level = nullptr;
 OrderTargetFn g_order_target = nullptr;
-uintptr_t g_unit_vtable = 0, g_item_vtable = 0;
+SyncedIntGetFn g_synced_int_get = nullptr;
+FloatGameStateFn g_float_game_state = nullptr;
+uintptr_t g_unit_vtable = 0, g_item_vtable = 0, g_destructable_vtable = 0;
 FlagBits g_flag_bits;
 HandleLayout g_handle_layout;
 
@@ -64,9 +70,15 @@ void describe_unit(const void* unit, tome_unit& out) {
     out.name = name ? name : "";
     out.owner = field<int32_t>(unit, p.unit_owner_offset);
     out.flags = classify(out.type_id, field<uint32_t>(unit, p.unit_flags_offset), g_flag_bits);
+    out.handle = handle_of(unit);
+}
+
+uint32_t handle_of(const void* agent) {
+    if (!agent) return 0;
+    const auto& p = g_build->play;
     void* g = game();
     void* handles = g ? field<void*>(g, p.handles_offset) : nullptr;
-    out.handle = find_handle(handles, unit, field<uint32_t>(unit, p.agent_id_offset + 4), g_handle_layout);
+    return find_handle(handles, agent, field<uint32_t>(agent, p.agent_id_offset + 4), g_handle_layout);
 }
 
 namespace {
@@ -104,8 +116,11 @@ void init(uintptr_t game_base, const BuildMappings& build) {
     g_string_text = reinterpret_cast<StringTextFn>(game_base + build.jass.string_get_text);
     g_hero_level = reinterpret_cast<HeroLevelFn>(game_base + p.unit_hero_level);
     g_order_target = reinterpret_cast<OrderTargetFn>(game_base + p.order_target);
+    g_synced_int_get = reinterpret_cast<SyncedIntGetFn>(game_base + p.synced_int_get);
+    g_float_game_state = reinterpret_cast<FloatGameStateFn>(game_base + p.get_float_game_state);
     g_unit_vtable = game_base + p.unit_vtable;
     g_item_vtable = game_base + p.item_vtable;
+    g_destructable_vtable = game_base + p.destructable_vtable;
     g_flag_bits = {p.unit_flag_dead, p.unit_flag_structure, p.unit_flag_not_hero};
     g_handle_layout = {p.handle_buckets_offset, p.handle_mask_offset, p.handle_entries_offset, p.handle_first};
 }
@@ -187,6 +202,15 @@ const char* object_name(uint32_t id) {
     return name ? name : "";
 }
 
+Widget classify_widget(void* widget) {
+    Widget out;
+    uintptr_t vtable = widget ? field<uintptr_t>(widget, 0) : 0;
+    if (vtable == g_unit_vtable) out.unit = widget;
+    if (vtable == g_item_vtable) out.item = widget;
+    if (vtable == g_destructable_vtable) out.destructable = widget;
+    return out;
+}
+
 Order read_order(const void* order, int32_t type) {
     const auto& p = g_build->play;
     Order out;
@@ -196,11 +220,51 @@ Order read_order(const void* order, int32_t type) {
     out.x = field<float>(order, p.order_x_offset);
     out.y = field<float>(order, p.order_y_offset);
     if (type != TOME_ORDER_TARGET) return out;
-    void* target = g_order_target(order);
-    uintptr_t vtable = target ? field<uintptr_t>(target, 0) : 0;
-    if (vtable == g_unit_vtable) out.target_unit = target;
-    if (vtable == g_item_vtable) out.target_item = target;
+    out.target = classify_widget(g_order_target(order));
     return out;
+}
+
+Spell read_spell(void* ability) {
+    const auto& p = g_build->play;
+    Spell out;
+    if (!ability) return out;
+    out.ability_id = field<uint32_t>(ability, p.ability_type_offset);
+    auto vtable = field<const char*>(ability, 0);
+    out.target = classify_widget(field<SpellTargetFn>(vtable, p.spell_target_slot)(ability));
+    float value = 0;
+    out.x = *field<SpellPointFn>(vtable, p.spell_target_x_slot)(ability, &value);
+    out.y = *field<SpellPointFn>(vtable, p.spell_target_y_slot)(ability, &value);
+    return out;
+}
+
+uint32_t destructable_type(const void* destructable) {
+    return destructable ? field<uint32_t>(destructable, g_build->play.destructable_type_offset) : 0;
+}
+
+void* ability_owner(const void* ability) {
+    return ability ? field<void*>(ability, g_build->play.ability_owner_offset) : nullptr;
+}
+
+int32_t hero_xp(const void* hero_ability) {
+    return hero_ability ? field<int32_t>(hero_ability, g_build->play.hero_xp_offset) : 0;
+}
+
+bool player_resource(int32_t slot, int32_t resource, int32_t& value) {
+    const char* p = static_cast<const char*>(player(slot));
+    if (!p) return false;
+    const auto& play = g_build->play;
+    value = g_synced_int_get(p + play.player_states_offset + static_cast<uint32_t>(resource) * play.player_state_size) /
+            player_state_scale(resource);
+    return true;
+}
+
+double time_of_day() {
+    if (!game()) return -1;
+    constexpr int kTimeOfDay = 2;  // GAME_STATE_TIME_OF_DAY
+    uint32_t bits = g_float_game_state(kTimeOfDay);
+    float hours;
+    std::memcpy(&hours, &bits, sizeof(hours));
+    return hours;
 }
 
 void fill_api(tome_api& api) {

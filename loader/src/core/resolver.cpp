@@ -26,6 +26,12 @@ bool provides(const ModMetadata& meta, const std::string& id) {
     return std::find(meta.provides.begin(), meta.provides.end(), id) != meta.provides.end();
 }
 
+// Whether `meta` could meet `dep`, as resolve() matches them: by id and
+// version, or by "provides" for a dependency on any version.
+bool could_meet(const Dependency& dep, const ModMetadata& meta) {
+    return (meta.id == dep.id && dep.range.matches(meta.version)) || (dep.range.any() && provides(meta, dep.id));
+}
+
 } // namespace
 
 ResolveResult resolve(const std::vector<ResolveInput>& inputs, const ResolveEnvironment& env) {
@@ -239,12 +245,25 @@ ResolveResult resolve(const std::vector<ResolveInput>& inputs, const ResolveEnvi
                 }
             }
         }
-        // Every target may still go (mods breaking each other in a ring): the first one gives way.
-        for (size_t i = 0; i < n && off < 0; ++i) {
-            if (!targets[i].empty()) {
-                off = static_cast<long>(i);
-                because = static_cast<long>(targets[i][0]);
+        // Every target may still go (mods breaking each other in a ring): a
+        // mod in the ring (it breaks one and is broken by one) gives way, the
+        // first by id rather than by folder, so every player who has the same
+        // mods ends up running the same ones. A mod only breaking into the
+        // ring waits for it to be decided.
+        if (off < 0) {
+            std::vector<bool> targeted(n, false);
+            for (size_t i = 0; i < n; ++i) {
+                for (size_t t : targets[i]) targeted[t] = true;
             }
+            for (int pass = 0; pass < 2 && off < 0; ++pass) {
+                for (size_t i = 0; i < n; ++i) {
+                    if (targets[i].empty() || (pass == 0 && !targeted[i])) continue;
+                    if (off < 0 || inputs[i].meta->id < inputs[static_cast<size_t>(off)].meta->id) {
+                        off = static_cast<long>(i);
+                    }
+                }
+            }
+            if (off >= 0) because = static_cast<long>(targets[static_cast<size_t>(off)][0]);
         }
         if (off < 0) break;
         const ModMetadata& other = *inputs[static_cast<size_t>(because)].meta;
@@ -278,14 +297,68 @@ std::vector<size_t> dependents_of(const std::vector<ResolveInput>& inputs, const
     without[target].user_enabled = false;
     ResolveResult before = resolve(inputs, env);
     ResolveResult after = resolve(without, env);
+    const size_t n = inputs.size();
+    auto active = [&](size_t j) { return before.mods[j].state == ModState::Active; };
+    // The running mods that need target, directly or through other mods
+    // that need it. A mod that only stops because target's going lets a
+    // "breaks" play out differently (it doesn't need target) isn't one.
+    std::vector<bool> needs(n, false);
+    needs[target] = true;
+    for (bool grew = true; grew;) {
+        grew = false;
+        for (size_t i = 0; i < n; ++i) {
+            if (needs[i] || !active(i)) continue;
+            for (const Dependency& dep : inputs[i].meta->depends) {
+                for (size_t j = 0; j < n && !needs[i]; ++j) {
+                    if (needs[j] && could_meet(dep, *inputs[j].meta)) needs[i] = grew = true;
+                }
+                if (needs[i]) break;
+            }
+        }
+    }
     std::vector<size_t> result;
-    for (size_t i = 0; i < inputs.size(); ++i) {
-        if (i != target && before.mods[i].state == ModState::Active &&
-            after.mods[i].state == ModState::DependencyInactive) {
+    for (size_t i = 0; i < n; ++i) {
+        if (i != target && needs[i] && active(i) && after.mods[i].state == ModState::DependencyInactive) {
             result.push_back(i);
         }
     }
     return result;
+}
+
+std::vector<size_t> waiting_dependents(const std::vector<ResolveInput>& inputs, const ResolveResult& result,
+                                       const std::vector<size_t>& waiting) {
+    const size_t n = inputs.size();
+    std::vector<bool> waits(n, false);
+    for (size_t w : waiting) waits[w] = true;
+    std::vector<size_t> out;
+    for (bool grew = true; grew;) {
+        grew = false;
+        for (size_t i = 0; i < n; ++i) {
+            if (waits[i] || !inputs[i].user_enabled || result.mods[i].state != ModState::DependencyInactive) continue;
+            // Every dependency nothing active meets must be one a waiting mod could meet.
+            bool unmet = false, all_waiting = true;
+            for (const Dependency& dep : inputs[i].meta->depends) {
+                bool met = false, by_waiting = false;
+                for (size_t j = 0; j < n; ++j) {
+                    if (!could_meet(dep, *inputs[j].meta)) continue;
+                    met = met || result.mods[j].state == ModState::Active;
+                    by_waiting = by_waiting || waits[j];
+                }
+                if (met) continue;
+                unmet = true;
+                if (!by_waiting) {
+                    all_waiting = false;
+                    break;
+                }
+            }
+            if (unmet && all_waiting) {
+                waits[i] = grew = true;
+                out.push_back(i);
+            }
+        }
+    }
+    std::sort(out.begin(), out.end());
+    return out;
 }
 
 } // namespace tome

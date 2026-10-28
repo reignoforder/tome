@@ -2,6 +2,7 @@
 
 #include "core/assets.h"
 #include "core/hooks.h"
+#include "core/keys.h"
 #include "core/metadata.h"
 #include "core/mod_status.h"
 #include "core/resolver.h"
@@ -151,10 +152,17 @@ private:
         tome_mod_lifecycle_fn disable_fn = nullptr;
         tome_mod_lifecycle_fn unload_fn = nullptr;
         bool enabled = false;
-        // From tome.mod.json when it was enabled, for the game lock.
+        // `/tome reload` asked for its DLL to be loaded again (the next
+        // refresh treats it as changed; unload() clears it). rt.stamp stays
+        // the loaded DLL's, so a crash is still recorded against that DLL.
+        bool reload_requested = false;
+        // From tome.mod.json as of the last refresh that kept it running,
+        // for the game lock; frozen while it's locked.
         bool required = false;
         std::vector<std::string> depends;  // ids
+        std::vector<std::string> versioned;  // the depends with a version range
         std::vector<std::string> provides;
+        std::vector<Dependency> breaks;
     };
 
     struct LoadFailure {
@@ -190,6 +198,9 @@ private:
 
     std::vector<Installed> discover() const;
     void read_settings_schema(Installed& mod) const;
+    // Declares the natives of every valid mod that targets this game build;
+    // a mod whose natives can't be declared becomes invalid (§5.5).
+    void declare_natives(std::vector<Installed>& installed) const;
     // Runs fn under the lock, then tells the mods about settings that changed meanwhile.
     void locked(const std::function<void()>& fn);
     std::vector<std::string> set_enabled_locked(const std::string& id, bool enabled);
@@ -244,6 +255,7 @@ private:
     std::string safe_mode_;        // why safe mode is on; empty if it isn't
     bool game_lock_ = false;       // a multiplayer game is running (set_game_lock)
     std::set<std::string> locked_;  // the mods it keeps running, by id
+    std::vector<keys::Binding> declared_keys_;  // what the last refresh gave keybinds::set_mods
     std::set<std::string> safe_mode_enabled_;  // enabled during this session despite safe mode
     std::map<std::string, std::pair<uint64_t, std::string>> sync_hashes_;  // by folder: files' stamps, hash
     mutable std::map<std::string, ParsedMeta> meta_cache_;

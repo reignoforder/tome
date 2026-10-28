@@ -37,6 +37,10 @@ GLOBALS = """\
     boolean tome_e2e_loaded = false
     boolean tome_e2e_load = false
     unit tome_e2e_paladin = null
+    dialog tome_e2e_dialog = null
+    trigger tome_e2e_dialog_trigger = null
+    trigger tome_e2e_arrow_trigger = null
+    trigger tome_e2e_menu_trigger = null
 """
 
 CALLS = """\
@@ -106,6 +110,21 @@ CALLS = """\
     call TimerStart(CreateTimer(), 6.0, false, function TomeE2ESave)
     call TimerStart(CreateTimer(), 8.0, false, function TomeE2ELoad)
     call TimerStart(CreateTimer(), 12.0, false, function MeleeInitVictoryDefeat)
+    // A dialog with a hotkey (T) on the chat line "-dialog", for runs with
+    // simulated keys: a dialog pauses a single player game until it's clicked.
+    set tome_e2e_dialog_trigger = CreateTrigger()
+    call TriggerRegisterPlayerChatEvent(tome_e2e_dialog_trigger, Player(0), "-dialog", true)
+    call TriggerAddAction(tome_e2e_dialog_trigger, function TomeE2EDialog)
+    // The game only sends a player's arrow keys while a trigger listens.
+    set tome_e2e_arrow_trigger = CreateTrigger()
+    call TriggerRegisterPlayerEvent(tome_e2e_arrow_trigger, Player(0), EVENT_PLAYER_ARROW_LEFT_DOWN)
+    call TriggerRegisterPlayerEvent(tome_e2e_arrow_trigger, Player(0), EVENT_PLAYER_ARROW_LEFT_UP)
+    // "-build" and "-skill" select a new worker or hero alone, for a
+    // simulated B (build menu) or O (hero skill menu).
+    set tome_e2e_menu_trigger = CreateTrigger()
+    call TriggerRegisterPlayerChatEvent(tome_e2e_menu_trigger, Player(0), "-build", true)
+    call TriggerRegisterPlayerChatEvent(tome_e2e_menu_trigger, Player(0), "-skill", true)
+    call TriggerAddAction(tome_e2e_menu_trigger, function TomeE2EMenuUnit)
     // Code that waits: HelloRun returns at the wait, twice on one trigger.
     call HelloRun(function TomeE2EWaits)
     call HelloRun(function TomeE2EWaits)
@@ -187,6 +206,7 @@ function TomeE2EUnits takes nothing returns nothing
     local item potion
     call Cheat("warpten")
     call SetHeroLevel(hero, 3, true)
+    call AddHeroXP(hero, 50, true)
     set potion = UnitAddItemById(hero, 'pinv')
     call UnitUseItem(hero, potion)
     call UnitRemoveItem(hero, UnitAddItemById(hero, 'stwp'))
@@ -215,7 +235,38 @@ function TomeE2EMore takes nothing returns nothing
     call IssueTargetOrder(zeppelin, "load", passenger)
     call SetUnitOwner(CreateUnit(Player(0), 'hfoo', x, y - 700.0, 0.0), Player(1), true)
     call KillUnit(tome_e2e_paladin)
+    // A destructable and an item destroyed; a creep that acquires a target.
+    call KillDestructable(CreateDestructable('LTlt', x - 700.0, y - 700.0, 0.0, 1.0, 0))
+    call SetWidgetLife(CreateItem('ratf', x - 600.0, y - 700.0), 0.0)
+    call CreateUnit(Player(PLAYER_NEUTRAL_AGGRESSIVE), 'ngno', x + 800.0, y - 800.0, 0.0)
+    call CreateUnit(Player(0), 'hfoo', x + 750.0, y - 800.0, 0.0)
+    // A unit created and removed, gold set (nothing else spends in this
+    // tick), and the time of day set just before dusk: night falls a
+    // moment later, and TomeE2EUpgrade sets it back to noon.
+    call RemoveUnit(CreateUnit(Player(0), 'hrif', x - 800.0, y - 300.0, 0.0))
+    call SetPlayerState(Player(0), PLAYER_STATE_RESOURCE_GOLD, 777)
+    call SetFloatGameState(GAME_STATE_TIME_OF_DAY, 17.98)
     call TomeLogInteger(8606)
+endfunction
+
+function TomeE2EMenuUnit takes nothing returns nothing
+    local real x = GetStartLocationX(GetPlayerStartLocation(Player(0)))
+    local real y = GetStartLocationY(GetPlayerStartLocation(Player(0)))
+    local unit u
+    if GetEventPlayerChatString() == "-build" then
+        set u = CreateUnit(Player(0), 'hpea', x - 200.0, y - 450.0, 0.0)
+    else
+        set u = CreateUnit(Player(0), 'Hblm', x - 300.0, y - 450.0, 0.0)
+    endif
+    call ClearSelection()
+    call SelectUnit(u, true)
+endfunction
+
+function TomeE2EDialog takes nothing returns nothing
+    set tome_e2e_dialog = DialogCreate()
+    call DialogSetMessage(tome_e2e_dialog, "Tome")
+    call DialogAddButton(tome_e2e_dialog, "Test", 'T')
+    call DialogDisplay(Player(0), tome_e2e_dialog, true)
 endfunction
 
 // The Paladin killed at 3 s (revivable once its death animation ends),
@@ -232,6 +283,7 @@ function TomeE2ERevive takes nothing returns nothing
 endfunction
 
 function TomeE2EUpgrade takes nothing returns nothing
+    call SetFloatGameState(GAME_STATE_TIME_OF_DAY, 12.0)
     call SetPlayerState(Player(0), PLAYER_STATE_RESOURCE_LUMBER, 1000)
     call SetPlayerState(Player(0), PLAYER_STATE_RESOURCE_GOLD, 1000)
     if IssueImmediateOrderById(TomeE2ETownHall(), 'hkee') then

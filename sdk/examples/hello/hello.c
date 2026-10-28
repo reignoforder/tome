@@ -287,6 +287,96 @@ static void TOME_CALL on_play_event(tome_mod* mod, const tome_event_info* info, 
     }
 }
 
+/* API version 12: spells, damage, keys, dialogs, destructables. */
+static void TOME_CALL on_more_event(tome_mod* mod, const tome_event_info* info, void* user) {
+    static const char* const spells[] = {"begins channeling", "begins casting", "gets the effect of", "finishes", "stops casting"};
+    static const char* const keys[] = {"Left", "Right", "Down", "Up"};
+    static const char* const resources[] = {"", "gold", "lumber", "", "food cap", "food used"};
+    static int damaged = 0, acquired = 0, created = 0, resource_changes = 0;
+    char code[5], a[128], b[128];
+    (void)user;
+    switch (info->event) {
+    case TOME_EVENT_SPELL_CHANNEL:
+    case TOME_EVENT_SPELL_CAST:
+    case TOME_EVENT_SPELL_EFFECT:
+    case TOME_EVENT_SPELL_FINISH:
+    case TOME_EVENT_SPELL_END_CAST:
+        tome_logf(api, mod, TOME_LOG_INFO, "%s %s %s (%s)%s%s at %.0f, %.0f", unit_text(info->unit, a, sizeof(a)),
+                  spells[info->event - TOME_EVENT_SPELL_CHANNEL], info->object_name,
+                  tome_type_code(info->object_id, code), info->other ? " on " : "",
+                  info->other ? unit_text(info->other, b, sizeof(b)) : "", info->x, info->y);
+        return;
+    case TOME_EVENT_UNIT_DAMAGED:
+        if (++damaged > 20) return;
+        tome_logf(api, mod, TOME_LOG_INFO, "%s takes %.1f damage from %s", unit_text(info->unit, a, sizeof(a)),
+                  info->amount, unit_text(info->other, b, sizeof(b)));
+        return;
+    case TOME_EVENT_UNIT_ACQUIRED_TARGET:
+        if (++acquired > 20) return;
+        tome_logf(api, mod, TOME_LOG_INFO, "%s acquired %s", unit_text(info->unit, a, sizeof(a)),
+                  info->other ? unit_text(info->other, b, sizeof(b)) : info->object_name);
+        return;
+    case TOME_EVENT_UNIT_DECAY:
+        tome_logf(api, mod, TOME_LOG_INFO, "%s decays", unit_text(info->unit, a, sizeof(a)));
+        return;
+    case TOME_EVENT_UNIT_DETECTED:
+    case TOME_EVENT_UNIT_HIDDEN:
+        tome_logf(api, mod, TOME_LOG_INFO, "%s %s by player %d", unit_text(info->unit, a, sizeof(a)),
+                  info->event == TOME_EVENT_UNIT_DETECTED ? "detected" : "hidden", (int)info->player + 1);
+        return;
+    case TOME_EVENT_ESC_PRESSED:
+        tome_logf(api, mod, TOME_LOG_INFO, "%s pressed Esc", info->player_name);
+        return;
+    case TOME_EVENT_ARROW_KEY:
+        tome_logf(api, mod, TOME_LOG_INFO, "%s %s %s", info->player_name, info->pressed ? "pressed" : "released",
+                  info->key >= 0 && info->key < 4 ? keys[info->key] : "?");
+        return;
+    case TOME_EVENT_DESTRUCTABLE_DEATH:
+    case TOME_EVENT_ITEM_DEATH:
+        tome_logf(api, mod, TOME_LOG_INFO, "%s (%s) destroyed, handle 0x%x", info->object_name,
+                  tome_type_code(info->object_id, code),
+                  (unsigned)(info->destructable ? info->destructable_handle : info->item_handle));
+        return;
+    case TOME_EVENT_DIALOG_CLICK:
+        tome_logf(api, mod, TOME_LOG_INFO, "%s clicked dialog 0x%x button 0x%x", info->player_name,
+                  (unsigned)info->dialog, (unsigned)info->button);
+        return;
+    case TOME_EVENT_SKILL_MENU:
+    case TOME_EVENT_BUILD_MENU:
+        tome_logf(api, mod, TOME_LOG_INFO, "%s opened the %s menu", info->player_name,
+                  info->event == TOME_EVENT_SKILL_MENU ? "skill" : "build");
+        return;
+    case TOME_EVENT_LEVEL_END:
+        api->log(mod, TOME_LOG_INFO, "the level ends");
+        return;
+    case TOME_EVENT_UNIT_CREATED:
+        /* Players' units only: a map creates many mines and creeps as it loads. */
+        if (info->unit->owner >= 12 || ++created > 100) return;
+        tome_logf(api, mod, TOME_LOG_INFO, "created %s", unit_text(info->unit, a, sizeof(a)));
+        return;
+    case TOME_EVENT_UNIT_REMOVED:
+        tome_logf(api, mod, TOME_LOG_INFO, "removed %s", unit_text(info->unit, a, sizeof(a)));
+        return;
+    case TOME_EVENT_HERO_XP:
+        tome_logf(api, mod, TOME_LOG_INFO, "%s gained %.0f experience (level %d)", unit_text(info->unit, a, sizeof(a)),
+                  info->amount, (int)info->level);
+        return;
+    case TOME_EVENT_PLAYER_RESOURCE:
+        if (++resource_changes > 40) return;
+        tome_logf(api, mod, TOME_LOG_INFO, "%s's %s: %.0f -> %.0f", info->player_name,
+                  info->resource > 0 && info->resource < 6 ? resources[info->resource] : "?", info->previous,
+                  info->amount);
+        return;
+    case TOME_EVENT_DAY:
+    case TOME_EVENT_NIGHT:
+        tome_logf(api, mod, TOME_LOG_INFO, "%s at %.2f", info->event == TOME_EVENT_DAY ? "day breaks" : "night falls",
+                  info->amount);
+        return;
+    default:
+        return;
+    }
+}
+
 /* The greeting, from the mod's settings (API version 7) when Tome has them. */
 static void greet(tome_mod* mod, const char* who, const char* source) {
     char greeting[64] = "Hello", audience[32] = "world", text[256];
@@ -435,6 +525,9 @@ TOME_EXPORT void TOME_CALL tome_mod_enable(tome_mod* mod) {
         api->on_event(mod, TOME_EVENT_PAUSE, on_play_event, NULL);
         api->on_event(mod, TOME_EVENT_RESUME, on_play_event, NULL);
         for (i = TOME_EVENT_UNIT_DEATH; i <= TOME_EVENT_UNIT_OWNER_CHANGED; ++i) api->on_event(mod, i, on_play_event, NULL);
+    }
+    if (tome_has_more_events(api)) {
+        for (i = TOME_EVENT_SPELL_CHANNEL; i <= TOME_EVENT_NIGHT; ++i) api->on_event(mod, i, on_more_event, NULL);
     }
     if (tome_has_settings(api)) {
         api->on_setting_changed(mod, on_setting_changed, NULL);

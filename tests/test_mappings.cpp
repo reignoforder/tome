@@ -198,6 +198,8 @@ TEST(mappings_embedded_files_are_complete) {
             CHECK_EQ(bound.play.selection_units_offset, 0x1e8u);
             CHECK_EQ(bound.play.unit_flag_structure, 0x10000u);
             CHECK_EQ(bound.play.handle_first, 0x100000u);
+            CHECK_EQ(bound.play.spell_target_x_slot, 243u * 4);
+            CHECK_EQ(bound.play.player_state_size, 0x10u);
         }
     }
     CHECK(found_127b);

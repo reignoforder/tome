@@ -38,6 +38,40 @@ int32_t chat_recipient(int32_t raw);
 // player.
 int32_t pause_player(uint32_t player, uint32_t by_trigger);
 
+// CPlayerWar3::OnArrowKey's event (the JASS event id + 0x80200, from
+// EVENT_PLAYER_ARROW_LEFT_DOWN to EVENT_PLAYER_ARROW_UP_UP) as a
+// tome_arrow_key and whether it was pressed; false for anything else.
+bool arrow_key(uint32_t raw_event, int32_t& key, int32_t& pressed);
+
+// The player states TOME_EVENT_PLAYER_RESOURCE watches (tome_resource, the
+// JASS playerstate values), and what a stored value is divided by: the game
+// keeps gold and lumber (and what was gathered of them) times 10.
+inline constexpr int32_t kWatchedResources[] = {TOME_RESOURCE_GOLD, TOME_RESOURCE_LUMBER, TOME_RESOURCE_FOOD_CAP,
+                                                 TOME_RESOURCE_FOOD_USED};
+int32_t player_state_scale(int32_t state);
+
+// The last value seen of each watched resource per player slot (16 in
+// 1.27b: 12 players and 4 neutral ones).
+class ResourceWatch {
+public:
+    static constexpr int32_t kSlots = 16;
+
+    // Records `value`; true (with the value before it in `previous`) if one
+    // was recorded since reset() and it differs.
+    bool update(int32_t slot, int32_t resource, int32_t value, int32_t& previous);
+    void reset();
+
+private:
+    static constexpr int32_t kResources = sizeof(kWatchedResources) / sizeof(kWatchedResources[0]);
+    int32_t values_[kSlots][kResources] = {};
+    bool known_[kSlots][kResources] = {};
+};
+
+// The time of day (hours, 0 to 24) going from `before` to `now`: 1 if day
+// began (6:00 passed, or a jump into [6, 18) from night), -1 if night began
+// (18:00), else 0. A negative `before` means no earlier reading: 0.
+int32_t day_change(double before, double now);
+
 // TOME_EVENT_PLAYER_VICTORY, DEFEAT and LEFT once per player and game: the
 // game's functions for them have several callers each.
 class Results {

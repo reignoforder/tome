@@ -27,6 +27,8 @@ Status as of 2026-10-27. Design rationale: `research.md`. How it works:
 | Import hooks; FPS Unlock | API version 9: `import` symbols (an import address table slot of game.dll, checked against its import directory) can be hooked like functions. `fps-unlock`, a mod in its own repository next to Tome: a finer GetTickCount for game.dll (Windows' 15.6 ms steps held frames near 64), the frame limit through the game's own scheduler, vsync off for OpenGL and Direct3D, an FPS counter in a chosen corner; switching it on and off mid-game keeps the game's clock monotonic (checked: game speed stays 1.00) |
 | Popups and restarting | API version 10: `popup` (title, message, any number of buttons; Enter/Esc options), `popup_close`, `restart_game`. One at a time on any screen (main menu, menu screens, games), queued, moved to the next screen; three short options in a row, more in pages of six. Restart: the game closes as usual (in a game, through the Esc menu's own Exit), a rundll32 helper starts it again once it has exited. The mod menu offers a restart when a toggle leaves changes waiting for one. The hello example's Ctrl+Shift+P shows them. Unit tests for layout, keys, FDF and the prompt; verified by hand on the main menu, over the mod menu, in a game, and a full restart |
 | Inter-mod communication (§5.9 item 5) | API version 11: `service_register`/`service_get`/`on_service` (a mod offers a table of functions under a name and a version; others look it up, and hear when it appears or goes away in any load order; withdrawn on disable) and `subscribe`/`publish` (synchronous messages on named topics from the main thread; a subscriber that crashes is disabled and skipped; no loops on one topic). Registry in `core/intermod.*` with unit tests. Not yet in the e2e test or an example mod |
+| Events, part 3 | API version 12: the remaining JASS events Tome can see for every unit and player whether or not the map listens. Spell channel, cast, effect, finish and end cast (`CUnit::OnSpell*`, with the ability and its target unit, item or destructable and point), damage with the amount and source, acquired targets, decay, detected and hidden, Esc and arrow keys (every player's, from the network actions; arrow keys only on maps that listen for them, the game doesn't send them otherwise), destructable and item deaths (`CWidget::OnDeath`), dialog clicks with the dialog's and button's handles; order targets that are destructables; `item_handle`/`destructable_handle`. e2e: spells, damage, a destructable and an item destroyed, a creep's acquired target, decay, a dialog click and an arrow key with simulated keys; Esc on a melee map |
+| Events, part 4 | Still API version 12: the skill and build menus (`EVENT_GAME_SHOW_SKILL`, `BUILD_SUBMENU`, from their network actions, with the player), level end, units created (every unit, from `CreateUnitObject`) and removed (`RemoveUnit`), hero experience (the amount actually added), player resources (gold, lumber, food; polled every game tick) and day and night. e2e: B and O on a selected worker and hero, `RemoveUnit`, `AddHeroXP`, `SetPlayerState`, the time of day set across dusk and back to noon, `LoadGame` for the level end |
 | Tooling | Unit tests, e2e test in the real game, `tome-mpq`, `tools/re/*`, `tools/game.sh` |
 
 ## Next, in order
@@ -69,9 +71,12 @@ See `research.md` §13. The most relevant now:
   Battle.net games aren't tested (they need a second machine);
 - chat commands work in games only, not in Battle.net or lobby chat, and
   chat in replays is untested;
-- more events: spells (their caller checks the registration itself),
-  damage, cinematic mode, hover; defeat, leaving, research, rescue, sales,
-  most cancels and the menus' save/load are mapped but not yet seen in a test;
+- more events: hover; alliance changes (not found); buffs and missiles
+  (no single entry point found); a corpse that finishes decaying (not
+  `CUnit::Remove`); regions and ranges (need a registration's values); the
+  synced selection events (the game only syncs a selection while a trigger listens);
+  detected and hidden, defeat, leaving, research, rescue, sales, most
+  cancels and the menus' save/load are mapped but not yet seen in a test;
 - popups: once, a frame set made right after a mod menu click stayed hidden
   (1 in 13 tries, cause unknown); a shown popup is shown again every 250 ms.
   Popups and restarting aren't in `tools/e2e-test.sh` yet;
