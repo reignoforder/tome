@@ -1,0 +1,22 @@
+# A Tome mod in Rust. Copy this folder, rename "my-rust-mod" (here and in
+# tome.mod.json, where the DLL is my_rust_mod.dll), point `tome` at the SDK
+# (a path, or git = "<tome's repository>"), and build:
+#
+#   cargo build --release     # target/i686-pc-windows-gnu/release/my_rust_mod.dll
+#
+# Then a folder in the game's tome/mods/ with the DLL and tome.mod.json.
+[package]
+name = "my-rust-mod"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+tome = { path = "../../rust/tome" }
+
+[profile.release]
+strip = true
+lto = true

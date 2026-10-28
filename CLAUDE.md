@@ -17,6 +17,8 @@ tools/e2e-test.sh                        # real game, 4 launches (~5 min); close
 tools/game.sh start [VAR=val] / wait <regex> / shot <png> / stop / log
 tools/fuzz.sh [seconds] [target...]      # libFuzzer + ASan/UBSan on the core parsers (host clang, build-fuzz/)
 HEADLESS=1 tools/e2e-test.sh             # either script, off screen in gamescope (tools/headless.sh)
+tools/gen-rust-bindings.sh               # after changing tome.h: regenerate sdk/rust/tome-sys (bindgen)
+cmake --build build --target sdk-dist    # build/tome-sdk-<version>.zip, the SDK for mod makers
 ```
 
 ## Rules
@@ -37,6 +39,15 @@ HEADLESS=1 tools/e2e-test.sh             # either script, off screen in gamescop
   `fuzz/regressions/<target>/` with a unit test.
 - Code style: C++20, no exceptions/RTTI, `TOME_INFO`/`WARN`/`ERROR` logging.
   The mod API in `sdk/include/tome/tome.h` is plain C and append-only.
+  After changing it, run `tools/gen-rust-bindings.sh` (a test checks). The
+  C++ helpers (`tome.hpp`, generic `Mod::call`) need no change; the Rust
+  crate `sdk/rust/tome` gets a wrapper only when a mod needs one (until
+  then `Tome::raw`). Released fields go into `tests/test_abi.cpp`.
+- `sdk/` is for mod makers and must build on its own (the `sdk-dist` zip):
+  nothing it builds may use files outside `sdk/`. Maintainer checks may
+  (the Rust bindings test runs `tools/gen-rust-bindings.sh`), if they're
+  skipped when the file isn't there. A new `tome.mod.json` or
+  settings keyword also goes into `sdk/schemas/` and `sdk/docs/tome-mod-json.md`.
 
 ## Pitfalls (each one cost time already)
 
@@ -76,7 +87,8 @@ HEADLESS=1 tools/e2e-test.sh             # either script, off screen in gamescop
   (clicks in `tools/e2e-test.sh` run 5).
 - **The e2e test map has no opponents:** melee would declare victory at
   once (its dialog pauses the game), so the patched script starts the check
-  from a 12 s timer. A trigger's `PauseGame` clears the selection, and a
+  from a 20 s timer. The dialog takes the keyboard: chat lines typed after
+  it go nowhere. A trigger's `PauseGame` clears the selection, and a
   single player game pauses when its window loses the focus (timers stop).
 - **Saved games from scripts:** `SaveGame`/`LoadGame` names need `.w3z`
   (nothing adds it, and a load without it silently goes back to the menu).

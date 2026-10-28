@@ -1,5 +1,6 @@
 add_executable(tome_tests
     main.cpp
+    test_abi.cpp
     test_assets.cpp
     test_blp.cpp
     test_chat.cpp
@@ -27,6 +28,7 @@ add_executable(tome_tests
     test_rtti.cpp
     test_settings.cpp
     test_text.cpp
+    test_tome_hpp.cpp
     test_units.cpp
     test_utf8.cpp
     test_verify.cpp

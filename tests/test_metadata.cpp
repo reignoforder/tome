@@ -148,6 +148,11 @@ TEST(metadata_warns_on_unknown_fields) {
         R"({"schema":1,"id":"x1","version":"1.0.0","game":"*","tome":"*","sync":"client","colour":"red"})", m);
     CHECK(r.ok);
     CHECK_EQ(r.warnings.size(), size_t(1));
+    // The editor's pointer to the JSON Schema isn't unknown.
+    r = parse_text(R"({"$schema":"../tome/sdk/schemas/tome.mod.schema.json","schema":1,"id":"x1",
+                       "version":"1.0.0","game":"*","tome":"*","sync":"client"})", m);
+    CHECK(r.ok);
+    CHECK(r.warnings.empty());
 }
 
 TEST(metadata_rejects_bad_enums_and_self_dependency) {

@@ -1,0 +1,10 @@
+[package]
+name = "tome-sys"
+description = "Raw bindings to Tome's mod API (sdk/include/tome/tome.h)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+doctest = false

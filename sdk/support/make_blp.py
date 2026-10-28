@@ -3,8 +3,9 @@
 usage: python3 make_blp.py <out.blp> <size> <rrggbb>
 
 Paletted, no alpha, with the full mipmap chain, like the game's own 32x32
-glue button textures. The e2e test generates its override texture with this
-instead of shipping a binary.
+glue button textures: a placeholder icon for a mod (tome.mod.json "icon").
+The hello example and Tome's e2e test make theirs with this instead of
+shipping a binary.
 """
 import struct
 import sys

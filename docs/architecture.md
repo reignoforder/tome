@@ -7,7 +7,7 @@ How the loader works today. For plans see `ROADMAP.md`, for game internals
 
 ```
 CMakeLists.txt            top level: options, MinGW stdio, subprojects
-cmake/                    i686 MinGW toolchain (sets Wine as the test runner),
+cmake/                    i686 MinGW toolchain (forwards to sdk/cmake/; sets Wine as the test runner),
                           embed_mappings.cmake
 mappings/                 the mapping database: one JSON file per game build
 loader/
@@ -72,13 +72,22 @@ loader/
     restart.*             restarting the game (WM_CLOSE, then a rundll32 helper)
     debug_input.*         TOME_DEBUG_CLICKS: clicks, keys, typed text and chat lines (tests)
     log.*, paths.*        tome.log, game/tome/mods folders (TOME_HOME), moving the old layout
-sdk/
+sdk/                      everything for mod makers; README.md is the guide. Builds on its own too (sdk-dist zip)
   include/tome/tome.h     the public C API for mods
   include/tome/utf8.h     UTF-8 helpers (header-only; also used by Tome itself)
-  CMakeLists.txt          includes TomeMod.cmake, builds the example
-  TomeMod.cmake           tome_add_mod() helper (mods outside this repo include it too)
+  include/tome/tome.hpp   C++17 helpers: Mod::call for any API function (table size check, lambdas as callbacks),
+                          exceptions reported as crashes, TOME_EXPORT_MOD; generic, so new API functions need no change
+  CMakeLists.txt          includes TomeMod.cmake, builds the example (and rust/ when cargo can)
+  TomeMod.cmake           tome_add_mod(), tome_add_rust_mod(), tome_package() (mods outside this repo include it too)
+  cmake/                  the i686 MinGW toolchain (cmake/ at the top forwards to it), dist.cmake (the sdk-dist zip)
+  docs/tome-mod-json.md   tome.mod.json and config.schema.json, field by field
+  schemas/                JSON Schemas of both files, for editors ("$schema")
+  templates/              the smallest mod in C, C++ and Rust, to copy; built here so they keep working
   examples/hello/         example mod: natives (numbers, strings, callbacks), buttons on three screens, events, /hello,
                           settings (config.schema.json) and a keybind
+  examples/hello-cpp/     the hello example in C++ with tome.hpp (README.md: the C++ guide)
+  rust/                   Rust support (README.md): tome-sys (bindgen output of tome.h, committed), tome (the safe
+                          layer: closures, Results, version checks, panics reported as crashes), examples/hello-rs
 tests/                    unit tests (run under Wine by CTest)
   test_hook_runtime.cpp   the hook engine on real functions (a second test executable)
   e2e/                    fixture mods (hook-a and hook-b are built) and the map-script patcher
@@ -86,6 +95,7 @@ tools/
   e2e-test.sh             end-to-end test in the real game
   game.sh                 start/stop/wait/screenshot helper
   gen-upcase.py           generates loader/src/core/upcase_table.inc (NTFS name folding)
+  gen-rust-bindings.sh    regenerates sdk/rust/tome-sys/src/bindings.rs from tome.h (--check for the test)
   mpq/                    tome-mpq (StormLib), dev-only
   re/                     reverse-engineering scripts
 docs/
@@ -1232,7 +1242,7 @@ API version 10: `popup`, `popup_close`, `restart_game`.
 - **Testing:** `TOME_DEBUG_ASSET=<archive path>` logs the size and FNV-1a
   hash of that file as the game sees it after each change. The e2e test
   overrides the main menu button texture with a generated BLP
-  (`tests/e2e/make_blp.py`) and `Blizzard.j` with a copy that calls back into
+  (`sdk/support/make_blp.py`) and `Blizzard.j` with a copy that calls back into
   the map (`tests/e2e/patch_blizzard_j.py`), loads a TOC and FDF shipped in a
   mod's `assets/` from the map script, and plays a game started from the
   main menu to check the `map` and `restart` modes.

@@ -1,6 +1,9 @@
 # Build output
 build/
 build-*/
+sdk/rust/target/
+sdk/templates/rust/target/
+sdk/templates/rust/Cargo.lock
 compile_commands.json
 .cache/
 __pycache__/

@@ -1,4 +1,5 @@
 {
+  "$schema": "../../schemas/tome.mod.schema.json",
   "schema": 1,
   "id": "hello",
   "version": "1.0.0",

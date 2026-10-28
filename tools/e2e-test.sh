@@ -7,7 +7,9 @@
 # folder (with tome/mods/) is never touched. The only things written to the game
 # folder are tome.mix (the build under test) and, if tome-mpq was built
 # (-DTOME_BUILD_DEV_TOOLS=ON), a test map under Maps/TomeE2E/ that is removed
-# afterwards. The test map calls the hello mod's JASS natives.
+# afterwards. The test map calls the JASS natives of the hello mod, its C++
+# version (hello-cpp) and its Rust version (hello-rs) if that was built
+# (sdk/rust: cargo and its i686-pc-windows-gnu target).
 #
 # Usage: tools/e2e-test.sh [build-dir] [game-dir]
 # A game window opens six times, for up to a minute and a half each, unless
@@ -26,6 +28,7 @@ die() { echo "e2e: $*" >&2; exit 2; }
 [[ -f "$GAME/war3.exe" ]] || die "no war3.exe in $GAME"
 [[ -f "$BUILD/loader/tome.mix" ]] || die "build first: cmake --build $BUILD"
 [[ -f "$BUILD/mods/hello/hello.dll" ]] || die "hello example mod not built"
+[[ -f "$BUILD/mods/hello-cpp/hello-cpp.dll" ]] || die "hello-cpp example mod not built"
 [[ -f "$BUILD/mods/hook-a/hook-a.dll" && -f "$BUILD/mods/hook-b/hook-b.dll" ]] || die "hook test mods not built"
 [[ -f "$BUILD/mods/crash/crash.dll" ]] || die "crash test mod not built"
 command -v wine >/dev/null || die "wine not found"
@@ -83,7 +86,14 @@ trap 'exit 1' INT TERM HUP
 # --- setup -------------------------------------------------------------------
 
 cp "$BUILD/loader/tome.mix" "$GAME/tome.mix"
-cp -r "$BUILD/mods/hello" "$MODS/hello"
+cp -r "$BUILD/mods/hello" "$BUILD/mods/hello-cpp" "$MODS/"
+RUST=0
+if [[ -f "$BUILD/mods/hello-rs/hello_rs.dll" ]]; then
+    RUST=1
+    cp -r "$BUILD/mods/hello-rs" "$MODS/hello-rs"
+else
+    echo "Rust example: skipped (not built; see sdk/rust/README.md)"
+fi
 cp -r "$BUILD/mods/hook-a" "$BUILD/mods/hook-b" "$BUILD/mods/crash" "$MODS/"
 echo native > "$MODS/crash/mode.txt"  # where the crash fixture crashes first; see crash.c
 cp -r "$FIXTURES/broken-json" "$FIXTURES/needs-ghost" "$FIXTURES/needs-unmapped" "$MODS/"
@@ -97,7 +107,7 @@ ASSET_FILES=5  # asset-demo's TOC, FDF and texture, one file each in asset-map a
 PROBE='UI\Widgets\Glues\GlueScreen-Button1-BackdropBackground.blp'
 TEXTURE="$MODS/asset-demo/assets/UI/Widgets/Glues/GlueScreen-Button1-BackdropBackground.blp"
 mkdir -p "$(dirname "$TEXTURE")"
-python3 -I "$ROOT/tests/e2e/make_blp.py" "$TEXTURE" 32 20c0a0 || die "couldn't generate the test texture"
+python3 -I "$ROOT/sdk/support/make_blp.py" "$TEXTURE" 32 20c0a0 || die "couldn't generate the test texture"
 PROBE_HASH=$(python3 -I -c '
 import sys
 h = 2166136261
@@ -118,7 +128,10 @@ if [[ -f "$MPQ_TOOL" ]]; then
     cp "$SOURCE_MAP" "$TEST_MAP_DIR/e2e.w3m"
     mpq() { WINEDEBUG=-all wine "$MPQ_TOOL" "$@" >/dev/null 2>&1; }
     mpq extract "$TEST_MAP_DIR/e2e.w3m" war3map.j "$WORK/war3map.j" || die "couldn't extract war3map.j"
-    python3 -I "$ROOT/tests/e2e/patch_map_script.py" "$WORK/war3map.j" "$WORK/war3map.patched.j" || die "patch failed"
+    EXAMPLE_ARGS=(--cpp)
+    ((RUST)) && EXAMPLE_ARGS+=(--rust)
+    python3 -I "$ROOT/tests/e2e/patch_map_script.py" "$WORK/war3map.j" "$WORK/war3map.patched.j" "${EXAMPLE_ARGS[@]}" ||
+        die "patch failed"
     mpq put "$TEST_MAP_DIR/e2e.w3m" war3map.j "$WORK/war3map.patched.j" || die "couldn't write the test map"
     # asset-demo also overrides a game script: Blizzard.j, with a call the map logs.
     for archive in War3Patch War3x war3; do
@@ -139,7 +152,7 @@ fi
 
 # The test's mods with code (a DLL, or asset-demo's Blizzard.j), allowed
 # without a click (core/mod_state.h).
-APPROVED="hello,hook-a,hook-b,crash,wrong-arch,sync-test,asset-demo"
+APPROVED="hello,hello-cpp,hello-rs,hook-a,hook-b,crash,wrong-arch,sync-test,asset-demo"
 
 launch() {
     rm -f "$LOG"
@@ -238,10 +251,13 @@ check_absent() {
 # the game until its hotkey T (pressed twice in case the dialog was late; T
 # does nothing for the selected units), then an arrow key; then B and O on a
 # worker and a hero the map selects on "-build" and "-skill" (menu events;
-# Esc closes the build menu first, or O isn't a hotkey there).
+# Esc closes the build menu first, or O isn't a hotkey there). Then the C++
+# and Rust examples' chat commands, and the same commands making them throw
+# and panic.
 if ((${#MAP_ARG[@]})); then
     TOME_DEBUG_CLICKS="type:-dialog@6500;key:T@8500;key:T@9500;key:Left@10500;type:-build@11000;key:B@12000;\
-key:Esc@12500;type:-skill@13000;key:O@14500" launch
+key:Esc@12500;type:-skill@13000;key:O@14500;key:Esc@15000;type:/hellors e2e@16000;type:/hellors panic@17500;\
+type:/hellocpp e2e@19000;type:/hellocpp throw@20500" launch
 else
     launch
 fi
@@ -271,6 +287,18 @@ check_absent "blp-guard.*unclamped" "the BLP header-copy clamp was applied"
 check "Main-thread dispatcher installed" "main-thread dispatcher installed"
 check "Events: hooked screens, map load, game start and end, frames, game ticks, shutdown, chat, pause, units, spells, damage, experience, players, resources, keys, menus, dialogs, levels and saved games" "event hooks installed"
 check "\[hello\] 100 ticks" "tick events reach mods"
+check "\[hello-cpp\] loaded \(Tome [0-9.]+, Warcraft III 1\.27b, game\.dll at 0x[0-9a-f]{8}\)" "a C++ mod loaded"
+check "\[hello-cpp\] CTextFrame::SetText is a thiscall function at 0x[0-9a-f]{8} \(void\(CTextFrame\* this" \
+    "a C++ mod resolved a mapped name"
+check "\[hello-cpp\] enabled" "a C++ mod enabled"
+check "\[hello-cpp\] 100 ticks" "events reach a C++ lambda"
+if ((RUST)); then
+    check "\[hello-rs\] loaded \(Tome [0-9.]+, Warcraft III 1\.27b, game\.dll at 0x[0-9a-f]{8}\)" "a Rust mod loaded"
+    check "\[hello-rs\] CTextFrame::SetText is a thiscall function at 0x[0-9a-f]{8} \(void\(CTextFrame\* this" \
+        "a Rust mod resolved a mapped name"
+    check "\[hello-rs\] enabled" "a Rust mod enabled"
+    check "\[hello-rs\] 100 ticks" "events reach a Rust closure"
+fi
 check_absent "unapproved.*(LoadLibrary|not a valid|Loaded unapproved)" "code that isn't allowed is never loaded"
 check "unapproved-script +0\.1\.0 +approval: replaces game scripts; turn it on to allow it" \
     "an asset-only mod with a game script waits for approval too"
@@ -278,7 +306,7 @@ MAIN_TID=$(grep -oE "main thread [0-9]+" "$LOG" | head -n 1 | grep -oE "[0-9]+$"
 
 if ((${#MAP_ARG[@]})); then
     echo "JASS natives (map script)"
-    check "bound 17 Tome natives" "natives bound when the map loaded" 45
+    check "bound $((21 + RUST * 4)) Tome natives" "natives bound when the map loaded" 45
     check "\[hello\] HelloLog\(42\) called from JASS" "integer argument" 30
     check "\[hello\] HelloLogReal\(2\.5\) called from JASS" "real argument and real return value"
     check "\[hello\] HelloLog\(1001\) called from JASS" "TomeIsLoaded() returned true"
@@ -404,6 +432,38 @@ if ((${#MAP_ARG[@]})); then
     fi
     check "\[hook-a\] unseen code value: status 1, result 0" "a code value no native received is refused"
     check "code value 2147483632 wasn't passed to a native by the current map script" "and logged"
+    echo "a mod in C++ (map script and chat)"
+    check "\[hello-cpp\] map load: .+ \(Maps\\\\TomeE2E\\\\e2e\.w3m\)" "map load event in C++, with the map's path"
+    check "\[hello-cpp\] HelloCppLog\(42\) called from JASS" "C++ natives: integer and real arguments, real result"
+    check $'\\[map\\] TomeLogString\\("Hello from C\\+\\+, \u0396\u03b5\u03cd\u03c2! \\(4 letters\\)"\\)' \
+        "UTF-8 strings both ways through a C++ native"
+    check "\[hello-cpp\] HelloCppCall: callback returned 1 \(status 0\)" "a code argument run from C++"
+    check "\[hello-cpp\] HelloCppLog\(2002\)" "its boolean reached the script"
+    check "\[hello-cpp\] first CTextFrame::SetText after enable: \"" "a C++ hook lambda read the call's string argument"
+    check "\[hello-cpp\] game start: " "game start event in C++" 30
+    check "\[hello-cpp\] /hellocpp command: Hello from C\+\+, e2e\." "a C++ chat command, with a string setting" 30
+    check "\[hello-cpp\] uncaught exception: /hellocpp throw" "an exception leaving a lambda is logged" 15
+    check "hello-cpp crashed in chat command /hellocpp: the mod reported a failure \(logged above\)" \
+        "and Tome stops the call like a crash"
+    check "Unloaded hello-cpp \(its DLL stays loaded after the crash\)" "the throwing mod was disabled" 10
+    if ((RUST)); then
+        echo "a mod in Rust (map script and chat)"
+        check "\[hello-rs\] MAP_LOAD: .+ \(Maps\\\\TomeE2E\\\\e2e\.w3m\)" "map load event in Rust, with the map's path"
+        check "\[hello-rs\] HelloRsLog\(42\) called from JASS" "Rust natives: integer and real arguments, real result"
+        check $'\\[map\\] TomeLogString\\("Hello from Rust, \u0396\u03b5\u03cd\u03c2! \\(4 letters\\)"\\)' \
+            "UTF-8 strings both ways through a Rust native"
+        check_more "\[map\] TomeLogInteger\(8100\)" 2 "a code argument run from Rust (and from hello and hello-cpp)"
+        check "\[hello-rs\] HelloRsCall: callback returned Ok\(true\)" "with its boolean"
+        check "\[hello-rs\] HelloRsLog\(2002\)" "which reached the script"
+        check "\[hello-rs\] first CTextFrame::SetText after enable: \"" "a Rust hook handler read the call's string argument"
+        check "\[hello-rs\] GAME_START: " "game start event in Rust" 30
+        check "\[hello-rs\] /hellors command: Hello from Rust, e2e\." "a Rust chat command, with a string setting" 30
+        check "\[hello-rs\] panicked at .*examples.hello-rs.src.lib\.rs:[0-9]+.*: /hellors panic" \
+            "a panic is logged with where it happened" 15
+        check "hello-rs crashed in chat command /hellors: the mod reported a failure \(logged above\)" \
+            "and Tome stops the call like a crash"
+        check "Unloaded hello-rs \(its DLL stays loaded after the crash\)" "the panicking mod was disabled" 10
+    fi
     echo "crash isolation: a native (map script)"
     check "crash crashed in native CrashNative: access violation writing 0x00000000 at crash\.[0-9]+\.dll\+0x[0-9a-f]+; Tome stopped the call" \
         "a crash in a mod's native is caught, with the module and offset"
@@ -615,6 +675,8 @@ check "Main menu set up; Mods button added" "Mods button added to the main menu"
 check "Quit moved to the lower slot" "Quit shares the bottom box with Mods"
 check "\[hello\] loaded frame definitions from ui/hello\.fdf" "mod loaded its own FDF"
 check "\[hello\] added a Hello button to the main menu" "mod added its own button to the main menu"
+check "\[hello-cpp\] added a Hello \(C\+\+\) button to the main menu" "a C++ mod's frames on the main menu"
+((RUST)) && check "\[hello-rs\] added a Hello \(Rust\) button to the main menu" "a Rust mod's frames on the main menu"
 check "Mod menu opened" "clicking Mods opens the panel" 15
 check "Mod menu: disabling hello" "row button disables the mod" 10
 check "\[hello\] disabled" "mod disabled live"

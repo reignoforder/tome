@@ -1063,8 +1063,13 @@ typedef struct tome_api {
  * The mod stays off until its DLL changes, or the user disables and enables
  * it again. Threads a mod starts itself aren't guarded.
  *
+ * A mod that catches its own failure (a Rust panic, say) and logs why can
+ * hand it to the guard the same way: RaiseException(TOME_EXCEPTION_MOD_FAILED,
+ * EXCEPTION_NONCONTINUABLE, 0, NULL) from the callback Tome called.
+ *
  * tome_mod_load is required; the other three are optional.
  */
+#define TOME_EXCEPTION_MOD_FAILED 0xE0544D46u
 typedef int (TOME_CALL *tome_mod_load_fn)(const tome_api* api, tome_mod* mod);
 typedef void (TOME_CALL *tome_mod_lifecycle_fn)(tome_mod* mod);
 
@@ -1169,6 +1174,11 @@ static inline int tome_has_import_hooks(const tome_api* api) {
 /* True if the running Tome has popups and restart_game (version 10). */
 static inline int tome_has_popups(const tome_api* api) {
     return api->api_version >= 10 && api->size >= offsetof(tome_api, restart_game) + sizeof(api->restart_game);
+}
+
+/* True if the running Tome has services and messages between mods (version 11). */
+static inline int tome_has_services(const tome_api* api) {
+    return api->api_version >= 11 && api->size >= offsetof(tome_api, publish) + sizeof(api->publish);
 }
 
 /* True if the running Tome reports the map script's memhack pattern (version 13). */

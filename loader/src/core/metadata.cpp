@@ -8,8 +8,9 @@
 namespace tome {
 namespace {
 
-// Fields Tome knows about but doesn't act on yet. Accepted without a warning.
-const char* const kReservedFields[] = {"links"};
+// Fields Tome knows about but doesn't act on (yet). Accepted without a
+// warning. "$schema" lets editors find sdk/schemas/tome.mod.schema.json.
+const char* const kReservedFields[] = {"links", "$schema"};
 
 const char* const kKnownFields[] = {
     "schema", "id", "version", "name", "description", "authors", "license", "icon",

@@ -1,0 +1,14 @@
+{
+  "$schema": "../../schemas/tome.mod.schema.json",
+  "schema": 1,
+  "id": "my-rust-mod",
+  "version": "0.1.0",
+  "name": "My Rust Mod",
+  "description": "A Tome mod in Rust, from sdk/templates/rust.",
+  "authors": ["You"],
+  "game": "1.27b",
+  "tome": ">=0.1.0 <0.2.0",
+  "entry": "my_rust_mod.dll",
+  "sync": "client",
+  "natives": ["native MyRustModAdd takes integer a, integer b returns integer"]
+}

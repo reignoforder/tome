@@ -1,0 +1,13 @@
+[package]
+name = "tome"
+description = "Safe Rust API for Tome mods"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+tome-sys = { path = "../tome-sys" }
+
+[lib]
+doctest = false

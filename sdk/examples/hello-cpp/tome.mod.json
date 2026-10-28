@@ -1,0 +1,26 @@
+{
+  "$schema": "../../schemas/tome.mod.schema.json",
+  "schema": 1,
+  "id": "hello-cpp",
+  "version": "1.0.0",
+  "name": "Hello Tome (C++)",
+  "description": "The hello example written in C++ with tome/tome.hpp: JASS natives, a main menu button, game events, a hook, a /hellocpp chat command, settings, a keybind (Ctrl+Shift+J) and a popup.",
+  "authors": ["Tome contributors"],
+  "license": "MIT",
+  "game": "1.27b",
+  "tome": ">=0.1.0 <0.2.0",
+  "entry": "hello-cpp.dll",
+  "sync": "client",
+  "reload": "live",
+  "requires": ["CTextFrame::SetText"],
+  "config": "config.schema.json",
+  "keybinds": [
+    { "id": "greet", "label": "Greet", "default": "Ctrl+Shift+J" }
+  ],
+  "natives": [
+    "native HelloCppLog takes integer value returns nothing",
+    "native HelloCppDouble takes real value returns real",
+    "native HelloCppGreet takes string name returns string",
+    "native HelloCppCall takes code callback returns boolean"
+  ]
+}

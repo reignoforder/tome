@@ -177,6 +177,7 @@ const char* exception_name(DWORD code) {
     case EXCEPTION_FLT_UNDERFLOW: return "floating-point underflow";
     case EXCEPTION_FLT_STACK_CHECK: return "floating-point stack check";
     case kCppException: return "uncaught C++ exception";
+    case TOME_EXCEPTION_MOD_FAILED: return "the mod reported a failure (logged above)";
     default: return nullptr;
     }
 }
@@ -258,7 +259,9 @@ void report(tome_mod* mod, const char* what, const char* detail, const GuardFram
         snprintf(buf, sizeof(buf), "exception 0x%08lx", static_cast<unsigned long>(frame.code));
     }
     std::string text = std::string("crashed in ") + what + (detail && *detail ? " " : "") + (detail ? detail : "") +
-                       ": " + buf + " at " + where(frame.address);
+                       ": " + buf;
+    // A reported failure is raised in kernelbase.dll; the "called from" line has the mod.
+    if (frame.code != TOME_EXCEPTION_MOD_FAILED) text += " at " + where(frame.address);
     const char* id = mod ? mod->id.c_str() : "?";
     TOME_ERROR("%s %s; Tome stopped the call and disables the mod", id, text.c_str());
 

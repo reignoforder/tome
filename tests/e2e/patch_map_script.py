@@ -1,6 +1,10 @@
 """Adds the e2e test's native declarations and calls to a map's war3map.j.
 
-usage: python3 patch_map_script.py <war3map.j in> <war3map.j out>
+usage: python3 patch_map_script.py <war3map.j in> <war3map.j out> [--cpp] [--rust]
+
+--cpp and --rust also declare and call the natives of the hello-cpp and
+hello-rs examples (sdk/examples/hello-cpp, sdk/rust/examples/hello-rs), for
+a test with those mods installed.
 
 Natives are declared before the globals block, and the calls go at the
 start of main() right after InitBlizzard(), which every melee map calls.
@@ -110,7 +114,9 @@ CALLS = """\
     call TimerStart(CreateTimer(), 9.0, false, function TomeE2ERevive)
     call TimerStart(CreateTimer(), 6.0, false, function TomeE2ESave)
     call TimerStart(CreateTimer(), 8.0, false, function TomeE2ELoad)
-    call TimerStart(CreateTimer(), 12.0, false, function MeleeInitVictoryDefeat)
+    // Late enough for the chat lines tools/e2e-test.sh types in the first
+    // launch: the victory dialog takes the keyboard.
+    call TimerStart(CreateTimer(), 20.0, false, function MeleeInitVictoryDefeat)
     // A dialog with a hotkey (T) on the chat line "-dialog", for runs with
     // simulated keys: a dialog pauses a single player game until it's clicked.
     set tome_e2e_dialog_trigger = CreateTrigger()
@@ -143,6 +149,25 @@ CALLS = """\
 """
 
 ZEUS = "\u0396\u03b5\u03cd\u03c2"  # Ζεύς: 4 letters, 8 bytes in UTF-8
+
+# The natives the hello-cpp and hello-rs examples share, with their prefix:
+# integer, real, string and code values in C++ and Rust.
+EXAMPLE_DECLARATIONS = """\
+native {p}Log takes integer value returns nothing
+native {p}Double takes real value returns real
+native {p}Greet takes string name returns string
+native {p}Call takes code callback returns boolean
+"""
+
+EXAMPLE_CALLS = """\
+    call {p}Log(R2I({p}Double(21.0)))
+    call TomeLogString({p}Greet("ZEUS_GREEK"))
+    if {p}Call(function TomeE2ECallback) then
+        call {p}Log(2002)
+    endif
+"""
+
+EXAMPLES = {"--cpp": "HelloCpp", "--rust": "HelloRs"}
 
 FUNCTIONS = """\
 // Added by Tome's e2e test: called by the asset-demo mod's Blizzard.j
@@ -380,7 +405,7 @@ function TomeE2ESave takes nothing returns nothing
 endfunction
 
 // Loads the game saved at 6 s: a saved game load inside the session. The
-// timers come back with it, so the victory check still starts at 12 s.
+// timers come back with it, so the victory check still starts at 20 s.
 function TomeE2ELoad takes nothing returns nothing
     if not tome_e2e_load then
         return
@@ -403,6 +428,8 @@ endfunction
 
 def main() -> int:
     src, dst = sys.argv[1], sys.argv[2]
+    prefixes = [EXAMPLES[flag] for flag in sys.argv[3:]]
+    declarations = DECLARATIONS + "".join(EXAMPLE_DECLARATIONS.format(p=p) for p in prefixes)
     text = open(src, encoding="latin-1", newline="").read()
     newline = "\r\n" if "\r\n" in text else "\n"
 
@@ -417,7 +444,7 @@ def main() -> int:
     if not globals_at:
         print("no globals block found", file=sys.stderr)
         return 1
-    text = text[: globals_at.start()] + DECLARATIONS.replace("\n", newline) + text[globals_at.start():]
+    text = text[: globals_at.start()] + declarations.replace("\n", newline) + text[globals_at.start():]
     globals_line = re.search(r"^globals\b[^\n]*\n", text, re.M)
     text = text[: globals_line.end()] + GLOBALS.replace("\n", newline) + text[globals_line.end():]
 
@@ -433,7 +460,8 @@ def main() -> int:
         print("no call InitBlizzard() in main found", file=sys.stderr)
         return 1
     # The script is read as latin-1, so UTF-8 goes in as its bytes.
-    calls = CALLS.replace("ZEUS_GREEK", ZEUS.encode("utf-8").decode("latin-1"))
+    calls = CALLS + "".join(EXAMPLE_CALLS.format(p=p) for p in prefixes)
+    calls = calls.replace("ZEUS_GREEK", ZEUS.encode("utf-8").decode("latin-1"))
     text = text[: init_call.end(1)] + calls.replace("\n", newline) + text[init_call.end(1):]
 
     open(dst, "w", encoding="latin-1", newline="").write(text)

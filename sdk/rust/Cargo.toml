@@ -1,0 +1,18 @@
+# Rust support for Tome mods: raw bindings (tome-sys), a safe layer (tome)
+# and examples. Mods are 32-bit Windows DLLs: .cargo/config.toml builds for
+# i686-pc-windows-gnu with MinGW's linker.
+[workspace]
+resolver = "3"
+members = ["tome-sys", "tome", "examples/hello-rs"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+
+[profile.release]
+# Tome reports a mod's panics itself (the tome crate catches them), and an
+# unwind can't cross into the game: panics still unwind inside the mod.
+strip = true
+lto = true

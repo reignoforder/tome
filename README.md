@@ -104,9 +104,12 @@ unmodified.
 
 ## Writing a mod
 
-A mod is a folder with a `tome.mod.json` and, optionally, a 32-bit DLL. See
-[`sdk/examples/hello`](sdk/examples/hello) for a complete example, and
-[`sdk/include/tome/tome.h`](sdk/include/tome/tome.h) for the API.
+Start with the SDK: [`sdk/README.md`](sdk/README.md). It covers what a mod
+is and can do, templates to copy in C, C++ and Rust, a full example in each,
+the [`tome.mod.json` reference](sdk/docs/tome-mod-json.md), and how to try
+a mod in the game.
+
+A mod is a folder with a `tome.mod.json` and, optionally, a 32-bit DLL:
 
 ```json
 {
@@ -121,15 +124,10 @@ A mod is a folder with a `tome.mod.json` and, optionally, a 32-bit DLL. See
 }
 ```
 
-The DLL exports `tome_mod_load` (required) plus optional `tome_mod_enable`,
-`tome_mod_disable` and `tome_mod_unload`. Register natives in
-`tome_mod_enable`; Tome detaches them automatically on disable. A map uses a
-native by declaring it at the top of its script, exactly as in the metadata.
-
-`tome_add_mod()` (from `sdk/TomeMod.cmake`) builds a mod and assembles its
-folder under `build/mods/`. A mod in its own repository includes that file
-(`include(<tome>/sdk/TomeMod.cmake)`); `fps-unlock`, which lifts the frame
-rate above 60, is built that way and lives next to this repo.
+The SDK builds without the rest of this repository too:
+`cmake --build build --target sdk-dist` makes `build/tome-sdk-<version>.zip`.
+`fps-unlock`, which lifts the frame rate above 60, is a mod built against
+the SDK in its own repository next to this one.
 
 ## Environment variables
 
