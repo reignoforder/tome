@@ -93,6 +93,10 @@ bool valid_phase(int32_t phase) {
 tome_result TOME_CALL api_hook(tome_mod* mod, const char* name, int32_t phase, int32_t priority, tome_hook_fn fn,
                                void* user) {
     if (!mod || !name || !fn || !valid_phase(phase)) return TOME_ERR_INVALID_ARGUMENT;
+    if (hooks::is_reserved(name)) {
+        TOME_ERROR("[%s] hook(%s): reserved by a built-in Tome patch; mods can't hook it", mod->id.c_str(), name);
+        return TOME_ERR_NOT_OWNER;
+    }
     std::string error;
     hooks::Target* target = hooks::find_or_install(name, error);
     if (!target) {
@@ -120,6 +124,7 @@ tome_result TOME_CALL api_hook(tome_mod* mod, const char* name, int32_t phase, i
 
 tome_result TOME_CALL api_unhook(tome_mod* mod, const char* name, int32_t phase, tome_hook_fn fn, void* user) {
     if (!mod || !name || !fn || !valid_phase(phase)) return TOME_ERR_INVALID_ARGUMENT;
+    if (hooks::is_reserved(name)) return TOME_ERR_NOT_OWNER;  // a built-in patch owns it; nothing of the mod's to remove
     hooks::Target* target = hooks::find(name);
     std::vector<const void*> removed;
     if (!target || hooks::remove(target, mod, phase, fn, user, &removed) == 0) return TOME_ERR_INVALID_ARGUMENT;

@@ -158,6 +158,16 @@ static void TOME_CALL on_game_event(tome_mod* mod, const tome_event_info* info, 
         info->size >= offsetof(tome_event_info, map_description) + sizeof(info->map_description)) {
         tome_logf(api, mod, TOME_LOG_INFO, "map description: %.60s", info->map_description);
     }
+    /* The memhack pattern in the map's script (Tome blocks it), and where. */
+    if (info->event == TOME_EVENT_MAP_LOAD && tome_has_script_shadows(api) &&
+        info->size >= offsetof(tome_event_info, script_shadows) + sizeof(info->script_shadows) &&
+        info->script_shadows > 0) {
+        tome_script_shadow first;
+        int32_t count = tome_get_map_script_shadows(api, &first, 1);
+        tome_logf(api, mod, TOME_LOG_INFO, "map script shadows: %u, %d listed (first: local %s %s on line %d, global %s)",
+                  (unsigned)info->script_shadows, (int)count, first.local_type, first.name, (int)first.line,
+                  first.global_type);
+    }
 }
 
 /* "Footman (hfoo) of player 1" */

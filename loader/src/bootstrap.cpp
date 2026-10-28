@@ -13,6 +13,7 @@
 #include "mod_menu.h"
 #include "natives.h"
 #include "overlay.h"
+#include "patches.h"
 #include "paths.h"
 #include "watcher.h"
 
@@ -37,6 +38,9 @@ std::string g_menu_hooks_report;
 std::string g_menu_reload_report;
 bool g_events_ok = false;
 std::string g_events_report;
+
+bool g_patches_ok = false;
+std::string g_patches_report;
 bool g_esc_hooks_ok = false;
 bool g_handshake_ok = false;
 std::string g_handshake_report;
@@ -215,6 +219,7 @@ DWORD bootstrap() {
         } else if (g_events_ok) {
             TOME_ERROR("Multiplayer handshake unavailable: %s", g_handshake_report.c_str());
         }
+        if (g_patches_ok) TOME_INFO("Patches: %s", g_patches_report.c_str());
         if (!g_assets_report.empty()) TOME_INFO("Assets at startup: %s", g_assets_report.c_str());
     } else {
         // game.dll wasn't loaded yet when Tome was attached, so this runs
@@ -224,6 +229,7 @@ DWORD bootstrap() {
         TOME_WARN("JASS natives hooked late (game.dll wasn't loaded at attach): %s", report.c_str());
         if (!ok) TOME_ERROR("JASS natives unavailable");
         TOME_WARN("Events, frames and the mod menu need Tome loaded after game.dll; they stay unavailable");
+        TOME_WARN("Built-in patches (memhack-guard) need Tome loaded after game.dll; they stay off");
     }
 
     // The first load runs here: nothing can call into a mod yet (its natives
@@ -303,6 +309,9 @@ void start_bootstrap(HMODULE self) {
         if (g_early_verified) {
             g_early_hooks_ok = natives::install_hooks(reinterpret_cast<uintptr_t>(game), *g_early_build,
                                                       g_early_hooks_report);
+            // Built-in fixes (always on, independent of events and of Tome's
+            // folders): applied to whichever ones fit this build. See patches.h.
+            g_patches_ok = patches::install(reinterpret_cast<uintptr_t>(game), *g_early_build, g_patches_report);
             if (g_paths_ok) {
                 frames::init(reinterpret_cast<uintptr_t>(game), *g_early_build, g_attach_thread);
                 g_menu_hooks_ok = mod_menu::install_hooks(reinterpret_cast<uintptr_t>(game), *g_early_build,

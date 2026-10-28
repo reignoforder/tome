@@ -32,6 +32,24 @@
       "bytes": "85 c9 75 03 33 c0 c3 51 8b 0d ?? ?? ?? ?? e8 3d",
       "doc": "What natives returning a string return (I2S, SubString, GetPlayerName): adds the text to the map script's string table and returns its id, 0 for NULL. Reads CGameWar3.instance without checking it."
     },
+    "JassScanner::nextToken": {
+      "kind": "function", "rva": "0x009249d0", "conv": "thiscall",
+      "sig": "int(void* this)",
+      "bytes": "55 8b ec 83 ec 0c 53 56 57 8b f9 c7 45 fc 00 00",
+      "doc": "Memhack fix: reads the next token; returns its type code in eax (endfunction is 0x115; keywords get codes ~0x120-0x12d; identifiers tail-call the scanner's intern+classify, 0x9253E0). The token text is left in [this+0x98] (len [this+0xC4]). The memhack-guard patch hooks this (AFTER) to restore shadowed globals at the endfunction token. See docs/reverse-engineering.md, JASS compiler."
+    },
+    "Jass::compile": {
+      "kind": "function", "rva": "0x009146f0", "conv": "fastcall",
+      "sig": "void*(void* context, void* callback, void* a0, int a1)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 81 ec e4 00 00 00 53",
+      "doc": "Memhack fix: the JASS compile driver. Builds the parser (0x9122E0) and the scanner (0x9246A0) on its own stack, runs the parse (0x913C30), then destroys the scanner (0x9245F0); both live in its stack frame. The only live caller of the scanner ctor (the other site, 0x9120E0, has no references), so every JassScanner::nextToken and JassLocalVarDesc::ctor runs inside one of these calls. ret 8. The memhack-guard patch hooks it (BEFORE and AFTER) to drop saved descriptors when a compile starts or ends, including one that stops inside a function. See docs/reverse-engineering.md, JASS compiler."
+    },
+    "JassLocalVarDesc::ctor": {
+      "kind": "function", "rva": "0x0091dcf0", "conv": "thiscall",
+      "sig": "void(void* this, void* a0, void* typeNode, void* sym, void* a3)",
+      "bytes": "55 8b ec 8b 45 08 8b 55 10 56 8b f1 8b 4d 0c c7 06 ?? ?? ?? ?? c7 46 14 00 00 00 00 89 46 0c c7 46 04 29",
+      "doc": "Memhack fix: builds a local variable's type descriptor (desc+0x4=kind 0x29 local-var, desc+0x10=type-id from typeNode+0x10) and at 0x91DD5E writes sym+0x18=this descriptor, overwriting the symbol's current (possibly global) descriptor with no save and no endfunction restore. sym=3rd stack arg, typeNode=2nd. The memhack gateway. See docs/reverse-engineering.md, JASS compiler."
+    },
     "Native.CreateTrigger": {
       "kind": "function", "rva": "0x001fc7e0", "conv": "cdecl", "sig": "uint32_t(void)",
       "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 34 a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 33 f6 89 75 c0 c7 45 fc 01 00 00 00 e8 14 b6",

@@ -31,8 +31,9 @@ extern "C" {
  * (TOME_SYMBOL_IMPORT). 10: popups and restart_game. 11: services and messages between mods.
  * 12: more events (spells, damage, target acquired, decay, detection, Esc and arrow keys,
  * destructable and item deaths, dialog clicks, skill and build menus, level end, units
- * created and removed, hero experience, player resources, day and night). */
-#define TOME_API_VERSION 12
+ * created and removed, hero experience, player resources, day and night).
+ * 13: the map script's memhack pattern (script_shadows, map_script_shadows). */
+#define TOME_API_VERSION 13
 
 #define TOME_CALL __cdecl
 /* C linkage in C++ too: Tome looks the lifecycle functions up by their plain names. */
@@ -181,8 +182,11 @@ typedef void (TOME_CALL *tome_click_fn)(tome_mod* mod, tome_frame* button, void*
  */
 typedef enum tome_event {
     /* A map is about to load: its natives are bound, but its script hasn't
-     * run and none of its files have been read. Mods' asset changes with
-     * "reload": "map" apply right before this. */
+     * run. The script is already compiled (war3map.j, common.j and
+     * Blizzard.j were read when the map was picked), but none of its other
+     * files have been read. Mods' asset changes with "reload": "map" apply
+     * right before this, so a changed script file takes effect from the
+     * next map on. */
     TOME_EVENT_MAP_LOAD = 1,
     /* Loading has finished and the game is running (single player, LAN,
      * saved games, replays). TOME_UI_GAME callbacks have run just before. A
@@ -511,9 +515,27 @@ typedef struct tome_event_info {
     /* PLAYER_RESOURCE: which one (tome_resource) and its value before. */
     int32_t resource;
     double previous;
+    /* API version 13: check `size` before reading this. */
+    /* MAP_LOAD, GAME_START, GAME_END: how many locals in the map script
+     * have a global's name and another type, the trick memhack maps use to
+     * read and write game memory (map_script_shadows lists them). Tome's
+     * built-in guard keeps it from working, so a map that relies on it
+     * doesn't load; a nonzero count only says the map tries it. */
+    uint32_t script_shadows;
 } tome_event_info;
 
 typedef void (TOME_CALL *tome_event_fn)(tome_mod* mod, const tome_event_info* info, void* user);
+
+/* API version 13: one local in the map script that has a global's name and
+ * another type (see tome_event_info.script_shadows). The strings stay valid
+ * until the next map loads. */
+typedef struct tome_script_shadow {
+    uint32_t size;            /* sizeof(tome_script_shadow) as filled by Tome */
+    const char* name;         /* e.g. "bj_lastCreatedUnit" */
+    const char* local_type;   /* the local's type, e.g. "integer" */
+    const char* global_type;  /* the global's type, e.g. "unit" */
+    int32_t line;             /* the local's line in war3map.j, from 1 */
+} tome_script_shadow;
 
 /* A chat command: `args` is the rest of the line after "/name", trimmed. */
 typedef void (TOME_CALL *tome_command_fn)(tome_mod* mod, const char* args, void* user);
@@ -757,7 +779,10 @@ typedef struct tome_api {
      * of its handlers is running. Fails with TOME_ERR_UNAVAILABLE if the
      * name isn't mapped, or if Tome can't hook that function (see tome.log:
      * e.g. an instruction Tome can't move). List the names a mod hooks in
-     * tome.mod.json "requires".
+     * tome.mod.json "requires". A few functions are reserved by Tome's own
+     * built-in patches (security fixes such as the JASS memhack guard); hook
+     * and unhook refuse them with TOME_ERR_NOT_OWNER so a mod can't disable a
+     * fix.
      */
     tome_result (TOME_CALL *hook)(tome_mod* mod, const char* name, int32_t phase, int32_t priority, tome_hook_fn fn,
                                   void* user);
@@ -995,6 +1020,18 @@ typedef struct tome_api {
      * from their callback. Main thread.
      */
     int32_t (TOME_CALL *publish)(tome_mod* mod, const char* topic, const void* data, size_t size);
+
+    /* --- API version 13: the map script's memhack pattern --- */
+
+    /*
+     * The current map's locals that have a global's name and another type
+     * (tome_event_info.script_shadows): fills up to `max` (`item_size` is
+     * sizeof(tome_script_shadow); use tome_get_map_script_shadows) and
+     * returns how many there are (possibly more than `max`). Globals of
+     * common.j and Blizzard.j count too. 0 before the first map load.
+     * Main thread.
+     */
+    int32_t (TOME_CALL *map_script_shadows)(tome_script_shadow* out, uint32_t item_size, int32_t max);
 } tome_api;
 
 /*
@@ -1131,6 +1168,16 @@ static inline int tome_has_import_hooks(const tome_api* api) {
 /* True if the running Tome has popups and restart_game (version 10). */
 static inline int tome_has_popups(const tome_api* api) {
     return api->api_version >= 10 && api->size >= offsetof(tome_api, restart_game) + sizeof(api->restart_game);
+}
+
+/* True if the running Tome reports the map script's memhack pattern (version 13). */
+static inline int tome_has_script_shadows(const tome_api* api) {
+    return api->api_version >= 13 &&
+           api->size >= offsetof(tome_api, map_script_shadows) + sizeof(api->map_script_shadows);
+}
+
+static inline int32_t tome_get_map_script_shadows(const tome_api* api, tome_script_shadow* out, int32_t max) {
+    return api->map_script_shadows(out, (uint32_t)sizeof(tome_script_shadow), max);
 }
 
 static inline int32_t tome_get_selection(const tome_api* api, tome_unit* units, int32_t max, int32_t* leader) {

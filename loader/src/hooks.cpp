@@ -13,6 +13,7 @@
 #include <cstring>
 #include <map>
 #include <memory>
+#include <set>
 
 namespace tome::hooks {
 
@@ -163,6 +164,7 @@ constexpr size_t kCodePage = 4096;
 SRWLOCK g_lock = SRWLOCK_INIT;  // the maps and the code allocator
 std::map<std::string, std::unique_ptr<Target>> g_targets;  // never freed: the patches stay
 std::map<uintptr_t, Target*> g_by_address;
+std::set<std::string> g_reserved;  // functions a built-in patch owns; mods can't hook/unhook them
 uint8_t* g_code_page = nullptr;
 size_t g_code_used = kCodePage;
 std::atomic<uint64_t> g_seq{0};
@@ -451,6 +453,16 @@ Target* find(const std::string& name) {
     SharedLock hold(g_lock);
     auto it = g_targets.find(name);
     return it != g_targets.end() ? it->second.get() : nullptr;
+}
+
+void reserve(const std::string& name) {
+    ExclusiveLock hold(g_lock);
+    g_reserved.insert(name);
+}
+
+bool is_reserved(const std::string& name) {
+    SharedLock hold(g_lock);
+    return g_reserved.count(name) != 0;
 }
 
 Target* find_or_install(const std::string& name, std::string& error) {

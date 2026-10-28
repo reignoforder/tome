@@ -44,6 +44,8 @@ loader/
     mappings.*            loads the embedded mapping files, finds the build
     game_build.*, sha256.*  build identification
     patch.*               call-site and pointer patching, verified before writing
+    patches.*             built-in patches (always-on fixes); the registry and version gating
+    patches/              one file per patch (memhack_guard: the JASS typecast fix)
     natives.*             native registry, thunks, InitNatives hook, JASS strings and code
     hooks.*               inline hooks on mapped functions: patch, entry stub, dispatcher
     mod_manager.*         discovery, state.json, lifecycle, hot reload, crashed mods, safe mode
@@ -97,8 +99,9 @@ docs/
      module (`verify_loaded_build`); on any mismatch nothing is patched;
    - installs the hooks, each checking the target bytes before patching:
      the 3 InitNatives call sites, the FrameDef.toc call site, two
-     CMainMenu vtable slots, and the event hooks (`events::install`, through
-     the hook manager);
+     CMainMenu vtable slots, the event hooks (`events::install`, through
+     the hook manager) and the built-in patches (`patches::install`, see
+     "Patches");
    - builds and mounts the generated overlay and loads Tome's frame
      definitions (`mod_menu::reload_frame_definitions`);
    - mounts the assets of the mods that will run
@@ -415,7 +418,7 @@ before adding any handler. Everything runs on the main thread.
 
 | Hook | Does |
 |------|------|
-| `CGlueMgr::SetScreen` (after) | maps the GlueScreen id to a `tome_ui_event` and calls `frames::on_screen` with `[mgr+CGlueMgr.screen]`; the main menu keeps its Setup hook. The loading screen is the map load: it reads the map's name and path, applies `reload: map` asset changes (`ModManager::on_map_load`, `assets::Moment::MapLoad`) and fires `TOME_EVENT_MAP_LOAD`. The natives are bound by then (CGameWar3::Reset), the map's files aren't read yet. The score screen ends the game. |
+| `CGlueMgr::SetScreen` (after) | maps the GlueScreen id to a `tome_ui_event` and calls `frames::on_screen` with `[mgr+CGlueMgr.screen]`; the main menu keeps its Setup hook. The loading screen is the map load: it reads the map's name and path, applies `reload: map` asset changes (`ModManager::on_map_load`, `assets::Moment::MapLoad`) and fires `TOME_EVENT_MAP_LOAD`. The natives are bound by then (CGameWar3::Reset), and the map's files aren't read yet, except its scripts: the game compiles `common.j`, `Blizzard.j` and `war3map.j` when the map is picked (twice with `-loadfile`), so a `reload: map` change to a script applies from the next map. The score screen ends the game. |
 | `CGameWar3::Reset` (before and after) | ends a game that started and never showed a score screen: `TOME_EVENT_GAME_END`; while it runs (it removes every unit left, also after a load that was abandoned), no `UNIT_CREATED` or `UNIT_REMOVED` |
 | `CGlueMgr::EnterGame` (after) | `TOME_UI_GAME` for `CGameUI::Get(0, 0)`, then `TOME_EVENT_GAME_START` |
 | `PresentFrame` (before) | counts frames and measures the time between them (QueryPerformanceCounter); `TOME_EVENT_TICK` only if a handler is registered |
@@ -520,6 +523,68 @@ before adding any handler. Everything runs on the main thread.
   research, revival at an altar, a LAN player's pause, defeat and leaving,
   the Esc menu's Save Game and loading from the Load Saved Game screen,
   replays and observers.
+
+## Patches
+
+`loader/src/patches.*` and `loader/src/patches/`. Patches are Tome's own
+fixes for game bugs and vulnerabilities, compiled into `tome.mix` and applied
+once at startup. Unlike mods they aren't discovered, listed, toggled or
+removed, so a fix like the JASS "memhack" typecast is always in force — the
+reason to make a fix a patch rather than ship it as a mod.
+
+- **A patch** is a `patches::Patch`: a name, a one-line summary, an optional
+  `builds` allowlist (build names from `mappings/<build>.json`), the mapping
+  `symbols` it needs, and an `install(base, build, report)`. Each lives in its
+  own file under `patches/` and is listed in `patches.cpp`'s `kAll` table
+  (an `extern const Patch`, so the registry references it across translation
+  units without static-initializer ordering). A patch installs through the
+  **hook manager** (`hooks::find_or_install` + `hooks::add`) with no mod and
+  no gate, exactly like Tome's event handlers, at the highest BEFORE / lowest
+  AFTER priority so it wraps mods' handlers.
+- **Mods can't disable a patch.** A patch lists the functions it `reserve`s;
+  `patches::install` calls `hooks::reserve(name)` for each once the patch is
+  live, and the mod-facing `hook`/`unhook` API then refuses those names with
+  `TOME_ERR_NOT_OWNER`. So a mod can't drop the patch's handlers or slip in one
+  that interferes (e.g. a REPLACE on the scanner that suppresses the
+  `endfunction` token so the restore never fires). Tome's own internal
+  add/remove take a `Target*`, not a name, so they're unaffected. This is an
+  API-level boundary: a mod is native code and could still write process memory
+  directly, which Tome can't prevent for an in-process plugin — the same trust
+  as loading any native DLL. The reservation closes the only *sanctioned* way
+  to interfere.
+- **Version targeting is capability gating, not a version string.** The patch
+  manager skips a patch unless the running build maps every symbol in
+  `symbols` (and, if `builds` is set, is in that list). Those symbols are the
+  same ones the mapping database already verifies against the loaded `game.dll`
+  by byte signature at startup, and the hook re-checks the target bytes before
+  patching. So a patch runs only where its functions are present and match,
+  and automatically covers any later build whose mapping defines the same
+  symbols — no per-build copy of the patch needed. A patch whose logic truly
+  differs between builds would split into one file per build selected by the
+  `builds` allowlist; none does yet.
+- **When:** `patches::install` runs from DllMain right after
+  `natives::install_hooks` (bootstrap.cpp), so the fixes are in place before
+  the game compiles any map script. It doesn't depend on Tome's folders or on
+  `events`; if game.dll loads after Tome, bootstrap logs a warning that the
+  patches stay off. It always returns true: a patch that doesn't fit or fails to install
+  is counted and described, not fatal. Because DllMain runs before the
+  bootstrap thread opens `tome.log`, the per-patch outcome is collected into
+  the returned `report` string (applied/skipped/failed with the reason), which
+  bootstrap logs once the file is open — as `events` does with its report.
+- **memhack-guard** (`patches/memhack_guard.cpp`, `docs/known-bugs.md`): the
+  one patch today. It hooks `JassLocalVarDesc::ctor` (BEFORE) to remember a
+  global's type descriptor whenever a local shadows it, and
+  `JassScanner::nextToken` (AFTER) to restore every shadowed global's
+  descriptor at the `endfunction` token, closing the local/global type-shadow
+  typecast with no change to legitimate code. It also hooks `Jass::compile`
+  (BEFORE and AFTER) to drop what a compile that stopped inside a function
+  left saved. The separate map-script *scanner*
+  that reports the same pattern in the log is not a patch: it runs at map load
+  in `events.cpp` (`core/jass.cpp`, `scan_shadow_exploit`), and also counts
+  `common.j` and `Blizzard.j` globals. It logs what it finds, tells the player
+  at game start (`display_text`), and gives mods the count in
+  `tome_event_info.script_shadows` and the details through
+  `map_script_shadows` (API version 13).
 
 ## Multiplayer handshake
 

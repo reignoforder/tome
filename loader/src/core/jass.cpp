@@ -1,5 +1,7 @@
 #include "jass.h"
 
+#include <unordered_map>
+
 namespace tome::jass {
 namespace {
 
@@ -48,7 +50,93 @@ char type_code(const std::string& type) {
     return 'H';
 }
 
+// The leading identifier words of a declaration line: everything before a
+// `//` comment or the first `=`, split on whitespace and commas, keeping only
+// identifier-shaped words. For `constant unit G = x` this is {constant,unit,G}.
+void leading_words(std::string_view line, std::vector<std::string_view>& out) {
+    out.clear();
+    size_t end = line.size();
+    for (size_t i = 0; i + 1 < line.size(); ++i) {
+        if (line[i] == '/' && line[i + 1] == '/') { end = i; break; }
+    }
+    for (size_t i = 0; i < end; ++i) {
+        if (line[i] == '=') { end = i; break; }
+    }
+    size_t i = 0;
+    auto word_char = [](char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+    };
+    while (i < end) {
+        if (!word_char(line[i])) { ++i; continue; }
+        size_t start = i;
+        while (i < end && word_char(line[i])) ++i;
+        out.push_back(line.substr(start, i - start));
+    }
+}
+
+// name -> type; generated maps declare thousands of globals (gg_*, udg_*).
+using GlobalTypes = std::unordered_map<std::string_view, std::string_view>;
+
+// Collects one script's globals into `globals` and, with `findings` set,
+// reports its locals that shadow one with a different type.
+void scan_script(std::string_view script, GlobalTypes& globals, std::vector<ShadowFinding>* findings) {
+    std::vector<std::string_view> w;  // reused for every line
+    bool in_globals = false;
+    int line_no = 0;
+    size_t pos = 0;
+    while (pos <= script.size()) {
+        size_t nl = script.find('\n', pos);
+        std::string_view line =
+            script.substr(pos, nl == std::string_view::npos ? std::string_view::npos : nl - pos);
+        pos = (nl == std::string_view::npos) ? script.size() + 1 : nl + 1;
+        ++line_no;
+
+        leading_words(line, w);
+        if (w.empty()) continue;
+
+        if (w[0] == "globals") { in_globals = true; continue; }
+        if (w[0] == "endglobals") { in_globals = false; continue; }
+
+        if (in_globals) {
+            // [constant] <type> [array] <name>
+            size_t t = 0;
+            if (w[t] == "constant") ++t;
+            if (t >= w.size()) continue;
+            std::string_view type = w[t++];
+            if (t < w.size() && w[t] == "array") ++t;
+            if (t >= w.size()) continue;
+            std::string_view name = w[t];
+            if (is_valid_identifier(name) && !is_keyword(name)) {
+                globals.emplace(name, type);  // keeps the first declaration
+            }
+            continue;
+        }
+
+        if (findings && w[0] == "local") {
+            // local <type> [array] <name>
+            size_t t = 1;
+            if (t >= w.size()) continue;
+            std::string_view type = w[t++];
+            if (t < w.size() && w[t] == "array") ++t;
+            if (t >= w.size()) continue;
+            std::string_view name = w[t];
+            auto it = globals.find(name);
+            if (it != globals.end() && it->second != type) {
+                findings->push_back({std::string(name), std::string(it->second), std::string(type), line_no});
+            }
+        }
+    }
+}
+
 } // namespace
+
+bool scan_shadow_exploit(std::string_view script, std::vector<ShadowFinding>& findings,
+                         const std::vector<std::string_view>& prelude) {
+    GlobalTypes globals;
+    for (std::string_view p : prelude) scan_script(p, globals, nullptr);
+    scan_script(script, globals, &findings);
+    return !findings.empty();
+}
 
 bool is_valid_identifier(std::string_view name) {
     if (name.empty()) return false;

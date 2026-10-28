@@ -252,6 +252,7 @@ fi
 check "Assets at startup: $ASSET_FILES files from 3 mods \(0 overridden" "mods' assets mounted from DllMain"
 check "Asset probe .*: [0-9]+ bytes, fnv1a $PROBE_HASH" "the game reads the mod's texture instead of its own"
 check "Bootstrap complete" "bootstrap finished" 15
+check "Patches: 1 applied, 0 skipped: memhack-guard applied" "memhack guard patch applied"
 check "Main-thread dispatcher installed" "main-thread dispatcher installed"
 check "Events: hooked screens, map load, game start and end, frames, game ticks, shutdown, chat, pause, units, spells, damage, experience, players, resources, keys, menus, dialogs, levels and saved games" "event hooks installed"
 check "\[hello\] 100 ticks" "tick events reach mods"
@@ -264,6 +265,15 @@ if ((${#MAP_ARG[@]})); then
     check "\[hello\] HelloLogReal\(2\.5\) called from JASS" "real argument and real return value"
     check "\[hello\] HelloLog\(1001\) called from JASS" "TomeIsLoaded() returned true"
     check "\[map\] TomeLogInteger\(4\)" "native result used by the map script"
+    echo "memhack guard (map script)"
+    check "Map script guard: 2 local/global type-shadow\(s\) in war3map\.j" "map scan reports the shadowing locals"
+    check "  line [0-9]+: local 'tome_e2e_shadow' \(integer\) shadows global of type unit" "with the name and both types"
+    check "memhack-guard: endfunction restored 1 shadowed global" "the guard restored the global at endfunction"
+    check "\[map\] TomeLogInteger\(9506\)" "a shadowing local keeps its type up to its return"
+    check "\[map\] TomeLogInteger\(9507\)" "and up to a set just before endfunction"
+    check "\[map\] TomeLogInteger\(9510\)" "the global keeps its own type in later functions"
+    check "\[hello\] map script shadows: 2, 2 listed \(first: local integer tome_e2e_shadow on line [0-9]+, global unit\)" "mods get the findings (script_shadows, map_script_shadows)"
+    check "Map script guard: told the player" "the player is told at game start" 30
     echo "game events (-loadfile)"
     check "\[hello\] map load: .+ \(Maps\\\\TomeE2E\\\\e2e\.w3m\)" "map load event with the map's name and path"
     check "\[hello\] game start: " "game start event" 30

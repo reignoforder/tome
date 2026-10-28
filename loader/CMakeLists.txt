@@ -57,6 +57,8 @@ add_library(tome_loader SHARED
     src/natives.cpp
     src/overlay.cpp
     src/patch.cpp
+    src/patches.cpp
+    src/patches/memhack_guard.cpp
     src/paths.cpp
     src/popups.cpp
     src/restart.cpp

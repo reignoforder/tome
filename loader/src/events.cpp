@@ -1,6 +1,8 @@
 #include "events.h"
 
 #include "core/chat.h"
+#include "core/jass.h"
+#include "storm.h"
 #include "frames.h"
 #include "guard.h"
 #include "handshake.h"
@@ -87,6 +89,9 @@ double g_time_of_day = -1;         // as of the last game tick; -1 for none
 int g_reset_depth = 0;             // inside CGameWar3::Reset (its BEFORE ran, its AFTER not yet)
 LARGE_INTEGER g_frequency, g_last_tick;
 uint32_t g_frames = 0;
+// The current map script's locals that shadow a global of another type (the
+// memhack pattern), found at map load; main thread only.
+std::vector<tome::jass::ShadowFinding> g_script_shadows;
 
 tome_event_info make_info(int32_t event, double delta) {
     tome_event_info info = {};
@@ -96,6 +101,7 @@ tome_event_info make_info(int32_t event, double delta) {
     info.map_name = has_map ? g_map_name.c_str() : "";
     info.map_path = has_map ? g_map_path.c_str() : "";
     info.map_description = has_map ? g_map_description.c_str() : "";
+    info.script_shadows = has_map ? static_cast<uint32_t>(g_script_shadows.size()) : 0;
     info.delta = delta;
     info.frame = event == TOME_EVENT_TICK ? g_frames : 0;
     info.game_time = event == TOME_EVENT_GAME_TICK || event == TOME_EVENT_GAME_END ? g_game_time : 0;
@@ -379,9 +385,48 @@ bool handle_chat(const char* text) {
 // --- hook handlers ---------------------------------------------------------------------
 // Tome's own handlers: no mod, no gate.
 
+// Built-in map-script guard (docs/known-bugs.md): warns when the loading map's
+// war3map.j declares a `local` that shadows a `global` of a different type --
+// the local/global name-shadowing typecast ("memhack"/ACE) pattern. The
+// compiler fix (memhack-guard) neutralizes it; this makes a downloaded virus
+// map visible in the log regardless. Reads war3map.j from the mounted map
+// archive, which is available by the loading screen.
+void check_map_script() {
+    g_script_shadows.clear();
+    std::string script;
+    // Storm is otherwise only bound once a mod mounts assets; init is idempotent.
+    if (!tome::storm::init()) return;
+    // The game also accepts the script under scripts\ (protected maps use it).
+    if ((!tome::storm::read_file("war3map.j", script) || script.empty()) &&
+        (!tome::storm::read_file("scripts\\war3map.j", script) || script.empty())) {
+        return;
+    }
+    // The map's script is compiled after these, so it can shadow their
+    // globals too. Read through Storm, a map's own copies come first.
+    std::string common, blizzard;
+    std::vector<std::string_view> prelude;
+    if (tome::storm::read_file("Scripts\\common.j", common)) prelude.push_back(common);
+    if (tome::storm::read_file("Scripts\\Blizzard.j", blizzard)) prelude.push_back(blizzard);
+    TOME_DEBUG("Map script guard: scanning war3map.j (%zu bytes, %zu prelude script(s))", script.size(),
+               prelude.size());
+    std::vector<tome::jass::ShadowFinding>& findings = g_script_shadows;
+    if (!tome::jass::scan_shadow_exploit(script, findings, prelude)) return;
+    TOME_WARN("Map script guard: %zu local/global type-shadow(s) in war3map.j "
+              "(the JASS typecast/memhack pattern; see docs/known-bugs.md)",
+              findings.size());
+    for (size_t i = 0; i < findings.size() && i < 10; ++i) {
+        TOME_WARN("  line %d: local '%s' (%s) shadows global of type %s",
+                  findings[i].line, findings[i].name.c_str(),
+                  findings[i].local_type.c_str(), findings[i].global_type.c_str());
+    }
+}
+
 // The loading screen is the one point every way into a game passes (menus,
 // -loadfile, LAN), after the natives are bound (CGameWar3::Reset) and before
-// the map's script and files are read.
+// the map's files are read and its script runs. The script itself is already
+// compiled: the game compiles it when the map is picked (twice with
+// -loadfile), so the scan above only reports, and the memhack guard works in
+// the compiler instead.
 void map_load() {
     end_game();  // a game that never went back to a menu
     g_reset_depth = 0;  // in case a Reset was abandoned (a crash guard further out) before its AFTER ran
@@ -394,7 +439,9 @@ void map_load() {
     g_game_started = false;
     g_game_time = 0;
     TOME_INFO("Map loading: %s (%s)", g_map_name.c_str(), g_map_path.c_str());
-    // Before the map reads any file, so "reload": "map" changes apply to it.
+    check_map_script();
+    // Before the map reads its other files, so "reload": "map" changes apply
+    // to them (not to the scripts, compiled already).
     mod_manager().on_map_load();
     fire(TOME_EVENT_MAP_LOAD);
 }
@@ -434,6 +481,16 @@ void TOME_CALL after_enter_game(tome_mod*, tome_hook_call*, void*) {
     g_time_of_day = -1;
     read_map(current_game());  // a saved game's map info is only complete now
     TOME_INFO("Game started: %s", g_map_name.c_str());
+    if (!g_script_shadows.empty()) {
+        // The player didn't choose to trust this map's script; say so where
+        // they'll see it, not only in tome.log. The guard has blocked it.
+        bool shown = display_text("|cffffcc00Tome:|r This map's script gives " +
+                                      std::to_string(g_script_shadows.size()) +
+                                      " local variable(s) a global's name and another type, the trick memhack "
+                                      "maps use to read and write game memory. Tome blocks it; details in tome.log.",
+                                  20.0f);
+        if (shown) TOME_INFO("Map script guard: told the player");
+    }
     if (void* game_ui = g_game_ui_get(0, 0)) frames::on_screen(TOME_UI_GAME, game_ui);
     handshake::on_game_start();
     fire(TOME_EVENT_GAME_START);
@@ -1037,6 +1094,30 @@ tome_result TOME_CALL api_register_command(tome_mod* mod, const char* name, tome
     return TOME_OK;
 }
 
+int32_t TOME_CALL api_map_script_shadows(tome_script_shadow* out, uint32_t item_size, int32_t max) {
+    if (max < 0 || (max > 0 && (!out || item_size == 0))) return 0;
+    if (!frames::on_main_thread()) {
+        TOME_ERROR("map_script_shadows called off the game's main thread (thread %lu); ignored",
+                   GetCurrentThreadId());
+        return 0;
+    }
+    // A mod built against a later tome.h may pass a larger struct.
+    size_t copy = std::min<size_t>(item_size, sizeof(tome_script_shadow));
+    for (int32_t i = 0; i < max && i < static_cast<int32_t>(g_script_shadows.size()); ++i) {
+        const auto& f = g_script_shadows[i];
+        tome_script_shadow shadow = {};
+        shadow.size = static_cast<uint32_t>(copy);
+        shadow.name = f.name.c_str();
+        shadow.local_type = f.local_type.c_str();
+        shadow.global_type = f.global_type.c_str();
+        shadow.line = f.line;
+        auto slot = reinterpret_cast<char*>(out) + static_cast<size_t>(i) * item_size;
+        std::memset(slot, 0, item_size);
+        std::memcpy(slot, &shadow, copy);
+    }
+    return static_cast<int32_t>(g_script_shadows.size());
+}
+
 tome_result TOME_CALL api_display_text(const char* text, float seconds) {
     if (!text || !(seconds > 0)) return TOME_ERR_INVALID_ARGUMENT;
     if (!g_ready) return TOME_ERR_UNAVAILABLE;
@@ -1137,6 +1218,7 @@ void fill_api(tome_api& api) {
     api.on_event = api_on_event;
     api.register_command = api_register_command;
     api.display_text = api_display_text;
+    api.map_script_shadows = api_map_script_shadows;
 }
 
 bool display_text(const std::string& text, float seconds) {

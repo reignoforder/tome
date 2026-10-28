@@ -30,6 +30,16 @@ Target* find_or_install(const std::string& name, std::string& error);
 // The target if `name` is already hooked, otherwise null.
 Target* find(const std::string& name);
 
+// Reserves a mapped function for Tome's own built-in use (a patch): the
+// mod-facing hook/unhook API refuses it, so a mod can't add a handler that
+// interferes with the patch's chain (e.g. a REPLACE that suppresses a token)
+// or try to drop it. Tome's internal add/remove (which take a Target*) are
+// unaffected. Called once at startup, before any mod loads. Note this is an
+// API-level boundary only: a mod is native code and can still write process
+// memory directly, which Tome can't prevent for in-process plugins.
+void reserve(const std::string& name);
+bool is_reserved(const std::string& name);
+
 // Patches the function at `address`, whose first bytes must match `bytes`
 // (-1 matches anything). find_or_install uses it; tests call it directly.
 Target* install(const std::string& name, uintptr_t address, mappings::Convention convention,

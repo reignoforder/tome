@@ -436,6 +436,17 @@ TEST(hook_runtime_wide_result) {
     CHECK_EQ(as<CdeclWide>(rt_wide)(1), 0x1234567800000065ull);
 }
 
+TEST(hook_runtime_reserve) {
+    // A reserved name is remembered and others aren't; api_hook/api_unhook
+    // check this to keep mods off a built-in patch's functions.
+    CHECK(!hooks::is_reserved("rt_reserved_name"));
+    hooks::reserve("rt_reserved_name");
+    CHECK(hooks::is_reserved("rt_reserved_name"));
+    CHECK(!hooks::is_reserved("rt_other_name"));
+    hooks::reserve("rt_reserved_name");  // idempotent
+    CHECK(hooks::is_reserved("rt_reserved_name"));
+}
+
 TEST(hook_runtime_refuses_bad_bytes) {
     std::string error;
     std::vector<int16_t> wrong(8, 0x90);

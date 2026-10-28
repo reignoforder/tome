@@ -41,6 +41,7 @@ GLOBALS = """\
     trigger tome_e2e_dialog_trigger = null
     trigger tome_e2e_arrow_trigger = null
     trigger tome_e2e_menu_trigger = null
+    unit tome_e2e_shadow = null
 """
 
 CALLS = """\
@@ -129,6 +130,12 @@ CALLS = """\
     call HelloRun(function TomeE2EWaits)
     call HelloRun(function TomeE2EWaits)
     call TomeLogInteger(8301)
+    // The memhack guard: locals that shadow a global of another type
+    // (TomeE2EShadow*). The script only compiles if each local keeps its
+    // type up to its endfunction and the global gets its own back after.
+    call TomeLogInteger(9500 + TomeE2EShadowReturn())
+    call TomeE2EShadowSet()
+    call TomeE2EShadowAfter()
     call TomeLogInteger(9000 + CrashNative(1))
     call TomeLogInteger(9100 + CrashNative(2))
     call TomeLogInteger(8999)
@@ -140,6 +147,29 @@ FUNCTIONS = """\
 // Added by Tome's e2e test: called by the asset-demo mod's Blizzard.j
 function TomeBlizzardJLoaded takes nothing returns nothing
     call TomeLogInteger(7600)
+endfunction
+
+// The memhack pattern, which the memhack-guard patch makes harmless: each
+// local shadows the unit global tome_e2e_shadow with an integer. The
+// function's last statement (just before endfunction) must still see the
+// local, and TomeE2EShadowAfter the unit global.
+function TomeE2EShadowReturn takes nothing returns integer
+    local integer tome_e2e_shadow = 5
+    set tome_e2e_shadow = tome_e2e_shadow + 1
+    return tome_e2e_shadow
+endfunction
+
+function TomeE2EShadowSet takes nothing returns nothing
+    local integer tome_e2e_shadow
+    call TomeLogInteger(9507)
+    set tome_e2e_shadow = 7
+endfunction
+
+function TomeE2EShadowAfter takes nothing returns nothing
+    set tome_e2e_shadow = null
+    if tome_e2e_shadow == null then
+        call TomeLogInteger(9510)
+    endif
 endfunction
 
 // Called by the hello mod through code arguments.

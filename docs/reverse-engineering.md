@@ -96,6 +96,139 @@ from C with handle ids.
 Signature letters: `I` integer, `R` real, `B` boolean, `S` string, `C` code,
 `V` nothing, `H<type>;` handle (e.g. `(Hunit;R)V`).
 
+### JASS compiler (Jass2), for the memhack guard
+
+The map script (`war3map.j`, textual JASS) is compiled at runtime by the
+Jass2 compiler, source `scanner.cpp` (lexer) and `parser.cpp` (type name
+strings at `0xBD77AC`/`0xBD77A0`), engine version `1.0.3` (`0xBD78DC`). The
+compiler and VM occupy roughly `0x90xxxx`–`0x92xxxx`: the VM code table
+(`0x916880`), string table (`0x91AF80`), function lookup (`0x915F60`), and
+an AST source writer (`0x9259A0` onward, which re-emits keywords like
+`endfunction`/`globals` through a writer helper `0x925690`).
+
+**Static type checker confirmed present on 1.27b.** The compiler reports, among
+others (error table of `{char* msg; int code; int flags}` 12-byte records at
+`.data 0xCE4B30`, searched by code — its base isn't referenced by a plain
+immediate, so find the reporter by the `printf`-style formatter, not by xref):
+`type mismatch in assignment` (code `0x29`), `expected a handle type` (`0x18`),
+`invalid argument type '%s' in call` (`0x24`), `attempt to set a constant
+variable` (`0x4`), `unregistered native function` (`0x2F`). So 1.27b does
+type-check assignments and calls; the memhack works by *defeating* this
+check through local/global name shadowing (see `docs/known-bugs.md`), not by
+its absence.
+
+**Front-end pipeline (traced):**
+
+| What | RVA | Notes |
+|------|-----|-------|
+| Compile driver (`Jass::compile`) | `0x9146F0` | `ret 8`, `__fastcall` (ecx context, edx callback, two stack args). Builds the parser object (`0x9122E0`) and the scanner (`0x9246A0`, `0x834` capacity) in its own stack frame, runs the parse (`0x913C30`), tears both down (scanner dtor `0x9245F0`). Four callers (`0x20D36F`, `0x20FEB2`, `0x719A9C`, `0x9CBCAB`). The scanner ctor's only other caller, `0x9120E0`, is unreferenced, so all compilation runs inside this function. |
+| Parse entry | `0x913C30` | `__thiscall(src, len*)`. Sets up the parse context; `0x913F40` just flattens the source rope into one buffer (not the parser proper). |
+| Scanner ctor / dtor | `0x9246A0` / `0x9245F0` | Holds the symbol table(s). |
+| Symbol-table hashtable | ctor `0x9143D0`, dtor `0x9124D0` | count `+0x18`, capacity `+0x18`?/buckets `+0x1C`; inner container ctor `0x9152D0`. Instantiated in the scanner at `+0x4` and `+0x2C`, and at scope sites `0x912508/0x912786/0x912790/0x912B22/0x913F05/0x9222CB/0x922E1E/0x922FA1`. A single script-wide, name-keyed symbol table — the structure that makes local-shadows-global type confusion possible. |
+
+**Symbol table and resolver (traced):**
+
+| What | RVA | Notes |
+|------|-----|-------|
+| Hashtable insert-or-get | `0x914640` | `ret 0xC`, `__thiscall(key, a, b)`. Masks key by `[tab+0x24]`, finds the bucket, allocates an entry through the vtable method `[[tab]+4]` (entries are polymorphic). Caller then sets `[entry]=symbol`, `[entry+0x14]=key`. |
+| Hashtable find-by-key | `0x9247F0` | `__thiscall(key)` → entry or 0. |
+| Bucket-chain maintenance | `0x914900` | Grows a bucket when its chain passes length `0xD` (via `0x914090`); not the key compare. |
+| Identifier hash | `0x908500` | `(text, scanner[+0x28])` → interned key. |
+| Scanner intern + classify | ~`0x925380` | Hashes an identifier, looks it up with `0x9247F0` in the scanner's **two** symbol tables at `+0x58` then `+0x30` (insert into one chosen by the mode flag `[scanner+0x2C]`), then classifies the symbol into a token type (`0x130`–`0x133`) via the kind tests below. |
+| Scope add-symbol | `0x921FA0` | `__thiscall(key)`, one caller (`0x924068`). Inserts into a scope's table `+0x4` or `+0x2C` by its mode flag `[scope]`. |
+| Symbol kind tests | `0x91CC30` / `0x91CC50` / `0x91CCA0` | Read `[sym+0x18]` (the symbol's *descriptor*) then `[descriptor+0x4]` (**the kind enum**): e.g. `0x91CCA0` true for kinds `0xC/0x29/0x2A/0x2B`, `0x91CC30` for `6/9`, `0x91CC50` for `0xA`. |
+
+**Symbol struct:** `+0x14` = interned name/key, `+0x18` = descriptor pointer;
+`descriptor+0x4` = kind enum (keyword / type / function / variable …). A
+variable's declared type lives in/off the descriptor. The scanner interns
+each name once and **reuses the same symbol object for every occurrence** —
+so declaring a `local` whose name matches a `global` resolves to the same
+interned symbol (`0x925380` returns the existing entry rather than inserting
+a new one). That shared-symbol design is the structural root of the
+local-shadows-global type confusion; the write that repoints the symbol is
+the local-variable descriptor ctor's `0x91DD5E` (next section).
+
+**`+0xB8` is NOT the variable type (corrected by a dynamic run).** GetType
+`0x91B340` / SetType `0x91B330` access `[this+0xB8]` but are **dead** (zero
+callers/refs). `0x9121D0` is *not* the general variable-reference ctor: a
+dev probe mod (a hook on it, since removed) logged it across a full melee-map compile and it
+fired for only **3 distinct `this` objects** over 204 references, always with
+node `+0x4=0x27` and node `+0x10=5`, reading a *small, monotonically
+increasing* value out of a singleton's `+0xB8` (a running string-id counter,
+not a per-variable type). So the earlier "`+0xB8` = type-object" reading
+conflated two different objects' `+0xB8`; the live per-variable type lives
+elsewhere (most likely the `+0x10` type-id, set from the type nonterminal, or
+a descriptor field). Numeric coercion (`0x91D940`+) does run on node `+0x10`
+type-ids (values 2..7).
+
+### The memhack gateway: mechanism (CONFIRMED dynamically on 1.27b)
+
+Confirmed in game with a dev probe mod (since removed) that hooked the
+scanner's intern+classify `0x9253E0` (`ret 0`, `__thiscall(scanner)`; token
+text at `[scanner+0x98]`, resolved symbol at `[scanner+0x24]`) and dumped the
+symbol it resolves, against a map whose `war3map.j`
+declares `unit zzqG` (global) and, in a function, `local integer zzqG`.
+
+- Each name is interned to **one shared symbol** `E`. A **variable's declared
+  type lives on a descriptor** at `E+0x18`; `descriptor+0x4` = kind
+  (`0x2A`=global var, `0x29`=local var), **`descriptor+0x10` = JASS type-id**
+  (observed: `unit`=7, `integer`=4, `real`=5; `descriptor+0x8` is a
+  global/local flag: 2/6).
+- Declaring a variable **overwrites** `E+0x18` with a freshly built
+  descriptor. Local-var descriptor ctor `0x91DCF0` (`ret 0x10`): sets
+  `desc+0x4=0x29`, copies the declared type-id into `desc+0x10`, and at
+  **`0x91DD5E` (`89 72 18  mov [edx+0x18], esi`)** writes `E+0x18 = this new
+  descriptor`. Global-var ctor is `0x91D710` (kind `0x2A`, same shape). The
+  local-decl handler is `0x922EE8`/`0x922F2A` (two variants, calling
+  `0x91DCF0` at `0x922EF9`/`0x922F3A`); it passes `E` but **does not save the
+  old `E+0x18`**.
+- **No scope restore.** A reference to `zzqG` in a *different function compiled
+  after* the shadowing one still resolves `E+0x18` to the **local integer**
+  descriptor (type-id 4), not the global `unit` (type-id 7). So a `local` that
+  shadows a global of another type **permanently repoints the global's type**
+  for the rest of the compile — the handle↔integer typecast primitive (memhack
+  gateway).
+
+**Precise detection rule (for the guard):** a `local` declaration whose name
+equals a `global` variable of a *different* type. Low false-positive; legit
+maps don't do this. The engine-patch sites, if a binary fix is wanted, are the
+swap `0x91DD5E` or the local-decl handler `0x922EE8`/`0x922F2A`; a correct
+in-compiler fix must add scope restoration of `E+0x18` (invasive, since the
+handler saves nothing). A hook on `0x91DCF0` can instead neutralize the
+exploit by forcing a cross-type shadow's `desc+0x10` to the global's type-id.
+**Shipped** as the scope-restore fix: the built-in `memhack-guard` patch
+(`loader/src/patches/memhack_guard.cpp`) hooks:
+
+- `0x91DCF0` (BEFORE): saves the symbol and its current descriptor unless
+  there is none or it's another local's (kind `0x29`). Every other kind is
+  saved, not just `0x2A`: the compiler's variable test `0x91CCA0` also
+  accepts `0xC` and `0x2B`. The list has no cap, or a function could declare
+  that many harmless shadows before the one that matters.
+- `JassScanner::nextToken` `0x9249D0` (AFTER, the `endfunction` token
+  `0x115`): writes the saved descriptors back, newest first.
+- `Jass::compile` `0x9146F0` (BEFORE and AFTER): drops the list. A script
+  that stops inside a function never reaches its `endfunction`, and the next
+  compile's first one would write into the old compile's freed symbols. This
+  is a safety net. In game, the parser recovers from a syntax error or a
+  missing `endfunction` and still reaches a later `endfunction`, and a script
+  that ends inside a function crashes 1.27b itself, with or without Tome.
+
+Restoring when the scanner hands out `endfunction` isn't too early: the
+e2e map's functions end with `return <local>` and `set <local> = 7` right
+before `endfunction`, and both compile and run against the local
+(`tools/e2e-test.sh`, "memhack guard"). A map whose later function assigns
+an `integer` to the shadowed `unit` global fails to compile and doesn't load:
+the typecast is closed. With `-loadfile`, the map script is compiled twice
+before the loading screen (the guard logs each restore twice). The map scan in `events.cpp`
+(`jass::scan_shadow_exploit`) logs the same pattern at map load, including
+locals that shadow a `common.j` or `Blizzard.j` global. See
+`docs/known-bugs.md` and `docs/architecture.md`, "Patches".
+
+`0x9121D0` is a specialized ident-node ctor, *not* the general var-ref: it
+reads a string-id counter off a singleton's `+0xB8`, which earlier misled a
+static reading of `+0xB8` as "the type". GetType `0x91B340`/SetType
+`0x91B330` (`[this+0xB8]`) are real but dead.
+
 ## Frames (UI)
 
 | What | RVA | Signature / notes |
