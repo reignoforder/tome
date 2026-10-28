@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "id": "unapproved",
+  "version": "0.1.0",
+  "game": "1.27b",
+  "tome": "*",
+  "sync": "client",
+  "entry": "unapproved.dll"
+}

@@ -57,7 +57,7 @@ const char* TOME_CALL api_mod_dir(tome_mod* mod) {
 
 const char* TOME_CALL api_config_dir(tome_mod* mod) {
     if (!mod) return "";
-    CreateDirectoryW((mod->dir_w + L"\\config").c_str(), nullptr);
+    CreateDirectoryW(mod->config_dir_w.c_str(), nullptr);
     return mod->config_dir.c_str();
 }
 

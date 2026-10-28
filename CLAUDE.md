@@ -15,6 +15,7 @@ cmake --build build --target deploy    # build and copy tome.mix into "WarCraft 
 cd build && ctest                        # unit tests (Wine)
 tools/e2e-test.sh                        # real game, 4 launches (~5 min); close the game first
 tools/game.sh start [VAR=val] / wait <regex> / shot <png> / stop / log
+tools/fuzz.sh [seconds] [target...]      # libFuzzer + ASan/UBSan on the core parsers (host clang, build-fuzz/)
 HEADLESS=1 tools/e2e-test.sh             # either script, off screen in gamescope (tools/headless.sh)
 ```
 
@@ -31,6 +32,9 @@ HEADLESS=1 tools/e2e-test.sh             # either script, off screen in gamescop
 - Mod lifecycle and anything touching game state runs on the **main thread**
   (`main_thread::post`).
 - Portable logic goes in `loader/src/core/` with unit tests; Windows code goes in `loader/src/`.
+- A `core/` parser of untrusted bytes (other players, maps, packages,
+  `tome.mod.json`) gets a target in `fuzz/`; a crashing input goes into
+  `fuzz/regressions/<target>/` with a unit test.
 - Code style: C++20, no exceptions/RTTI, `TOME_INFO`/`WARN`/`ERROR` logging.
   The mod API in `sdk/include/tome/tome.h` is plain C and append-only.
 
@@ -40,7 +44,10 @@ HEADLESS=1 tools/e2e-test.sh             # either script, off screen in gamescop
   matches your own shell. Use `pkill -x war3.exe` (or `tools/game.sh stop`).
   SIGTERM sometimes isn't enough, so follow up with `-9`.
 - **Only one game instance at a time.** A second one can't open `tome.log`.
-- **Tests must use `TOME_HOME`** (a temp folder), never the real `mods/` folder.
+- **Tests must use `TOME_HOME`** (a temp folder), never the real `tome/mods/` folder.
+- **New mods with a DLL don't run until allowed** (approval, `core/mod_state.*`).
+  A test that installs one sets `TOME_DEBUG_APPROVE=<ids>` (or `*`); for
+  `tools/game.sh start` pass it like any other variable.
 - **Show/Hide:** vtable `+0xD4` is Show and `+0xD0` is Hide. Show also shows all children.
 - **Don't reload all of FrameDef.toc after startup:** it crashes later map
   loads. Use LoadTocFiles for Tome's own TOC.

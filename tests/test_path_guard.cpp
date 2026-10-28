@@ -60,6 +60,7 @@ TEST(path_guard_rejects_reserved_devices) {
     CHECK(is_unsafe("CON.log"));
     CHECK(is_unsafe("nul "));
     CHECK(is_unsafe("nul."));
+    CHECK(is_unsafe("nul .txt"));
     // A reserved name as one component of a path still resolves to the device.
     CHECK(is_unsafe("Logs\\nul"));
     CHECK(is_unsafe("CONIN$"));

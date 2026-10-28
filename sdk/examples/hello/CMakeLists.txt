@@ -12,4 +12,8 @@ if(Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE} -I "${CMAKE_SOURCE_DIR}/tests/e2e/make_blp.py"
             "${CMAKE_BINARY_DIR}/mods/hello/icon.blp" 32 3070d0
     )
+    set(hello_icon icon.blp)
 endif()
+
+# The same mod as one file: <build>/packages/hello.tome.
+tome_package(hello FILES ${hello_icon})

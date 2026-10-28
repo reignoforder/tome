@@ -131,7 +131,7 @@ std::set<std::string> g_icon_definitions;     // loaded this session
 std::string icon_definition(const ModStatus& m) {
     std::wstring icon_path = widen(m.icon);
     std::replace(icon_path.begin(), icon_path.end(), L'/', L'\\');
-    std::wstring path = mod_manager().paths().mods_dir + L"\\" + widen(m.folder) + L"\\" + icon_path;
+    std::wstring path = widen(m.dir) + L"\\" + icon_path;
     FileStamp stamp;
     if (!file_stamp(path, stamp)) return {};
     IconFile& cached = g_icon_files[m.folder];

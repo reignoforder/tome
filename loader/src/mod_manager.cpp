@@ -12,6 +12,9 @@
 #include "main_thread.h"
 #include "mod_menu.h"
 #include "natives.h"
+#include "packages.h"
+#include "core/package.h"
+#include "sha256.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -21,7 +24,6 @@
 namespace tome {
 namespace {
 
-constexpr int kStateSchema = 1;
 constexpr unsigned kReleaseRetryMs = 250;
 
 using Gates = std::vector<std::shared_ptr<hooks::Gate>>;
@@ -168,6 +170,7 @@ void ModManager::init(const Paths& paths, const GameBuild& build) {
     guard::set_fault_sink([](tome_mod* mod) { mod_manager().on_fault(mod); });
 
     CreateDirectoryW(paths_.mods_dir.c_str(), nullptr);
+    CreateDirectoryW(paths_.mod_config_dir.c_str(), nullptr);
     last_polled_ = disk_fingerprint();  // baseline for poll_changed(), set before the watcher starts
 
     // Shadow copies from earlier sessions. Files still in use (another game
@@ -189,7 +192,7 @@ void ModManager::init(const Paths& paths, const GameBuild& build) {
 // parsed again only when its stamp changes.
 void ModManager::read_settings_schema(Installed& mod) const {
     const std::wstring schema_file = mod.dir + L"\\" + to_windows_path(mod.meta.config);
-    const std::wstring values_file = mod.dir + L"\\config\\settings.json";
+    const std::wstring values_file = settings_file(mod.meta.id);
     // The stamps first: if a file changes while it's read, the next poll sees a newer one.
     FileStamp schema_stamp, values_stamp;
     bool schema_exists = file_stamp(schema_file, schema_stamp);
@@ -227,8 +230,9 @@ void ModManager::read_settings_schema(Installed& mod) const {
     mod.settings = cached.schema;
     mod.warnings.insert(mod.warnings.end(), cached.schema_warnings.begin(), cached.schema_warnings.end());
 
-    if (!cached.values_read || !(cached.values_stamp == values_stamp)) {
+    if (!cached.values_read || cached.values_file != values_file || !(cached.values_stamp == values_stamp)) {
         cached.values_read = true;
+        cached.values_file = values_file;
         cached.values_stamp = values_stamp;
         cached.values = json::Value();
         cached.values_warning.clear();
@@ -236,7 +240,7 @@ void ModManager::read_settings_schema(Installed& mod) const {
         if (!values_exist || !read_file(values_file, text)) {
             cached.values_stamp = {};
         } else if (json::ParseResult parsed = json::parse(text, cached.values); !parsed.ok) {
-            cached.values_warning = "config\\settings.json: " + parsed.error + "; using the defaults";
+            cached.values_warning = settings_name(mod.meta.id) + ": " + parsed.error + "; using the defaults";
             cached.values = json::Value();
         }
     }
@@ -264,13 +268,35 @@ std::vector<ModManager::Installed> ModManager::discover() const {
     HANDLE find = FindFirstFileW((paths_.mods_dir + L"\\*").c_str(), &fd);
     if (find == INVALID_HANDLE_VALUE) return mods;
     do {
-        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
         std::wstring name = fd.cFileName;
         if (name == L"." || name == L".." || name[0] == L'.') continue;
+        const bool is_package = !(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY);
+        if (is_package && package::stem(narrow(name)).empty()) continue;
+        if (_wcsicmp(name.c_str(), L"config") == 0) continue;  // the mods' settings, not a mod
 
         Installed mod;
         mod.folder = narrow(name);
         mod.dir = paths_.mods_dir + L"\\" + name;
+        mod.package = is_package;
+        if (is_package) {
+            // Unpacked again only when the file's stamp changes.
+            FileStamp stamp;
+            file_stamp(mod.dir, stamp);
+            UnpackedPackage& unpacked = package_cache_[mod.folder];
+            if ((unpacked.dir.empty() && unpacked.error.empty()) || !(unpacked.stamp == stamp)) {
+                packages::Unpacked result = packages::unpack(paths_, mod.dir);
+                // The metadata cache compares stamps only, and a new copy has new files.
+                if (result.dir != unpacked.dir) meta_cache_.erase(mod.folder);
+                unpacked = {stamp, result.dir, result.error};
+                if (!result.error.empty()) TOME_WARN("%s: %s", mod.folder.c_str(), result.error.c_str());
+            }
+            if (!unpacked.error.empty()) {
+                mod.errors.push_back(unpacked.error);
+                mods.push_back(std::move(mod));
+                continue;
+            }
+            mod.dir = unpacked.dir;
+        }
 
         // tome.mod.json is parsed again only when its stamp changes.
         const std::wstring meta_file = mod.dir + L"\\tome.mod.json";
@@ -333,58 +359,101 @@ std::vector<ModManager::Installed> ModManager::discover() const {
             } else if (!mod.meta.assets.empty()) {
                 mod.warnings.push_back("\"assets\" folder \"" + mod.meta.assets + "\" not found");
             }
+            mod.has_code = mod.valid && (!mod.dll.empty() || std::any_of(mod.assets.begin(), mod.assets.end(), [](const auto& f) {
+                               return mod_state::is_script(f.name);
+                           }));
+            if (mod.has_code) mod.code_hash = code_hash(mod);
         }
         mods.push_back(std::move(mod));
     } while (FindNextFileW(find, &fd));
     FindClose(find);
 
     std::sort(mods.begin(), mods.end(), [](const Installed& a, const Installed& b) { return a.folder < b.folder; });
+    // A folder and a package with the same id: the folder is used, so a mod
+    // can be worked on while it's also installed as a package.
+    for (Installed& pkg : mods) {
+        if (!pkg.package || !pkg.valid) continue;
+        for (const Installed& folder : mods) {
+            if (!folder.package && folder.valid && folder.meta.id == pkg.meta.id) {
+                pkg.valid = false;
+                pkg.errors.push_back("the folder " + folder.folder + " has the same id and is used instead");
+            }
+        }
+    }
     // Forget folders that are gone.
     std::set<std::string> folders;
     for (const Installed& mod : mods) folders.insert(mod.folder);
     auto gone = [&](const auto& entry) { return !folders.count(entry.first); };
     std::erase_if(meta_cache_, gone);
     std::erase_if(settings_cache_, gone);
+    std::erase_if(package_cache_, gone);
+    std::erase_if(code_hash_cache_, gone);
     return mods;
 }
 
-std::map<std::string, bool> ModManager::read_state(bool* invalid) const {
-    std::map<std::string, bool> state;
+mod_state::State ModManager::read_state(bool* invalid, bool* legacy) const {
     if (invalid) *invalid = false;
+    if (legacy) *legacy = false;
     std::string text;
-    if (!read_file(paths_.tome_dir + L"\\state.json", text)) return state;
+    if (!read_file(paths_.tome_dir + L"\\state.json", text)) return {};
     json::Value root;
     json::ParseResult parsed = json::parse(text, root);
     if (!parsed.ok) {
-        TOME_WARN("tome/state.json is invalid (%s); treating every mod as enabled", parsed.error.c_str());
+        // Mods with code still need their approval, which can't be read now.
+        TOME_WARN("tome/state.json is invalid (%s); treating every mod as enabled, but none as allowed",
+                  parsed.error.c_str());
         if (invalid) *invalid = true;
-        return state;
+        return {};
     }
-    const json::Value* mods = root.find("mods");
-    if (!mods || !mods->is_object()) return state;
-    for (const auto& [id, entry] : mods->members()) {
-        const json::Value* enabled = entry.find("enabled");
-        if (enabled && enabled->is_bool()) state[id] = enabled->as_bool();
-    }
+    bool old = false;
+    mod_state::State state = mod_state::parse(root, old);
+    if (legacy) *legacy = old;
     return state;
 }
 
-bool ModManager::wanted_by_user(const std::map<std::string, bool>& state, const std::string& id) const {
+bool ModManager::wanted_by_user(const mod_state::State& state, const std::string& id) const {
     if (!safe_mode_.empty()) return safe_mode_enabled_.count(id) > 0;
     auto saved = state.find(id);
-    return saved == state.end() || saved->second;
+    return saved == state.end() || saved->second.enabled;
 }
 
-void ModManager::write_state(const std::map<std::string, bool>& state) {
-    json::Value root = json::Value::object();
-    root.set("schema", json::Value::number(kStateSchema));
-    json::Value mods = json::Value::object();
-    for (const auto& [id, enabled] : state) {
-        json::Value entry = json::Value::object();
-        entry.set("enabled", json::Value::boolean(enabled));
-        mods.set(id, std::move(entry));
+mod_state::Need ModManager::approval_need(const mod_state::State& state, const Installed& mod) {
+    auto saved = state.find(mod.meta.id);
+    return mod_state::need(saved == state.end() ? nullptr : &saved->second, mod.has_code, mod.package, mod.folder,
+                           mod.code_hash);
+}
+
+void ModManager::implicit_approvals(mod_state::State& state, const std::vector<Installed>& installed, bool legacy,
+                                    bool log) {
+    char env[1024] = {};
+    GetEnvironmentVariableA("TOME_DEBUG_APPROVE", env, sizeof(env));
+    for (const Installed& mod : installed) {
+        if (!mod.valid) continue;
+        auto saved = state.find(mod.meta.id);
+        // A state.json from before approvals: what it lists ran without one.
+        if (legacy && saved != state.end() && saved->second.approved.hash.empty()) {
+            approve(state, mod, log ? "installed before approvals" : nullptr);
+        }
+        if (approval_need(state, mod) != mod_state::Need::None && mod_state::debug_approves(env, mod.meta.id)) {
+            approve(state, mod, log ? "TOME_DEBUG_APPROVE" : nullptr);
+        }
     }
-    root.set("mods", std::move(mods));
+}
+
+void ModManager::approve(mod_state::State& state, const Installed& mod, const char* how) {
+    if (!mod.has_code) return;
+    if (mod.code_hash.empty()) {
+        if (how) TOME_WARN("%s: some of its files can't be read, so its code can't be allowed", mod.meta.id.c_str());
+        return;
+    }
+    mod_state::Approval& approved = state[mod.meta.id].approved;
+    if (approved.hash == mod.code_hash && approved.folder == mod.folder) return;
+    approved = {mod.code_hash, mod.folder};
+    if (how) TOME_INFO("%s: code allowed (%s), sha256 %s", mod.meta.id.c_str(), how, mod.code_hash.c_str());
+}
+
+void ModManager::write_state(const mod_state::State& state) {
+    json::Value root = mod_state::serialize(state);
     const std::wstring path = paths_.tome_dir + L"\\state.json";
     if (!write_file_atomic(path, json::serialize(root))) {
         TOME_WARN("Couldn't write tome/state.json");
@@ -543,12 +612,14 @@ void ModManager::mount_startup_assets(const Paths& paths, const GameBuild& build
     // The same choice refresh() makes, minus the DLLs: a mod whose DLL then
     // fails to load loses its assets again in the first refresh.
     std::vector<Installed> installed = discover();
-    std::map<std::string, bool> state = read_state();
+    bool legacy = false;
+    mod_state::State state = read_state(nullptr, &legacy);
+    implicit_approvals(state, installed, legacy, false);  // recorded by the first refresh
     std::vector<ResolveInput> inputs;
     std::vector<const Installed*> input_mods;
     for (const Installed& mod : installed) {
         if (!mod.valid) continue;
-        inputs.push_back({&mod.meta, wanted_by_user(state, mod.meta.id)});
+        inputs.push_back({&mod.meta, wanted_and_allowed(state, mod)});
         input_mods.push_back(&mod);
     }
     ResolveResult resolved = resolve(inputs, {tome_version_, game_version_});
@@ -673,7 +744,7 @@ bool ModManager::write_settings(const std::string& id) {
     if (file == settings_files_.end() || values == settings_values_.end()) return false;
     CreateDirectoryW(file->second.substr(0, file->second.rfind(L'\\')).c_str(), nullptr);
     if (!write_file_atomic(file->second, json::serialize(values->second))) {
-        TOME_WARN("%s: couldn't write config\\settings.json", id.c_str());
+        TOME_WARN("%s: couldn't write %s", id.c_str(), settings_name(id).c_str());
         return false;
     }
     // Tome's own write: not a change for poll_settings_changed or the next refresh.
@@ -711,7 +782,7 @@ void ModManager::reload_settings() {
             if (!text.empty()) {
                 json::ParseResult parsed = json::parse(text, stored);
                 if (!parsed.ok) {
-                    TOME_WARN("%s: config\\settings.json: %s; keeping the current settings", id.c_str(),
+                    TOME_WARN("%s: %s: %s; keeping the current settings", id.c_str(), settings_name(id).c_str(),
                               parsed.error.c_str());
                     continue;
                 }
@@ -719,7 +790,9 @@ void ModManager::reload_settings() {
             std::vector<std::string> warnings;
             const settings::Schema& schema = settings_schemas_[id];
             json::Value values = settings::load_values(schema, stored, warnings);
-            for (const std::string& w : warnings) TOME_WARN("%s: config\\settings.json: %s", id.c_str(), w.c_str());
+            for (const std::string& w : warnings) {
+                TOME_WARN("%s: %s: %s", id.c_str(), settings_name(id).c_str(), w.c_str());
+            }
             json::Value& current = settings_values_[id];
             std::vector<std::string> keys;
             for (const settings::Setting& setting : schema.settings) {
@@ -730,7 +803,7 @@ void ModManager::reload_settings() {
             }
             current = std::move(values);
             if (keys.empty()) continue;
-            TOME_INFO("%s: config\\settings.json changed on disk (%zu setting%s)", id.c_str(), keys.size(),
+            TOME_INFO("%s: %s changed on disk (%zu setting%s)", id.c_str(), settings_name(id).c_str(), keys.size(),
                       keys.size() == 1 ? "" : "s");
             changes.emplace_back(id, std::move(keys));
         }
@@ -792,7 +865,7 @@ std::vector<std::string> ModManager::set_enabled(const std::string& id, bool ena
 }
 
 std::vector<std::string> ModManager::set_enabled_locked(const std::string& id, bool enabled) {
-    std::map<std::string, bool> state = read_state();
+    mod_state::State state = read_state();
     std::vector<std::string> ids{id};
     // Only a mod that goes off now takes its dependents along; disabling one
     // that's already off leaves the rest as they are.
@@ -806,7 +879,7 @@ std::vector<std::string> ModManager::set_enabled_locked(const std::string& id, b
         for (const Installed& mod : installed) {
             if (!mod.valid) continue;
             if (mod.meta.id == id) target = inputs.size();
-            inputs.push_back({&mod.meta, wanted_by_user(state, mod.meta.id)});
+            inputs.push_back({&mod.meta, wanted_and_allowed(state, mod)});
         }
         if (target != SIZE_MAX) {
             for (size_t i : dependents_of(inputs, {tome_version_, game_version_}, target)) {
@@ -815,8 +888,15 @@ std::vector<std::string> ModManager::set_enabled_locked(const std::string& id, b
             }
         }
     }
+    // Turning a mod on is how the user allows its code: the code installed
+    // now (the valid mod with that id; a package loses to a folder).
+    if (enabled) {
+        for (const Installed& mod : installed) {
+            if (mod.valid && mod.meta.id == id) approve(state, mod, "turned on");
+        }
+    }
     for (const std::string& each : ids) {
-        state[each] = enabled;
+        state[each].enabled = enabled;
         if (!safe_mode_.empty()) {
             if (enabled) {
                 safe_mode_enabled_.insert(each);
@@ -951,9 +1031,63 @@ std::string ModManager::sync_hash(const Installed& mod) {
     return text;
 }
 
+std::string ModManager::code_hash(const Installed& mod) const {
+    // Every file but tome.mod.json and the assets other than scripts (mod_state::is_code_file), by
+    // its path from the mod folder; the stamps first, to skip hashing them again.
+    const std::string assets = mod.meta.assets.empty() ? "assets" : mod.meta.assets;
+    std::vector<std::pair<std::string, std::wstring>> files;  // relative path ('/'), full path
+    Fnv1a64 stamps;
+    constexpr int kMaxDepth = 32;
+    bool complete = true;
+    auto walk = [&](const std::wstring& dir, const std::string& prefix, int depth, auto& self) -> void {
+        WIN32_FIND_DATAW fd;
+        HANDLE find = FindFirstFileW((dir + L"\\*").c_str(), &fd);
+        if (find == INVALID_HANDLE_VALUE) {
+            complete = false;
+            return;
+        }
+        do {
+            std::wstring name = fd.cFileName;
+            if (name == L"." || name == L"..") continue;
+            std::string relative = prefix + narrow(name);
+            std::wstring path = dir + L"\\" + name;
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+                // Into the assets folder too, for its scripts.
+                if (depth == 0) {
+                    complete = false;  // deeper than anything is hashed: never allowed
+                    continue;
+                }
+                self(path, relative + "/", depth - 1, self);
+            } else if (mod_state::is_code_file(relative, assets)) {
+                stamps.mix(relative.c_str(), relative.size() + 1);
+                stamps.mix(&fd.nFileSizeLow, sizeof(fd.nFileSizeLow));
+                stamps.mix(&fd.nFileSizeHigh, sizeof(fd.nFileSizeHigh));
+                stamps.mix(&fd.ftLastWriteTime, sizeof(fd.ftLastWriteTime));
+                files.emplace_back(std::move(relative), std::move(path));
+            }
+        } while (FindNextFileW(find, &fd));
+        FindClose(find);
+    };
+    walk(mod.dir, "", kMaxDepth, walk);
+    if (!complete) return {};
+    auto cached = code_hash_cache_.find(mod.folder);
+    if (cached != code_hash_cache_.end() && cached->second.first == stamps.value) return cached->second.second;
+
+    std::vector<mod_state::CodeFile> hashed;
+    for (const auto& [relative, path] : files) {
+        std::string sha = sha256_file(path);
+        if (sha.empty()) return {};  // not cached: try again next refresh
+        hashed.push_back({relative, std::move(sha)});
+    }
+    std::string hash = sha256_bytes(mod_state::manifest(std::move(hashed)));
+    if (!hash.empty()) code_hash_cache_[mod.folder] = {stamps.value, hash};
+    return hash;
+}
+
 // FNV-1a over the names and timestamps of every file refresh() depends on:
-// state.json and every file in the mod folders (DLLs, tome.mod.json, assets),
-// except the mods' own config folders (settings.json has poll_settings_changed).
+// state.json, every file in the mod folders (DLLs, tome.mod.json, assets)
+// and every package.
+// Not tome/mods/config (settings files have poll_settings_changed).
 uint64_t ModManager::disk_fingerprint() const {
     Fnv1a64 hash;
     auto mix = [&](const void* data, size_t len) { hash.mix(data, len); };
@@ -975,8 +1109,7 @@ uint64_t ModManager::disk_fingerprint() const {
             if (name == L"." || name == L"..") continue;
             std::wstring path = dir + L"\\" + name;
             if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-                bool mod_config = depth == kTopDepth && _wcsicmp(name.c_str(), L"config") == 0;
-                if (depth > 0 && !mod_config) self(path, depth - 1, self);
+                if (depth > 0) self(path, depth - 1, self);
             } else {
                 mix(path.data(), path.size() * sizeof(wchar_t));
                 mix(&fd.nFileSizeLow, sizeof(fd.nFileSizeLow));
@@ -1010,7 +1143,12 @@ uint64_t ModManager::disk_fingerprint() const {
     if (find != INVALID_HANDLE_VALUE) {
         do {
             std::wstring name = fd.cFileName;
-            if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || name == L"." || name == L"..") continue;
+            if (name == L"." || name == L"..") continue;
+            if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+                if (!package::stem(narrow(name)).empty()) mix_file(paths_.mods_dir + L"\\" + name);
+                continue;
+            }
+            if (_wcsicmp(name.c_str(), L"config") == 0) continue;
             std::wstring dir = paths_.mods_dir + L"\\" + name;
             mix_files(dir, kTopDepth, mix_files);
         } while (FindNextFileW(find, &fd));
@@ -1044,26 +1182,33 @@ void ModManager::refresh_locked(std::vector<Installed> installed, assets::Moment
     // enabled or not: a map that declares them must still load (§5.5).
     declare_natives(installed);
 
-    // New mods start enabled. Entries for mods that aren't installed right now
+    // New mods start enabled, but code waits until the user allows it
+    // (core/mod_state.h). Entries for mods that aren't installed right now
     // are kept, so removing and re-adding a mod remembers its setting.
     // An unparseable state.json is left alone (the user may be fixing it by
     // hand); rewriting it here would drop every disabled mod for good.
-    bool state_invalid = false;
-    std::map<std::string, bool> state = read_state(&state_invalid);
-    bool state_changed = false;
+    bool state_invalid = false, state_legacy = false;
+    mod_state::State state = read_state(&state_invalid, &state_legacy);
+    const mod_state::State state_before = state;
+    implicit_approvals(state, installed, state_legacy, true);
     for (const Installed& mod : installed) {
-        if (mod.valid && !state.count(mod.meta.id)) {
-            state[mod.meta.id] = true;
-            state_changed = true;
+        if (!mod.valid) continue;
+        state.try_emplace(mod.meta.id);
+        if (approval_need(state, mod) == mod_state::Need::None || !wanted_by_user(state, mod.meta.id)) continue;
+        if (!std::any_of(status_.begin(), status_.end(), [&](const ModStatus& s) {
+                return s.folder == mod.folder && s.state == "approval";
+            })) {  // once, not on every refresh
+            TOME_WARN("%s: %s (in the mod menu, or /tome enable %s)", mod.meta.id.c_str(),
+                      mod_state::describe(approval_need(state, mod), !mod.dll.empty()), mod.meta.id.c_str());
         }
     }
-    if (state_changed && !state_invalid) write_state(state);
+    if (!state_invalid && (state_legacy || !(state_before == state))) write_state(state);
 
     std::vector<ResolveInput> inputs;
     std::vector<const Installed*> input_mods;
     for (const Installed& mod : installed) {
         if (!mod.valid) continue;
-        inputs.push_back({&mod.meta, wanted_by_user(state, mod.meta.id)});
+        inputs.push_back({&mod.meta, wanted_and_allowed(state, mod)});
         input_mods.push_back(&mod);
     }
     // During a multiplayer game, mods that can't start before it ends wait
@@ -1215,7 +1360,7 @@ void ModManager::refresh_locked(std::vector<Installed> installed, assets::Moment
     }
 
     {
-        // Settings: the values from settings.json (or the defaults), and which
+        // Settings: the values from the settings file (or the defaults), and which
         // ones changed since the last refresh, to tell the mods.
         // Before any mod starts, so tome_mod_enable reads the current values.
         // Under settings_lock_ only: mods read them from their callbacks while
@@ -1254,7 +1399,7 @@ void ModManager::refresh_locked(std::vector<Installed> installed, assets::Moment
             json::Value values = settings::load_values(mod.settings, unchanged ? held->second : mod.stored_settings,
                                                        warnings);
             if (!unchanged) settings_stamps_[mod.meta.id] = mod.settings_stamp;
-            for (const std::string& w : warnings) mod.warnings.push_back("config\\settings.json: " + w);
+            for (const std::string& w : warnings) mod.warnings.push_back(settings_name(mod.meta.id) + ": " + w);
             json::Value& current = settings_values_[mod.meta.id];
             if (current.is_object()) {
                 std::vector<std::string> changed;
@@ -1267,7 +1412,7 @@ void ModManager::refresh_locked(std::vector<Installed> installed, assets::Moment
                 if (!changed.empty()) settings_changed_.emplace_back(mod.meta.id, std::move(changed));
             }
             current = std::move(values);
-            settings_files_[mod.meta.id] = mod.dir + L"\\config\\settings.json";
+            settings_files_[mod.meta.id] = settings_file(mod.meta.id);
             settings_schemas_[mod.meta.id] = mod.settings;
         }
     }
@@ -1370,7 +1515,9 @@ void ModManager::refresh_locked(std::vector<Installed> installed, assets::Moment
             rt.handle.version = mod.meta.version.to_string();
             rt.handle.dir_w = mod.dir;
             rt.handle.dir = narrow(mod.dir);
-            rt.handle.config_dir = narrow(mod.dir + L"\\config");
+            rt.folder = mod.folder;
+            rt.handle.config_dir_w = paths_.mod_config_dir + L"\\" + widen(id);
+            rt.handle.config_dir = narrow(rt.handle.config_dir_w);
         }
 
         if (!mod.dll.empty() && !rt.module) {
@@ -1427,6 +1574,8 @@ void ModManager::refresh_locked(std::vector<Installed> installed, assets::Moment
     for (const Installed& mod : installed) {
         ModStatus s;
         s.folder = mod.folder;
+        s.dir = narrow(mod.dir);
+        s.package = mod.package;
         s.description = mod.meta.description;
         s.icon = mod.meta.icon;
         s.authors = mod.meta.authors;
@@ -1453,7 +1602,10 @@ void ModManager::refresh_locked(std::vector<Installed> installed, assets::Moment
         s.id = mod.meta.id;
         s.name = mod.meta.name;
         s.version = mod.meta.version.to_string();
-        s.user_enabled = wanted_by_user(state, mod.meta.id);
+        s.user_enabled = wanted_and_allowed(state, mod);
+        s.code_hash = mod.code_hash;
+        s.code_kind = !mod.dll.empty() ? "native" : mod.has_code ? "scripts" : "";
+        const mod_state::Need need = approval_need(state, mod);
         auto rt = runtime_.find(mod.meta.id);
         s.running = rt != runtime_.end() && rt->second->enabled;
         bool locked = s.running && locked_.count(mod.meta.id) > 0;
@@ -1483,7 +1635,14 @@ void ModManager::refresh_locked(std::vector<Installed> installed, assets::Moment
         s.state = s.running ? "active" : held_off ? "waiting" : (r.state == ModState::DisabledByUser ? "disabled" : "error");
         // A held mod may be "disabled" to the resolver (what waits is left out of resolve()).
         s.reason = s.running ? "" : held_off ? s.locked : r.state == ModState::DisabledByUser ? "" : r.reason;
-        if (r.state == ModState::DisabledByUser && !safe_mode_.empty() && state[mod.meta.id]) s.reason = "safe mode";
+        if (r.state == ModState::DisabledByUser && !safe_mode_.empty() && state[mod.meta.id].enabled) {
+            s.reason = "safe mode";
+        }
+        // Off only because its code isn't allowed (yet, or again).
+        if (!s.running && !held_off && need != mod_state::Need::None && wanted_by_user(state, mod.meta.id)) {
+            s.state = "approval";
+            s.reason = mod_state::describe(need, !mod.dll.empty());
+        }
         s.warnings = mod.warnings;
         s.warnings.insert(s.warnings.end(), r.warnings.begin(), r.warnings.end());
         for (const assets::Pending& p : pending_assets_) {
@@ -1511,8 +1670,9 @@ void ModManager::refresh_locked(std::vector<Installed> installed, assets::Moment
         if (before != status_.end()) {
             s = *before;
         } else {
-            const std::wstring& dir = rt->second->handle.dir_w;
-            s.folder = narrow(dir.substr(dir.find_last_of(L'\\') + 1));
+            s.folder = rt->second->folder;
+            s.dir = rt->second->handle.dir;
+            s.package = !package::stem(s.folder).empty();
             s.id = s.name = id;
             s.version = rt->second->handle.version;
         }
@@ -1564,6 +1724,16 @@ void ModManager::refresh_locked(std::vector<Installed> installed, assets::Moment
         }
     }
     status_ = std::move(status);
+
+    // Unpacked packages nothing uses any more: not installed now, and not
+    // what a loaded mod (a locked one, say) was loaded from.
+    std::set<std::wstring> keep;
+    for (const Installed& mod : installed) {
+        if (mod.package) keep.insert(mod.dir);
+    }
+    for (const auto& [id, rt] : runtime_) keep.insert(rt->handle.dir_w);
+    packages::remove_unused(paths_, keep);
+
     // From now on asset changes follow the mods' reload modes. Until here
     // (DllMain and the first refresh, both part of startup) a mod whose DLL
     // fails to load loses its assets at once, whatever its reload mode.

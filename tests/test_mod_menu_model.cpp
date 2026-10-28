@@ -336,3 +336,42 @@ TEST(menu_list_shows_the_game_lock) {
     CHECK(contains(v.rows[1].info, "Waiting (starts when the multiplayer game ends)"));
     CHECK_EQ(v.rows[1].button, std::string("Disable"));
 }
+
+TEST(menu_shows_code_waiting_for_approval) {
+    Data d;
+    ModStatus fresh = mod("fresh", false);
+    fresh.state = "approval";
+    fresh.reason = "runs native code; turn it on to allow it";
+    fresh.code_hash = std::string(64, 'a');
+    ModStatus changed = mod("changed", false);
+    changed.package = true;
+    changed.state = "approval";
+    changed.reason = "its code changed since you allowed it; turn it on to allow the new code";
+    d.mods = {fresh, changed, mod("plain", true)};
+    State s;
+    View v = build(s, d, 3);
+    CHECK(contains(v.rows[0].info, "New code: not allowed yet"));
+    CHECK_EQ(v.rows[0].button, std::string("Enable"));
+    CHECK(contains(v.rows[1].info, "Code changed: not allowed yet"));
+
+    click_row(s, d, 3, 0, true);  // Details
+    View details = build(s, d, 3);
+    CHECK(contains(details.body, ("Code SHA-256: |r" + std::string(64, 'a')).c_str()));
+    CHECK(contains(details.body, "full access to your computer"));
+    CHECK_EQ(details.footer[0], std::string("Enable"));
+
+    // A running mod without a DLL: no hash, no warning.
+    click_footer(s, d, 3, 3);
+    click_row(s, d, 3, 2, true);
+    details = build(s, d, 3);
+    CHECK(!contains(details.body, "SHA-256"));
+    CHECK(!contains(details.body, "full access"));
+
+    // Game scripts only: the warning says so.
+    d.mods[0].code_kind = "scripts";
+    click_footer(s, d, 3, 3);
+    click_row(s, d, 3, 0, true);
+    details = build(s, d, 3);
+    CHECK(contains(details.body, "replaces game scripts"));
+    CHECK(!contains(details.body, "native code"));
+}

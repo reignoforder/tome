@@ -120,6 +120,15 @@ TEST(metadata_rejects_newer_schema) {
     CHECK(has_error_containing(r, "newer than this Tome supports"));
 }
 
+// Found by fuzz/fuzz_json: a schema past INT_MAX was cast to int for the message.
+TEST(metadata_rejects_huge_schema) {
+    ModMetadata m;
+    auto r = parse_text(R"({"schema":2222222222222222222222222222222222222221,"id":"x1","version":"1.0.0"})", m);
+    CHECK(has_error_containing(r, "\"schema\" 2.2222222222222223e+39 is newer"));
+    r = parse_text(R"({"schema":3000000000,"id":"x1","version":"1.0.0"})", m);
+    CHECK(has_error_containing(r, "\"schema\" 3000000000 is newer"));
+}
+
 TEST(metadata_rejects_paths_outside_mod_folder) {
     ModMetadata m;
     auto r = parse_text(

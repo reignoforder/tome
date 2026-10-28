@@ -11,7 +11,7 @@ What works today:
 
 - **Drop-in loading:** `tome.mix` in the game folder is loaded by the game's
   sound library; no patched executables or injector.
-- **Mods folder:** every `mods/<name>/` with a `tome.mod.json` is discovered,
+- **Mods folder:** every `tome/mods/<name>/` with a `tome.mod.json` is discovered,
   validated and dependency-resolved; problems are reported per mod in the log.
 - **Live toggling:** enable/disable mods by editing `tome/state.json` while the
   game runs. Changes apply on the game's main thread within about a second.
@@ -46,7 +46,8 @@ cmake --build build
 Outputs:
 
 - `build/loader/tome.mix`: the loader
-- `build/mods/hello/`: the example mod, ready to copy into `mods/`
+- `build/mods/hello/`: the example mod, ready to copy into `tome/mods/`
+- `build/packages/hello.tome`: the same mod as one file
 
 Add `-DTOME_BUILD_DEV_TOOLS=ON` to also build `tome-mpq` (MPQ list/extract/
 replace, used by the end-to-end test). It downloads StormLib at configure time.
@@ -54,17 +55,37 @@ replace, used by the end-to-end test). It downloads StormLib at configure time.
 ## Installing
 
 Copy `tome.mix` into the Warcraft III folder (next to `war3.exe`) and put mods
-in a `mods/` folder there. To remove Tome, delete `tome.mix`.
+in `tome/mods/` there (Tome creates the folders on its first start). To
+remove Tome, delete `tome.mix`.
 
 ```
 Warcraft III/
   tome.mix
-  mods/
-    hello/
-      tome.mod.json
-      hello.dll
-  tome/            created by Tome: tome.log, state.json, cache/
+  tome/            tome.log, state.json, keybinds.json, cache/, packages/
+    mods/
+      hello/
+        tome.mod.json
+        hello.dll
+      other.tome   a packaged mod
+      config/      written by Tome
+        hello.json   the hello mod's settings
+        hello/       files the mod keeps (config_dir in the API)
 ```
+
+A mod with code (a DLL) runs native code with full access to your computer,
+and one whose assets include game scripts (`.j`, `.ai`, `.pld`) runs JASS in
+every game, so it stays off until you turn it on once in the Mods menu (or with
+`/tome enable <id>` in chat); its details page shows a SHA-256 of its code.
+A `.tome` package whose code changes asks again; a mod folder doesn't, so
+rebuilding a mod into `tome/mods/` keeps hot reloading.
+
+A mod can also come as one file, `<name>.tome` (a zip of its folder): put it
+in `tome/mods/` as it is. Tome unpacks it into `tome/packages/` and reloads
+the mod when the file changes. `tome_package()` makes one when building
+(`build/packages/hello.tome`).
+
+An older install's `mods/` folder next to `war3.exe` is moved to `tome/mods/`
+on the first start, with each mod's `config/settings.json`.
 
 When the game folder is `./WarCraft III` (the default), this builds and copies
 `tome.mix` in one step:
@@ -114,7 +135,8 @@ rate above 60, is built that way and lives next to this repo.
 
 | Variable | Effect |
 |----------|--------|
-| `TOME_HOME` | Use this folder (a Windows path) for `mods/` and `tome/` instead of the game folder. |
+| `TOME_HOME` | Use this folder (a Windows path) for `tome/` (and so `tome/mods/`) instead of the game folder. |
+| `TOME_DEBUG_APPROVE` | Allow these mods' code without turning them on in the menu: ids, comma-separated, or `*` for all. For tests. |
 | `TOME_DEBUG_OPEN_MOD_MENU=1` | Open the mod menu automatically once the main menu is up (screenshots). |
 | `TOME_DEBUG_CLICKS` | Post left clicks to the game window: `x,y@ms;...`, with x/y as fractions of the window; `type:text@ms` types a chat line, `text:abc@ms` types characters (no Enter), `key:Ctrl+J@ms` presses a key. Used by the e2e test. |
 
@@ -134,8 +156,8 @@ setting (or `HEADLESS_SIZE=1280x720`); `tools/game.sh shot` then captures it
 through `gamescopectl`.
 
 The end-to-end test launches the game three times (about a minute each). It
-runs Tome with `TOME_HOME` set to a temporary folder, so your own `mods/` and
-`tome/` are never touched; it only writes `tome.mix` and, temporarily, a test
+runs Tome with `TOME_HOME` set to a temporary folder, so your own `tome/`
+folder and its mods are never touched; it only writes `tome.mix` and, temporarily, a test
 map under `Maps/TomeE2E/`. With `tome-mpq` built, the test map (made from one
 of your melee maps) checks the JASS natives from inside a running map. The
 last launch clicks through the mod menu. Close the game before running it.

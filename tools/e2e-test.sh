@@ -3,8 +3,8 @@
 # mods, changes things while it runs, and checks tome.log for the expected
 # behavior.
 #
-# Tome runs with TOME_HOME pointing at a temporary folder, so your own mods/
-# and tome/ folders are never touched. The only things written to the game
+# Tome runs with TOME_HOME pointing at a temporary folder, so your own tome/
+# folder (with tome/mods/) is never touched. The only things written to the game
 # folder are tome.mix (the build under test) and, if tome-mpq was built
 # (-DTOME_BUILD_DEV_TOOLS=ON), a test map under Maps/TomeE2E/ that is removed
 # afterwards. The test map calls the hello mod's JASS natives.
@@ -34,11 +34,11 @@ command -v winepath >/dev/null || die "winepath not found"
 pgrep -x war3.exe >/dev/null && die "Warcraft III is already running; close it first"
 
 WORK="$(mktemp -d)"          # scratch files; deleted at the end
-HOME_DIR="$WORK/home"         # TOME_HOME: mods/ and tome/ for the test
-MODS="$HOME_DIR/mods"
+HOME_DIR="$WORK/home"         # TOME_HOME: tome/ (with tome/mods/) for the test
+MODS="$HOME_DIR/tome/mods"
 STATE="$HOME_DIR/tome/state.json"
 LOG="$HOME_DIR/tome/tome.log"
-mkdir -p "$MODS" "$HOME_DIR/tome"
+mkdir -p "$MODS"
 TOME_HOME_WIN="$(winepath -w "$HOME_DIR" 2>/dev/null)"
 [[ -n "$TOME_HOME_WIN" ]] || die "winepath couldn't convert $HOME_DIR"
 WINE_PID=""
@@ -87,6 +87,10 @@ cp -r "$BUILD/mods/hello" "$MODS/hello"
 cp -r "$BUILD/mods/hook-a" "$BUILD/mods/hook-b" "$BUILD/mods/crash" "$MODS/"
 echo native > "$MODS/crash/mode.txt"  # where the crash fixture crashes first; see crash.c
 cp -r "$FIXTURES/broken-json" "$FIXTURES/needs-ghost" "$FIXTURES/needs-unmapped" "$MODS/"
+# A mod with code nobody allowed (not in APPROVED): it must not even be
+# loaded, so its "DLL" is only text.
+cp -r "$FIXTURES/unapproved" "$FIXTURES/unapproved-script" "$MODS/"
+echo "not a DLL" > "$MODS/unapproved/unapproved.dll"
 cp -r "$FIXTURES/asset-demo" "$FIXTURES/asset-map" "$FIXTURES/asset-restart" "$MODS/"
 ASSET_FILES=5  # asset-demo's TOC, FDF and texture, one file each in asset-map and asset-restart
 # The texture asset-demo overrides: the main menu buttons' background.
@@ -133,10 +137,14 @@ fi
 
 # --- helpers -----------------------------------------------------------------
 
+# The test's mods with code (a DLL, or asset-demo's Blizzard.j), allowed
+# without a click (core/mod_state.h).
+APPROVED="hello,hook-a,hook-b,crash,wrong-arch,sync-test,asset-demo"
+
 launch() {
     rm -f "$LOG"
     (cd "$GAME" && WINEDEBUG=-all TOME_HOME="$TOME_HOME_WIN" TOME_DEBUG_CLICKS="${TOME_DEBUG_CLICKS:-}" \
-        TOME_DEBUG_ASSET="$PROBE" \
+        TOME_DEBUG_ASSET="$PROBE" TOME_DEBUG_APPROVE="$APPROVED" \
         headless_exec wine war3.exe -window -opengl "${MAP_ARG[@]}" >/dev/null 2>&1) &
     WINE_PID=$!
 }
@@ -246,10 +254,15 @@ check "\[hello\] enabled \(1 time" "hello loaded and enabled"
 check "broken-json +error: tome\.mod\.json: line 2" "broken JSON reported with position"
 check "needs-ghost .*needs \"ghost\" \^1, which isn't installed" "missing dependency reported"
 check "needs-unmapped .*needs \"CUnit\.armor\", which isn't mapped for 1\.27b" "unmapped requires reported"
+check "hello: code allowed \(TOME_DEBUG_APPROVE\), sha256 [0-9a-f]{64}" "a mod's code is hashed and allowed"
+check "unapproved +0\.1\.0 +approval: runs native code; turn it on to allow it" "new code waits for approval"
+check "unapproved: runs native code; turn it on to allow it \(in the mod menu, or /tome enable unapproved\)" \
+    "the player is told how to allow it"
 check "\[hello\] CTextFrame::SetText is a thiscall function at 0x[0-9a-f]{8}" "mod resolved a mapped name"
 if [[ -d "$MODS/wrong-arch" ]]; then
     check "wrong-arch: the DLL is 64-bit" "64-bit DLL rejected"
 fi
+# Not unapproved-script's: its script isn't allowed.
 check "Assets at startup: $ASSET_FILES files from 3 mods \(0 overridden" "mods' assets mounted from DllMain"
 check "Asset probe .*: [0-9]+ bytes, fnv1a $PROBE_HASH" "the game reads the mod's texture instead of its own"
 check "Bootstrap complete" "bootstrap finished" 15
@@ -257,6 +270,9 @@ check "Patches: 2 applied, 0 skipped: memhack-guard applied.*path-sanitizer appl
 check "Main-thread dispatcher installed" "main-thread dispatcher installed"
 check "Events: hooked screens, map load, game start and end, frames, game ticks, shutdown, chat, pause, units, spells, damage, experience, players, resources, keys, menus, dialogs, levels and saved games" "event hooks installed"
 check "\[hello\] 100 ticks" "tick events reach mods"
+check_absent "unapproved.*(LoadLibrary|not a valid|Loaded unapproved)" "code that isn't allowed is never loaded"
+check "unapproved-script +0\.1\.0 +approval: replaces game scripts; turn it on to allow it" \
+    "an asset-only mod with a game script waits for approval too"
 MAIN_TID=$(grep -oE "main thread [0-9]+" "$LOG" | head -n 1 | grep -oE "[0-9]+$")
 
 if ((${#MAP_ARG[@]})); then
@@ -475,10 +491,58 @@ fi
 
 echo "removing a mod"
 rm -rf "$MODS/needs-ghost"
-REMAINING=$(find "$MODS" -mindepth 1 -maxdepth 1 -type d | wc -l)
+REMAINING=$(find "$MODS" -mindepth 1 -maxdepth 1 -type d ! -name config | wc -l)
 ACTIVE=$(( ${#MAP_ARG[@]} ? 5 : 6 ))  # hello, hook-a, hook-b, asset-demo, asset-restart, and asset-map unless disabled above
 check "Mods: $REMAINING installed, $ACTIVE active" "mod list refreshed"
 if ! tail -n 5 "$LOG" | grep -q "needs-ghost"; then pass "removed mod gone from the list"; else fail "removed mod still listed"; fi
+
+echo ".tome packages"
+PACKAGES="$HOME_DIR/tome/packages"
+if [[ -f "$BUILD/packages/hello.tome" ]]; then
+    # Next to the hello folder (same id): the folder is used.
+    cp "$BUILD/packages/hello.tome" "$MODS/hello-pkg.tome"
+    check "Unpacked hello-pkg\.tome" "a .tome is unpacked" 10
+    check "hello +error: the folder hello has the same id and is used instead" "a folder wins over a package with its id" 10
+    # Without the folder, the package's copy runs.
+    before=$(count "\[hello\] loaded \(Tome")
+    mv "$MODS/hello" "$WORK/hello-folder"
+    check_more "\[hello\] loaded \(Tome" "$before" "the package runs once the folder is gone" 10
+    check "\[hello\] enabled" "the packaged mod is enabled" 10
+    # Updated in place: a new version in the same file reloads it from a new copy.
+    python3 -I - "$BUILD/packages/hello.tome" "$WORK/hello-pkg.tome" <<'PY'
+import json, sys, zipfile
+src, dst = sys.argv[1], sys.argv[2]
+with zipfile.ZipFile(src) as zin, zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as zout:
+    for info in zin.infolist():
+        data = zin.read(info)
+        if info.filename == "tome.mod.json":
+            meta = json.loads(data)
+            meta["version"] = "1.0.1"
+            data = json.dumps(meta).encode()
+        zout.writestr(info.filename, data)
+PY
+    mv -f "$WORK/hello-pkg.tome" "$MODS/hello-pkg.tome"
+    check "Loaded hello 1\.0\.1" "an updated package reloads the mod" 15
+    check "Removed the unused unpacked package hello-pkg\." "the old unpacked copy is removed" 10
+    COPIES=$(find "$PACKAGES" -mindepth 1 -maxdepth 1 -name 'hello-pkg.*' | wc -l)
+    if [[ "$COPIES" == 1 ]]; then pass "one unpacked copy left"; else fail "$COPIES unpacked copies of hello-pkg"; fi
+    # Removed: the mod stops, and its unpacked copy goes too.
+    before=$(count "Unloaded hello")
+    rm -f "$MODS/hello-pkg.tome"
+    check_more "Unloaded hello" "$before" "a removed package's mod is unloaded" 10
+    deadline=$((SECONDS + 10))
+    while ((SECONDS < deadline)) && [[ -n "$(find "$PACKAGES" -mindepth 1 -maxdepth 1 -name 'hello-pkg.*')" ]]; do sleep 0.2; done
+    if [[ -z "$(find "$PACKAGES" -mindepth 1 -maxdepth 1 -name 'hello-pkg.*')" ]]; then
+        pass "no unpacked copy left"
+    else
+        fail "the unpacked copy stayed after the package was removed"
+    fi
+    before=$(count "\[hello\] loaded \(Tome")
+    mv "$WORK/hello-folder" "$MODS/hello"
+    check_more "\[hello\] loaded \(Tome" "$before" "the hello folder runs again" 10
+else
+    fail ".tome packages: $BUILD/packages/hello.tome not built"
+fi
 
 stop_game
 
@@ -509,7 +573,7 @@ fi
 
 echo "mod menu (third launch, simulated clicks)"
 rm -rf "$MODS/broken-json" "$MODS/wrong-arch" "$MODS/needs-ghost" "$MODS/asset-demo" "$MODS/asset-map" \
-    "$MODS/asset-restart" "$MODS/hook-a" "$MODS/hook-b" "$MODS/crash"
+    "$MODS/asset-restart" "$MODS/hook-a" "$MODS/hook-b" "$MODS/crash" "$MODS/unapproved" "$MODS/unapproved-script"
 set_enabled hello true
 # Click positions are fractions of the window: Mods button, row 0's toggle
 # (twice, once the panel has lowered), Done, then the hello mod's own button
@@ -550,10 +614,10 @@ check "hello: icon icon\.blp loaded" "the list shows the mod's icon" 15
 check "hello: setting shout = On" "the settings page changes a setting" 15
 check "hello: setting greeting = Howdy" "a text setting typed into its box, saved with Enter" 10
 check "\[hello\] setting changed: shout" "the mod hears about it"
-if python3 -I -c "import json,sys; sys.exit(0 if json.load(open('$MODS/hello/config/settings.json'))['shout'] is True else 1)"; then
-    pass "config/settings.json saved"
+if python3 -I -c "import json,sys; sys.exit(0 if json.load(open('$MODS/config/hello.json'))['shout'] is True else 1)"; then
+    pass "config/hello.json saved"
 else
-    fail "config/settings.json saved"
+    fail "config/hello.json saved"
 fi
 if awk '/hello: setting shout = On/ { on = 1 } /hello: setting greeting = Howdy/ { on = 0 } on && /Refreshing mods/ { bad = 1 } END { exit bad }' "$LOG"; then
     pass "Tome's own settings writes don't refresh the mods"
@@ -561,14 +625,14 @@ else
     fail "Tome's own settings writes don't refresh the mods"
 fi
 # A hand edit while the game runs: only that mod's settings are read again.
-python3 -I - "$MODS/hello/config/settings.json" <<'PY'
+python3 -I - "$MODS/config/hello.json" <<'PY'
 import json, sys
 path = sys.argv[1]
 values = json.load(open(path))
 values["seconds"] = 7.5
 open(path, "w").write(json.dumps(values))
 PY
-check "hello: config\\\\settings.json changed on disk \\(1 setting\\)" "a settings.json edited by hand applies" 10
+check "hello: config\\\\hello.json changed on disk \\(1 setting\\)" "a settings file edited by hand applies" 10
 check "\\[hello\\] setting changed: seconds" "and the mod hears about it"
 check "Keybind hello/greet: Ctrl\+J" "the keybinds page takes a new key" 15
 check "\[hello\] Greet key: Howdy, world!" "the new key runs the mod's keybind, which reads the setting" 10

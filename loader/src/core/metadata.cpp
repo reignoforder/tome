@@ -3,6 +3,7 @@
 #include "jass.h"
 
 #include <cmath>
+#include <cstdio>
 
 namespace tome {
 namespace {
@@ -154,7 +155,9 @@ MetadataResult parse_metadata(const json::Value& root, ModMetadata& out) {
         if (n != std::floor(n) || n < 1) {
             r.error("\"schema\" must be a positive integer");
         } else if (n > kMetadataSchema) {
-            r.error("\"schema\" " + std::to_string(static_cast<int>(n)) +
+            char text[32];  // n may not fit in an int
+            std::snprintf(text, sizeof(text), "%.17g", n);
+            r.error("\"schema\" " + std::string(text) +
                     " is newer than this Tome supports (" + std::to_string(kMetadataSchema) + "); update Tome");
         } else {
             m.schema = static_cast<int>(n);

@@ -31,6 +31,9 @@ loader/
     pe.*                  lays out a PE file like the loader (for the test)
     embedded_mappings.h   mappings/*.json compiled in (generated .cpp)
     mpq.*                 MPQ v1 writer (overlay archives), streaming for large ones
+    package.*             .tome packages: names, unpacked folder names, layout check
+    zip.*                 zip reader for .tome packages: directory, inflate, CRC, safe names,
+                          NTFS name folding (upcase_table.inc from tools/gen-upcase.py)
     assets.*              asset archive paths; which mods' assets to mount, per reload mode
     main_menu_fdf.*       generates TomeModMenu.fdf (main menu and Esc menu layouts)
     mod_menu_model.*      the mod menu's pages and what their buttons do
@@ -57,6 +60,7 @@ loader/
     watcher.*             change notifications (+ timestamp polling under Wine: every 1.5 s, or 50x as long as a poll takes)
     storm.*               Storm.dll file/archive functions by ordinal
     overlay.*             the generated overlay and the mod assets archive
+    packages.*            unpacking .tome packages into tome/packages, removing unused copies
     frames.*              game frame functions, the frame API for mods, Blz* natives
     events.*              game events, screens and chat commands (Tome's own hooks)
     handshake.*           the multiplayer handshake in the lobby and in games
@@ -66,7 +70,7 @@ loader/
     popups.*              the popup queue and its frames on the current screen; the API
     restart.*             restarting the game (WM_CLOSE, then a rundll32 helper)
     debug_input.*         TOME_DEBUG_CLICKS: clicks, keys, typed text and chat lines (tests)
-    log.*, paths.*        tome.log, game/mods/tome folders (TOME_HOME)
+    log.*, paths.*        tome.log, game/tome/mods folders (TOME_HOME), moving the old layout
 sdk/
   include/tome/tome.h     the public C API for mods
   include/tome/utf8.h     UTF-8 helpers (header-only; also used by Tome itself)
@@ -80,6 +84,7 @@ tests/                    unit tests (run under Wine by CTest)
 tools/
   e2e-test.sh             end-to-end test in the real game
   game.sh                 start/stop/wait/screenshot helper
+  gen-upcase.py           generates loader/src/core/upcase_table.inc (NTFS name folding)
   mpq/                    tome-mpq (StormLib), dev-only
   re/                     reverse-engineering scripts
 docs/
@@ -186,10 +191,59 @@ logs each error with the symbol's name.
 
 ## Mods
 
-- Folder: `<home>/mods/<folder>/tome.mod.json` (+ optional DLL). `<home>` is
-  the game folder unless `TOME_HOME` is set.
-- State: `<home>/tome/state.json` (`{"schema":1,"mods":{"id":{"enabled":bool}}}`).
-  New mods start enabled. Entries for mods that aren't installed are kept.
+- Folder: `<home>/tome/mods/<folder>/tome.mod.json` (+ optional DLL). `<home>` is
+  the game folder unless `TOME_HOME` is set. `tome/mods/config/` isn't a
+  mod: it holds each mod's settings (`<id>.json`) and its `config_dir`
+  (`<id>/`), by id, so they survive replacing or repackaging the mod.
+- Old layout (`<home>/mods/`, settings in `<mod>/config/settings.json`):
+  `migrate_layout` (paths.cpp, from DllMain before the first discovery)
+  moves the folder to `tome/mods/` if that doesn't exist yet, then each
+  mod's `config/settings.json` to `config/<id>.json` and the rest of its
+  `config/` to `config/<id>/`. It never overwrites; what it did is logged
+  as `Layout:` lines.
+- State: `<home>/tome/state.json` (`{"schema":2,"mods":{"id":{"enabled":bool,
+  "approved":"<sha256>","approved_from":"<folder>"}}}`), parsed and written by
+  `core/mod_state.*`. New mods start enabled. Entries for mods that aren't
+  installed are kept.
+- **Approval of mod code** (`core/mod_state.*`, `ModManager::approval_need`).
+  A mod with a DLL is native code with full access to the machine, so its
+  code doesn't run until the user turns it on once (the mod menu's Enable, or
+  `/tome enable`; `set_enabled` records it). Until then the resolver sees it
+  as off, its assets aren't mounted, its DLL isn't even loaded, and its status
+  is `approval` with a reason the menu shows as "New code" / "Code changed".
+  The log says how to allow it, once.
+  - **What counts as code:** a DLL, or game scripts among the assets
+    (`mod_state::is_script`: `.j`, `.ai`, and `.pld`, which `Preloader`
+    runs), since an asset-only mod that replaces `Blizzard.j` runs JASS in
+    every game (`Installed::has_code`). Such a mod's warning says "replaces
+    game scripts" instead of "runs native code" (`ModStatus.code_kind`).
+    Other assets (models, textures, sounds) aren't gated, though they're
+    read by the game's own parsers.
+  - **What's hashed:** `Installed::code_hash`, the SHA-256 of a manifest of
+    every file in the mod except the top `tome.mod.json` and the assets
+    other than scripts (a DLL can load any other file as code). The manifest is
+    `sha256sum` output sorted by path (`<hash>  <path>\n`), so it can be
+    checked by hand. It's cached by folder until a file's name, size or time
+    changes; a file that can't be read gives "" (never allowed). The details
+    page shows it as "Code SHA-256".
+  - **When it asks again:** a folder mod in the folder it was allowed in
+    never does, so a mod being built into `tome/mods/` hot-reloads as before.
+    Anything else (a replaced `.tome`, or another folder or package with the
+    same id) runs only if its code hash is the one allowed.
+  - **Upgrading:** a schema 1 `state.json` had no approvals; the mods it
+    lists ran before, so their code is allowed as installed now and the file
+    is written as schema 2. Mods it doesn't list ask. An unparseable
+    `state.json` allows nothing (and still isn't rewritten).
+  - **DllMain:** `mount_startup_assets` applies the same approvals in memory
+    (`implicit_approvals`, quietly); the first refresh records them.
+  - **Tests:** `TOME_DEBUG_APPROVE` (ids, comma-separated, or `*`) allows
+    those mods' code without a click, logged as `code allowed
+    (TOME_DEBUG_APPROVE)`. The e2e test lists its mods with code and keeps an
+    `unapproved` fixture whose "DLL" is text, to show it's never loaded.
+  - **Not a boundary against local programs:** anything that can write
+    `tome/mods/` can also write `state.json` or replace `tome.mix`. This is
+    about mods that arrive by download or are passed around, not malware
+    already on the machine.
 - Turning a mod off (`ModManager::set_enabled`, from the mod menu or
   `/tome disable`) also turns off the enabled mods that depend on it,
   directly or not, in `state.json` (`dependents_of` in `core/resolver.*`).
@@ -210,6 +264,61 @@ logs each error with the symbol's name.
 - Hot reload: a changed DLL is disabled, unloaded, reloaded and re-enabled.
   Its dependents are bounced too.
 - Crashes: see "Crash isolation and safe mode".
+
+## Packages
+
+`.tome` files: one file per mod for distribution; folders stay the way to
+develop one. `core/package.*`, `core/zip.*` (portable, unit-tested) and
+`packages.*`.
+
+- **Format:** a zip of what would be the mod's folder, `tome.mod.json` at
+  the top (a package of the folder itself, `hello/tome.mod.json`, is refused
+  with a hint). Stored or deflated entries; no zip64, encryption or other
+  methods. At most 256 MiB on disk, 512 MiB and 20000 entries unpacked.
+- **Names:** `zip::read_directory` refuses names that could leave the
+  folder (`..`, absolute, drive letters, `\`, device names like `nul` or
+  `con .txt`, characters Windows refuses or drops, a trailing space or dot,
+  invalid UTF-8), two names that are one file on NTFS (`fold_name`: each
+  BMP code point through its simple uppercase mapping, the table generated
+  by `tools/gen-upcase.py`; no normalization, as NTFS) and a name that's
+  both a file and a folder. The unpacker also creates every file with
+  `CREATE_NEW`, so a collision the table misses fails instead of
+  overwriting.
+- **Unpacking:** `discover()` lists `tome/mods/*.tome` next to the folders.
+  A package's `Installed::folder` is its file name (`hello.tome`), its
+  `dir` the unpacked copy, `tome/packages/<stem>.<FNV-1a of the file>/`.
+  The copy is written to `<name>.<pid>.partial` and renamed when complete,
+  so a folder with the final name is always whole and is reused (another
+  launch, the same file again). Unpacked again only when the file's stamp
+  changes (`package_cache_`). Under the mod manager's lock, on the thread
+  that refreshes (DllMain at startup, then the main thread): a large
+  package holds the game for its unpack (about 100 MB/s under Wine).
+- **Everything else is a folder mod:** the DLL's shadow copy, assets, FDF,
+  the icon and the settings schema come from the unpacked copy. Settings and
+  `config_dir` are by id in `tome/mods/config/`, so an update keeps them.
+- **Updates:** a changed `.tome` unpacks into a new folder, so the DLL path
+  changes and the mod is reloaded like a hot reload.
+- **Cleanup:** after each refresh, `packages::remove_unused` deletes every
+  unpacked or partial folder in `tome/packages` except the installed
+  packages' copies and the folders loaded mods came from (a locked mod in a
+  multiplayer game keeps its copy). One that can't be deleted (a helper DLL
+  loaded from it) goes on a later refresh. Partial folders of another
+  running process are left alone.
+- **Same id:** a folder and a package with the same id: the package gets the
+  error "the folder <f> has the same id and is used instead", so a mod can
+  be worked on while it's also installed packed. Two packages with one id
+  are a duplicate id, as two folders are.
+- **Watching:** the fingerprint covers each `.tome`'s name, size and time;
+  the unpacked copies aren't watched (Tome's own).
+- **Handshake:** the sync hash is over the unpacked files, by name, so a
+  package and the same mod as a folder match.
+- **Menu:** the Details page says `Package: tome\mods\hello.tome`
+  (`ModStatus::package`); the icon comes from `ModStatus::dir`.
+- **Packing:** `tome_package(<target> [FILES ...])` (`sdk/TomeMod.cmake`)
+  makes `<build>/packages/<folder>.tome` from the folder `tome_add_mod`
+  assembled, with `cmake -E tar --format=zip` run inside it (entries
+  without `./`). Any zip tool works if the entries start at the mod
+  folder's contents.
 
 ## Crash isolation and safe mode
 
@@ -668,6 +777,13 @@ report on both sides and in a replay. Not in `tools/e2e-test.sh` yet; see
   who sent nothing counts as having none. Differences are shown with
   `display_text` and logged; in a replay, the recorded players are compared
   with the viewer's mods.
+- **Limits on what other players send:** a set of more than `kMaxMods`
+  (256) mods is dropped, whether it comes as lobby lines (`Assembler`) or as
+  game actions (`GameRecord::add`), so a modified client can't make the
+  comparisons slow. Each player's handshake messages also get a log budget
+  (`LogBudget`: 100 lines per lobby, `kMaxMods` + 8 per game); past it one
+  line says the rest aren't logged. Unreadable keys are logged cut to 100
+  characters.
 - **Game lock** (§5.7, `core/game_lock.*`, `ModManager::set_game_lock`):
   a game with more than one person playing (controller user, playing; checked
   at the start and on the first step) or a replay locks required mods until
@@ -888,7 +1004,8 @@ API version 4 (`hook`, `unhook`, `hook_call_next` in `tome.h`).
   box like free-text strings: Enter or leaving the page saves what was
   typed (`parse_typed_number`, then `coerce` rounds and clamps it); text
   that isn't a number is dropped and the box shows the value again.
-- Values live in `<mod>/config/settings.json`: every setting, plus keys the
+- Values live in `tome/mods/config/<id>.json` (outside the mod's folder, so
+  replacing the mod keeps them): every setting, plus keys the
   schema doesn't know (kept for other versions of the mod). Invalid values
   fall back to the default with a warning.
 - **Hand edits without refreshes:** settings.json isn't part of the watcher's
@@ -1075,7 +1192,7 @@ API version 10: `popup`, `popup_close`, `restart_game`.
   "Applies" means later reads see the new files; already-loaded textures
   and models generally update on the next map or restart.
 - **Watching:** the watcher's fingerprint covers every file in each mod
-  folder except `config/`, so editing an asset triggers a refresh, which
+  folder (not `tome/mods/config/`), so editing an asset triggers a refresh, which
   rescans the folder (`overlay::scan_assets`: names, sizes, write times).
 - **Order inside a refresh:** assets are applied before mods are enabled,
   so `tome_mod_enable` can already load a TOC from its own assets. If a DLL
@@ -1107,6 +1224,17 @@ API version 10: `popup`, `popup_close`, `restart_game`.
   breakpoints, C++ exceptions, stack overflows (twice on one thread), nested
   guards, inner SEH frames unwound, callee-saved registers and FPU state
   restored, and crashing BEFORE/REPLACE handlers and a crash below a nested chain.
+- `tools/fuzz.sh [seconds] [target...]`: libFuzzer targets in `fuzz/`, one
+  per untrusted input: lobby handshake lines and game-cache keys
+  (`handshake`), chat commands (`chat`), packages (`zip`: directory,
+  extraction and the package checks, asserting every accepted name stays
+  inside its folder), raw deflate (`inflate`), `tome.mod.json`, settings
+  schemas and keybinds (`json`), map scripts and native declarations
+  (`jass`), and paths, TOCs and package names (`paths`). Built for the host
+  with clang, ASan and UBSan in `build-fuzz/`, apart from the mingw build;
+  seeds from `fuzz/make_seeds.py`, the corpus in `build-fuzz/corpus/`, and
+  crashing inputs kept in `fuzz/regressions/<target>/`. They run 64-bit, so
+  overflows only 32-bit `size_t` arithmetic would hit don't show up.
 - `tools/e2e-test.sh`: six real game launches with a temporary `TOME_HOME`.
   `TOME_DEBUG_CLICKS` items can also be `type:<text>@ms`: Enter, the text
   as WM_CHAR messages, Enter (a line in the in-game chat).

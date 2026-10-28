@@ -74,6 +74,9 @@ std::string status_line(const ModStatus& m) {
         info = colored("|cffa0a0a0", m.reason.empty() ? "Disabled" : "Disabled (" + m.reason + ")");
     } else if (m.state == "waiting") {
         info = colored(kYellow, "Waiting (" + m.reason + ")");
+    } else if (m.state == "approval") {
+        info = colored(kYellow, m.reason.find("changed") != std::string::npos ? "Code changed: not allowed yet"
+                                                                            : "New code: not allowed yet");
     } else {
         info = colored(kRed, ellipsize(first_line(m.reason.empty() ? m.state : m.reason), 60));
     }
@@ -106,13 +109,23 @@ std::string details_body(const ModStatus& m, const Data& data) {
         line("");
     }
     if (!m.authors.empty()) line(colored(kGray, "Authors: ") + join(m.authors, ", "));
-    line(colored(kGray, "Id: ") + (m.id.empty() ? "?" : m.id) + colored(kGray, "    Folder: ") + "mods\\" + m.folder);
+    line(colored(kGray, "Id: ") + (m.id.empty() ? "?" : m.id) + colored(kGray, m.package ? "    Package: " : "    Folder: ") +
+         "tome\\mods\\" + m.folder);
     if (m.sync == "required") line(colored(kGray, "Sync: ") + "required, every player needs it");
     else if (m.sync == "client") line(colored(kGray, "Sync: ") + "client, only you");
     if (m.reload == "live") line(colored(kGray, "Turning it on or off: ") + "applies at once");
     else if (m.reload == "map") line(colored(kGray, "Turning it on or off: ") + "applies at the next map");
     else if (m.reload == "restart") line(colored(kGray, "Turning it on or off: ") + "needs a restart");
     line(colored(kGray, "Status: ") + status_line(m));
+    if (!m.code_hash.empty()) line(colored(kGray, "Code SHA-256: ") + m.code_hash);
+    if (m.state == "approval") {
+        line("");
+        line(colored(kYellow, m.code_kind == "scripts"
+                                  ? "This mod replaces game scripts, which run in every game. Enable it only if you "
+                                    "trust where it came from."
+                                  : "This mod runs native code with full access to your computer. Enable it only if "
+                                    "you trust where it came from."));
+    }
 
     std::vector<std::string> keybinds;
     for (const keys::Binding& b : data.keybinds) {
@@ -158,7 +171,7 @@ void build_list(const State& state, const Data& data, int rows, View& view) {
         view.rows.push_back(std::move(r));
     }
     if (data.mods.empty()) {
-        view.rows.push_back(message_row("No mods installed", "Put mods in the \"mods\" folder next to war3.exe."));
+        view.rows.push_back(message_row("No mods installed", "Put mods in the \"tome\\mods\" folder next to war3.exe."));
     }
     if (page_count(data.mods.size(), rows) > 1) {
         view.footer[0] = "Previous";

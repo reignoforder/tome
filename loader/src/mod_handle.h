@@ -22,6 +22,7 @@ struct tome_mod {
     std::string dir;         // UTF-8, for the API
     std::string config_dir;  // UTF-8, for the API
     std::wstring dir_w;
+    std::wstring config_dir_w;  // tome/mods/config/<id>, created on demand
 
     // Undo actions for everything this mod registered through the API, run in
     // reverse order on disable (docs/research.md §5.4). `tag` identifies one

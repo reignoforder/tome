@@ -327,3 +327,47 @@ TEST(handshake_longest_entry_fits) {
         }
     }
 }
+
+TEST(handshake_oversized_sets_dropped) {
+    // In a game: a total over kMaxMods is ignored; kMaxMods itself is fine.
+    GameRecord record;
+    for (int i = 0; i < 3; ++i) record.add(0, mod(("m" + std::to_string(i)).c_str()), kMaxMods + 1);
+    CHECK(record.sets().empty());
+    for (int i = 0; i < kMaxMods; ++i) record.add(1, mod(("m" + std::to_string(i)).c_str()), kMaxMods);
+    CHECK_EQ(record.sets().at(1).size(), size_t(kMaxMods));
+
+    // In the lobby: a set that grows past kMaxMods is dropped, and the next
+    // real one still arrives.
+    ModSet big;
+    for (int i = 0; i <= kMaxMods; ++i) big.push_back(mod(("m" + std::to_string(i)).c_str()));
+    sort(big);
+    Assembler assembler;
+    ModSet out;
+    bool completed = false;
+    for (const std::string& text : encode(LineKind::Reply, big)) {
+        Line line;
+        CHECK(decode(text, line));
+        completed |= assembler.add(line, out);
+    }
+    CHECK(!completed);
+    ModSet small = {mod("a")};
+    for (const std::string& text : encode(LineKind::Reply, small)) {
+        Line line;
+        CHECK(decode(text, line));
+        completed |= assembler.add(line, out);
+    }
+    CHECK(completed);
+    CHECK(out == small);
+}
+
+TEST(handshake_log_budget) {
+    LogBudget budget(2);
+    CHECK(budget.take(0) == LogBudget::Verdict::Log);
+    CHECK(budget.take(0) == LogBudget::Verdict::Log);
+    CHECK(budget.take(1) == LogBudget::Verdict::Log);  // per player
+    CHECK(budget.take(0) == LogBudget::Verdict::Exhausted);
+    CHECK(budget.take(0) == LogBudget::Verdict::Quiet);
+    CHECK(budget.take(0) == LogBudget::Verdict::Quiet);
+    budget.reset();
+    CHECK(budget.take(0) == LogBudget::Verdict::Log);
+}

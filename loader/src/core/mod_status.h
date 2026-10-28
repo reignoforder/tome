@@ -13,13 +13,15 @@
 namespace tome {
 
 struct ModStatus {
-    std::string folder;
+    std::string folder;   // in tome/mods: a folder's name, or a package's file name
+    std::string dir;      // where its files are (UTF-8): the folder, or the unpacked package
+    bool package = false;  // a .tome
     std::string id;       // empty if tome.mod.json couldn't be read
     std::string name;
     std::string version;
     bool user_enabled = false;
     bool running = false; // enabled right now
-    std::string state;    // "active", "disabled", "waiting" (game lock), "error", ...
+    std::string state;    // "active", "disabled", "waiting" (game lock), "approval" (code not allowed), "error", ...
     std::string reason;
     std::vector<std::string> warnings;
     std::string assets_pending;  // why the mod's asset changes are waiting; "" if they aren't
@@ -32,6 +34,8 @@ struct ModStatus {
     std::vector<std::string> authors;
     std::string sync;    // "client" / "required"; "" if the metadata is invalid
     std::string sync_hash;  // a running "required" mod: its identity in the multiplayer handshake (8 hex digits)
+    std::string code_hash;  // a mod with code: SHA-256 of its code files (core/mod_state.h); "" otherwise
+    std::string code_kind;  // "native" (a DLL), "scripts" (game scripts among its assets) or "" (neither)
     std::string reload;  // "live" / "map" / "restart"
     std::vector<std::string> errors;  // every problem with tome.mod.json, in full
     std::string crash_calls;  // after a crash: where it was called from (likely), as logged

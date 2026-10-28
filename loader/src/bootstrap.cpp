@@ -33,6 +33,7 @@ std::vector<std::string> g_verify_errors;
 bool g_early_hooks_ok = false;
 std::string g_early_hooks_report;
 bool g_paths_ok = false;
+std::vector<std::string> g_layout_notes;  // from migrate_layout, logged once the log is open
 bool g_menu_hooks_ok = false;
 std::string g_menu_hooks_report;
 std::string g_menu_reload_report;
@@ -125,6 +126,7 @@ DWORD bootstrap() {
     TOME_INFO("Host process: %s (pid %lu)", narrow(g_paths.host_exe).c_str(), GetCurrentProcessId());
     TOME_INFO("Game directory: %s", narrow(g_paths.game_dir).c_str());
     TOME_INFO("Mods directory: %s", narrow(g_paths.mods_dir).c_str());
+    for (const std::string& note : g_layout_notes) TOME_INFO("Layout: %s", note.c_str());
     TOME_INFO("game.dll already loaded when tome.mix was attached: %s",
               g_game_loaded_at_attach ? "yes" : "no");
 
@@ -255,7 +257,7 @@ DWORD bootstrap() {
                 mod_menu::on_mods_changed();
             });
         } else if (mod_manager().poll_settings_changed()) {
-            // Only a settings.json edited by hand: no full refresh for that.
+            // Only a settings file edited by hand: no full refresh for that.
             main_thread::post([] {
                 mod_manager().reload_settings();
                 mod_menu::on_mods_changed();
@@ -281,6 +283,7 @@ void start_bootstrap(HMODULE self) {
     // GetModuleHandle doesn't take the loader lock's slow path; safe in DllMain.
     g_attach_thread = GetCurrentThreadId();
     g_paths_ok = init_paths(self, g_paths);
+    if (g_paths_ok) g_layout_notes = migrate_layout(g_paths);
     if (g_paths_ok) overlay::init(g_paths);
     if (g_paths_ok) {
         g_safe_mode = safe_mode_reason(g_paths);

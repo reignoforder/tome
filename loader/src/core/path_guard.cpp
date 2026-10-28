@@ -17,6 +17,8 @@ bool is_reserved_device(std::string_view comp) {
     while (!comp.empty() && (comp.back() == ' ' || comp.back() == '.')) comp.remove_suffix(1);
     // Stem: up to the first '.'.
     if (size_t dot = comp.find('.'); dot != std::string_view::npos) comp = comp.substr(0, dot);
+    // Spaces before the extension are ignored too: "nul .txt" is NUL.
+    while (!comp.empty() && comp.back() == ' ') comp.remove_suffix(1);
     if (iequals(comp, "con") || iequals(comp, "prn") || iequals(comp, "aux") || iequals(comp, "nul") ||
         iequals(comp, "conin$") || iequals(comp, "conout$")) {
         return true;

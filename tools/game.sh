@@ -16,7 +16,7 @@
 # The game is found by its exact process name (war3.exe), never by command
 # line: `pkill -f` patterns also match the shell that runs them.
 # Set GAME_DIR to use a game folder other than ./WarCraft III, and TOME_HOME
-# (a Windows path) to keep mods/ and tome/ somewhere else. HEADLESS=1 runs
+# (a Windows path) to keep tome/ (and tome/mods/) somewhere else. HEADLESS=1 runs
 # the game off screen, in gamescope (tools/headless.sh).
 set -uo pipefail
 

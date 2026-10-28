@@ -20,7 +20,9 @@ add_library(tome_core STATIC
     src/core/mappings.cpp
     src/core/metadata.cpp
     src/core/mod_menu_model.cpp
+    src/core/mod_state.cpp
     src/core/mpq.cpp
+    src/core/package.cpp
     src/core/path_guard.cpp
     src/core/pe.cpp
     src/core/popup.cpp
@@ -31,6 +33,7 @@ add_library(tome_core STATIC
     src/core/verify.cpp
     src/core/version.cpp
     src/core/x86.cpp
+    src/core/zip.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/generated/embedded_mappings.cpp
 )
 target_include_directories(tome_core PUBLIC src)
@@ -57,6 +60,7 @@ add_library(tome_loader SHARED
     src/mod_menu.cpp
     src/natives.cpp
     src/overlay.cpp
+    src/packages.cpp
     src/patch.cpp
     src/patches.cpp
     src/patches/memhack_guard.cpp

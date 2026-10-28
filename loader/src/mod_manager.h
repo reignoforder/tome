@@ -4,6 +4,7 @@
 #include "core/hooks.h"
 #include "core/keys.h"
 #include "core/metadata.h"
+#include "core/mod_state.h"
 #include "core/mod_status.h"
 #include "core/resolver.h"
 #include "game_build.h"
@@ -64,12 +65,12 @@ public:
     // watcher thread can poll it; the refresh itself runs on the main thread.
     bool poll_changed();
 
-    // True if a mod's config/settings.json changed since Tome last read or
+    // True if a mod's tome/mods/config/<id>.json changed since Tome last read or
     // wrote it (an edit by hand). Not part of poll_changed: Tome's own writes
     // would otherwise refresh every mod after each change. Watcher thread.
     bool poll_settings_changed() const;
 
-    // Reads the settings.json files that changed, applies their valid values
+    // Reads the settings files that changed, applies their valid values
     // and tells the mods. Main thread.
     void reload_settings();
 
@@ -96,7 +97,7 @@ public:
     void set_game_lock(bool on);
     bool game_locked() const;
 
-    // Settings (core/settings.h), saved in <mod>/config/settings.json.
+    // Settings (core/settings.h), saved in tome/mods/config/<id>.json.
     // The current value of `key`, or a null value if the mod or setting
     // doesn't exist. Any thread.
     json::Value setting(const std::string& id, const std::string& key) const;
@@ -108,7 +109,7 @@ public:
     // Every setting of `id` back to its default.
     void reset_settings(const std::string& id);
     // Called (on the thread that changed them, outside the lock) with the
-    // keys whose values changed, from set_setting or from settings.json
+    // keys whose values changed, from set_setting or from its settings file
     // changing on disk.
     using SettingsSink = void (*)(const std::string& id, const std::vector<std::string>& keys);
     void set_settings_sink(SettingsSink sink) { settings_sink_ = sink; }
@@ -126,20 +127,27 @@ public:
 
 private:
     struct Installed {
-        std::string folder;
-        std::wstring dir;
+        std::string folder;   // in tome/mods: a folder's name, or a package's file name ("hello.tome")
+        std::wstring dir;     // where its files are: the folder, or the package unpacked in tome/packages
+        bool package = false;
         bool valid = false;
         ModMetadata meta;
         std::vector<std::string> errors;
         std::vector<std::string> warnings;
         std::wstring dll;  // entry for this build; empty for asset-only mods
         FileStamp dll_stamp;
+        // A DLL, or game scripts among the assets (mod_state::is_script):
+        // what has to be allowed before it runs.
+        bool has_code = false;
+        // With code: SHA-256 of its code files' manifest (core/mod_state.h);
+        // "" if one couldn't be read. Empty without code.
+        std::string code_hash;
         std::vector<overlay::AssetFile> assets;
         uint64_t assets_fingerprint = 0;  // 0: no asset files
         settings::Schema settings;
         std::string settings_error;
-        json::Value stored_settings;  // settings.json as read; null if there's none
-        FileStamp settings_stamp;     // of that settings.json, taken before reading it; zero if there's none
+        json::Value stored_settings;  // the settings file as read; null if there's none
+        FileStamp settings_stamp;     // of that file, taken before reading it; zero if there's none
     };
 
     struct Runtime {
@@ -148,6 +156,7 @@ private:
         std::wstring source_dll;
         FileStamp stamp;
         std::wstring shadow_dll;
+        std::string folder;  // Installed::folder it was loaded from
         tome_mod_lifecycle_fn enable_fn = nullptr;
         tome_mod_lifecycle_fn disable_fn = nullptr;
         tome_mod_lifecycle_fn unload_fn = nullptr;
@@ -191,13 +200,17 @@ private:
         bool unusable = false;  // the schema couldn't be read or parsed: no settings at all
         std::vector<std::string> schema_warnings;
         bool values_read = false;
-        FileStamp values_stamp;  // of config/settings.json; zero if there's none
+        std::wstring values_file;
+        FileStamp values_stamp;  // of tome/mods/config/<id>.json; zero if there's none
         json::Value values;
         std::string values_warning;
     };
 
     std::vector<Installed> discover() const;
     void read_settings_schema(Installed& mod) const;
+    // A mod's settings values, tome/mods/config/<id>.json, and its name for messages.
+    std::wstring settings_file(const std::string& id) const { return paths_.mod_config_dir + L"\\" + widen(id) + L".json"; }
+    static std::string settings_name(const std::string& id) { return "config\\" + id + ".json"; }
     // Declares the natives of every valid mod that targets this game build;
     // a mod whose natives can't be declared becomes invalid (§5.5).
     void declare_natives(std::vector<Installed>& installed) const;
@@ -205,14 +218,30 @@ private:
     void locked(const std::function<void()>& fn);
     std::vector<std::string> set_enabled_locked(const std::string& id, bool enabled);
     std::vector<std::string> reload_locked(const std::string& id);
-    // `invalid` (optional) is set when state.json exists but can't be parsed.
-    std::map<std::string, bool> read_state(bool* invalid = nullptr) const;
+    // `invalid` (optional) is set when state.json exists but can't be
+    // parsed, `legacy` when it's from before approvals (mod_state::parse).
+    mod_state::State read_state(bool* invalid = nullptr, bool* legacy = nullptr) const;
     // Whether the user wants `id` to run: state.json (new mods start
     // enabled), unless safe mode is on.
-    bool wanted_by_user(const std::map<std::string, bool>& state, const std::string& id) const;
+    bool wanted_by_user(const mod_state::State& state, const std::string& id) const;
+    // Whether the mod's code has to be allowed (again) before it runs.
+    static mod_state::Need approval_need(const mod_state::State& state, const Installed& mod);
+    // wanted_by_user, and its code allowed: what the resolver gets.
+    bool wanted_and_allowed(const mod_state::State& state, const Installed& mod) const {
+        return wanted_by_user(state, mod.meta.id) && approval_need(state, mod) == mod_state::Need::None;
+    }
+    // Records `mod`'s code as allowed in `state` (nothing for a mod without
+    // code), logging `how` unless it's null (in DllMain, before the log opens).
+    static void approve(mod_state::State& state, const Installed& mod, const char* how);
+    // The approvals nobody clicks: mods a state.json from before approvals
+    // lists (they ran without one), and TOME_DEBUG_APPROVE's (tests).
+    static void implicit_approvals(mod_state::State& state, const std::vector<Installed>& installed, bool legacy,
+                                   bool log);
     // Also records the new file's stamp, so the watcher doesn't take Tome's
     // own write for an edit (disk_fingerprint).
-    void write_state(const std::map<std::string, bool>& state);
+    void write_state(const mod_state::State& state);
+    // Installed::code_hash, cached by folder until a code file's name, size or time changes.
+    std::string code_hash(const Installed& mod) const;
 
     bool load(Runtime& rt, const Installed& mod, std::string& error);
     void unload(Runtime& rt);
@@ -260,6 +289,14 @@ private:
     std::map<std::string, std::pair<uint64_t, std::string>> sync_hashes_;  // by folder: files' stamps, hash
     mutable std::map<std::string, ParsedMeta> meta_cache_;
     mutable std::map<std::string, ParsedSettings> settings_cache_;
+    mutable std::map<std::string, std::pair<uint64_t, std::string>> code_hash_cache_;  // by folder: stamps, hash
+    // Each .tome in tome/mods as of its last unpack, by file name.
+    struct UnpackedPackage {
+        FileStamp stamp;
+        std::wstring dir;
+        std::string error;
+    };
+    mutable std::map<std::string, UnpackedPackage> package_cache_;
     uint64_t last_polled_ = 0;  // set in init(), then only touched by the watcher thread
     // tome/state.json as Tome last wrote it. Its own lock: written under
     // lock_ on the main thread, read by the watcher thread without lock_.
@@ -270,7 +307,7 @@ private:
     mutable SRWLOCK settings_lock_ = SRWLOCK_INIT;
     std::map<std::string, json::Value> settings_values_;  // by mod id: every setting's current value
     std::map<std::string, settings::Schema> settings_schemas_;  // by mod id
-    std::map<std::string, std::wstring> settings_files_;  // by mod id: its settings.json
+    std::map<std::string, std::wstring> settings_files_;  // by mod id: tome/mods/config/<id>.json
     std::map<std::string, FileStamp> settings_stamps_;    // by mod id: that file as Tome last read or wrote it
     std::vector<std::pair<std::string, std::vector<std::string>>> settings_changed_;  // for notify_settings
     SettingsSink settings_sink_ = nullptr;

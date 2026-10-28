@@ -8,7 +8,7 @@
  * command, and has settings (config.schema.json, on its page of the mod
  * menu) and a keybind (Greet, Ctrl+G by default).
  *
- * Build it, copy build/mods/hello/ into the game's mods/ folder, and watch
+ * Build it, copy build/mods/hello/ into the game's tome/mods/ folder, and watch
  * tome/tome.log while toggling it in tome/state.json.
  */
 #include <tome/tome.h>

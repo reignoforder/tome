@@ -135,11 +135,16 @@ void* current_room() {
     return frames::is_class(room, "CGameChatroom") ? room : nullptr;
 }
 
+// Log lines for each lobby player's handshake lines: a handshake takes a
+// few, so this only stops a modified client from filling tome.log.
+LogBudget g_lobby_log(100);
+
 // The lobby for `room`, a new one if the lobby changed.
 Lobby& lobby_for(void* room) {
     if (!g_lobby || g_lobby_room != room) {
         g_lobby = std::make_unique<Lobby>();
         g_lobby_room = room;
+        g_lobby_log.reset();
         TOME_INFO("Handshake: lobby opened");
     }
     return *g_lobby;
@@ -194,7 +199,13 @@ void TOME_CALL before_chat_received(tome_mod*, tome_hook_call* call, void*) {
     if (!decode(text, line)) return;  // people's lines, "[Tome] ..." typed by hand included
     call->skip_original = 1;
     int from = field<uint8_t>(event, n.lobby_event_sender_offset);
-    TOME_INFO("Handshake: from lobby player %d: %s", from, text.c_str());
+    switch (g_lobby_log.take(from)) {
+    case LogBudget::Verdict::Log: TOME_INFO("Handshake: from lobby player %d: %s", from, text.c_str()); break;
+    case LogBudget::Verdict::Exhausted:
+        TOME_WARN("Handshake: lobby player %d sent too many lines; not logging the rest", from);
+        break;
+    case LogBudget::Verdict::Quiet: break;
+    }
     if (!frames::is_class(room, "CGameChatroom")) return;
     // A line can arrive before the first poll: the lobby must know whether it
     // hosts and its own mods first, or it drops a reply or answers "none".
@@ -235,6 +246,8 @@ void TOME_CALL before_start_game(tome_mod*, tome_hook_call* call, void*) {
 // --- games ---------------------------------------------------------------------------
 
 GameRecord g_record;
+// One log line for each mod in a set, and a few to spare.
+LogBudget g_game_log(kMaxMods + 8);
 bool g_in_game = false;
 bool g_replay = false;
 bool g_sent = false;
@@ -293,12 +306,23 @@ void TOME_CALL before_sync_integer(tome_mod*, tome_hook_call* call, void*) {
     int sender = field<uint8_t>(event, n.sync_sender_offset);
     int total = field<int32_t>(event, n.sync_value_offset);
     SyncMod mod;
-    if (!decode_key(key, mod)) {
-        TOME_WARN("Handshake: player %d sent an unreadable mod: %s", sender, key.c_str());
-        return;
+    const bool readable = decode_key(key, mod);
+    switch (g_game_log.take(sender)) {
+    case LogBudget::Verdict::Log:
+        if (!readable) {
+            TOME_WARN("Handshake: player %d sent an unreadable mod: %s", sender, key.substr(0, 100).c_str());
+        } else if (total > kMaxMods) {
+            TOME_WARN("Handshake: player %d sent a set of %d mods; more than %d are ignored", sender, total, kMaxMods);
+        } else {
+            TOME_INFO("Handshake: player %d has %s (%d in all)", sender, describe(mod).c_str(), total);
+        }
+        break;
+    case LogBudget::Verdict::Exhausted:
+        TOME_WARN("Handshake: player %d sent too many mod actions; not logging the rest", sender);
+        break;
+    case LogBudget::Verdict::Quiet: break;
     }
-    TOME_INFO("Handshake: player %d has %s (%d in all)", sender, describe(mod).c_str(), total);
-    g_record.add(sender, mod, total);
+    if (readable) g_record.add(sender, mod, total);
 }
 
 struct HookSpec {
@@ -368,6 +392,7 @@ void check_lock() {
 void on_game_start() {
     if (!g_build) return;
     g_record.reset();
+    g_game_log.reset();
     g_in_game = true;
     g_replay = g_is_replay() != 0;
     g_sent = false;

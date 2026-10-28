@@ -1,0 +1,84 @@
+#!/usr/bin/env python3
+"""Writes the fuzz targets' seed inputs: make_seeds.py <out dir>.
+
+Creates <out>/<target>/ for every target in fuzz/. Inputs that once crashed
+a target are checked in under fuzz/regressions/<target>/ and copied too.
+"""
+import glob
+import io
+import os
+import shutil
+import sys
+import zipfile
+import zlib
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+out = sys.argv[1]
+seeds = {}
+
+
+def add(target, data):
+    if isinstance(data, str):
+        data = data.encode()
+    seeds.setdefault(target, []).append(data)
+
+
+# Lobby chat lines and game cache keys (the first byte of a line picks the sender).
+for text in [
+    "[Tome] Required mods 1/1: hello 1.0.0 #1a2b3c4d, other 2.0.0 #00ff00ff",
+    "[Tome] Required mods 1/2: hello 1.0.0 #1a2b3c4d\n[Tome] Required mods 2/2: other 2.0.0 #00ff00ff",
+    "[Tome] My mods 1/1: none",
+    "A[Tome] My mods 1/1: hello 1.0.0 #1a2b3c4d\nB[Tome] Required mods 1/1: none",
+    "hello 1.0.0 #1a2b3c4d\nother 2.0.0 #00ff00ff",
+    "[Tome] Required mods 1/1: hello 1.2.3-beta.1+build #deadbeef",
+]:
+    add("handshake", text)
+
+for text in ["/tome list", "/tome enable hello", "/tome disable my-mod", "/tome reload", "/Hello  some  args ",
+             "/x\targ", "/tome help"]:
+    add("chat", text)
+
+
+def zip_bytes(files, method):
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", method) as z:
+        for name, data in files:
+            z.writestr(name, data)
+    return buf.getvalue()
+
+
+mod = [("tome.mod.json", '{"schema": 1, "id": "x", "version": "1.0.0"}'),
+       ("assets/", ""), ("assets/a.txt", "hello hello hello hello"), ("x.dll", b"MZ" + bytes(64))]
+add("zip", zip_bytes(mod, zipfile.ZIP_STORED))
+add("zip", zip_bytes(mod, zipfile.ZIP_DEFLATED))
+add("zip", zip_bytes([("tome.mod.json", "{}")], zipfile.ZIP_DEFLATED))
+
+for data in [b"", b"a", b"hello hello hello hello hello", bytes(range(256)) * 4, bytes((i * 131 + 7) % 256 for i in range(300))]:
+    for level in (0, 1, 9):
+        c = zlib.compressobj(level, zlib.DEFLATED, -15)
+        add("inflate", len(data).to_bytes(2, "little") + c.compress(data) + c.flush())
+
+for path in sorted(glob.glob(os.path.join(ROOT, "sdk/examples/*/*.json")) +
+                   glob.glob(os.path.join(ROOT, "tests/e2e/mods/*/tome.mod.json"))):
+    add("json", open(path, "rb").read())
+add("json", '{"a": [1, 2.5e3, -0, true, false, null, "\\u00e9\\n"], "b": {}}')
+
+add("jass", "globals\nunit G\nendglobals\nfunction f takes nothing returns nothing\n"
+            "    local integer G\n    set G = 1\nendfunction\n")
+add("jass", "integer bj_x\nfunction f takes nothing returns nothing\n  local unit bj_x // c\n"
+            "  call BJDebugMsg(\"local real G\")\nendfunction\n")
+add("jass", "native HelloLog takes integer value returns nothing")
+add("jass", "constant native F takes code c, real r, unit u returns boolean")
+
+for text in ["Maps\\a.w3m", "..\\x", "C:\\x", "x::$DATA", "UI\\FrameDef\\a.toc", "a\\\\b", "con.txt",
+             "UI\\FrameDef\\Glue\\x.fdf\r\nUI\\a.fdf\r\n", "ui/mod.fdf"]:
+    add("paths", text)
+
+for target in [os.path.basename(f)[5:-4] for f in glob.glob(os.path.join(ROOT, "fuzz/fuzz_*.cpp"))]:
+    d = os.path.join(out, target)
+    os.makedirs(d, exist_ok=True)
+    for i, data in enumerate(seeds.get(target, [])):
+        with open(os.path.join(d, "seed-%02d" % i), "wb") as f:
+            f.write(data)
+    for path in glob.glob(os.path.join(ROOT, "fuzz/regressions", target, "*")):
+        shutil.copy(path, d)

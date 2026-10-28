@@ -17,7 +17,9 @@ add_executable(tome_tests
     test_mappings.cpp
     test_metadata.cpp
     test_mod_menu_model.cpp
+    test_mod_state.cpp
     test_mpq.cpp
+    test_package.cpp
     test_path_guard.cpp
     test_popup.cpp
     test_resolver.cpp
@@ -29,6 +31,7 @@ add_executable(tome_tests
     test_verify.cpp
     test_version.cpp
     test_x86.cpp
+    test_zip.cpp
 )
 target_link_libraries(tome_tests PRIVATE tome_core)
 # For checking the mapping files against the local install, if present.

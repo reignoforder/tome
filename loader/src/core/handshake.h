@@ -62,6 +62,29 @@ Difference compare(const ModSet& expected, const ModSet& actual);
 // where <other> names the owner of the expected set ("host", "you").
 std::string explain(const Difference& difference, std::string_view other);
 
+// The most mods one player's set may have. A bigger one (from a modified
+// client: nobody runs that many required mods) is dropped, so every set Tome
+// keeps and compares stays small.
+constexpr int kMaxMods = 256;
+
+// How many log lines each player's handshake messages get (per lobby, or
+// per game), so a modified client can't fill tome.log.
+class LogBudget {
+public:
+    explicit LogBudget(int per_player) : limit_(per_player) {}
+    enum class Verdict {
+        Log,        // log it
+        Exhausted,  // the first one over the limit: say that the rest aren't logged
+        Quiet,      // don't log it
+    };
+    Verdict take(int player);
+    void reset() { used_.clear(); }
+
+private:
+    int limit_;
+    std::map<int, int> used_;
+};
+
 // --- lobby chat lines ----------------------------------------------------------------
 
 constexpr std::string_view kPrefix = "[Tome] ";
@@ -178,7 +201,8 @@ class GameRecord {
 public:
     void reset() { pending_.clear(); complete_.clear(); }
 
-    // One action: a mod of `sender`'s set of `total`.
+    // One action: a mod of `sender`'s set of `total`. A total over kMaxMods
+    // is ignored.
     void add(int sender, const SyncMod& mod, int total);
 
     // Every set that arrived whole.

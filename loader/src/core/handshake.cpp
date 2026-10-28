@@ -177,6 +177,11 @@ bool Assembler::add(const Line& line, ModSet& out) {
         if (line.part != 1) return false;
     }
     mods_.insert(mods_.end(), line.mods.begin(), line.mods.end());
+    if (mods_.size() > static_cast<size_t>(kMaxMods)) {  // too big to be real: dropped
+        mods_.clear();
+        next_ = 1;
+        return false;
+    }
     if (line.part < line.total) {
         next_ = line.part + 1;
         return false;
@@ -314,8 +319,15 @@ bool decode_key(std::string_view key, SyncMod& out) {
     return parse_entry(key, out);
 }
 
+LogBudget::Verdict LogBudget::take(int player) {
+    int& used = used_[player];
+    if (used > limit_) return Verdict::Quiet;
+    ++used;
+    return used > limit_ ? Verdict::Exhausted : Verdict::Log;
+}
+
 void GameRecord::add(int sender, const SyncMod& mod, int total) {
-    if (total < 1 || complete_.count(sender)) return;
+    if (total < 1 || total > kMaxMods || complete_.count(sender)) return;
     auto& [expected, mods] = pending_[sender];
     if (expected != total) {
         expected = total;

@@ -609,7 +609,7 @@ typedef void (TOME_CALL *tome_hook_fn)(tome_mod* mod, tome_hook_call* call, void
  *
  * Settings: a mod describes them in a schema file named by tome.mod.json
  * "config" (e.g. "config.schema.json"); the mod menu generates a settings
- * page from it, and Tome keeps the values in <mod>/config/settings.json.
+ * page from it, and Tome keeps the values in tome/mods/config/<id>.json.
  * The schema is a small subset of JSON Schema:
  *
  *   { "type": "object",
@@ -680,7 +680,8 @@ typedef struct tome_api {
     const char* (TOME_CALL *mod_id)(tome_mod* mod);
     const char* (TOME_CALL *mod_version)(tome_mod* mod);
     const char* (TOME_CALL *mod_dir)(tome_mod* mod);    /* the mod's folder */
-    const char* (TOME_CALL *config_dir)(tome_mod* mod); /* <mod_dir>/config, created on demand */
+    /* tome/mods/config/<id>, created on demand: survives updates of the mod */
+    const char* (TOME_CALL *config_dir)(tome_mod* mod);
 
     /*
      * Attaches the implementation of a JASS native. The native must be
@@ -902,8 +903,8 @@ typedef struct tome_api {
 
     /*
      * Calls `fn` on the main thread with the key of each setting that
-     * changes: in the mod menu, through set_setting_*, or in settings.json
-     * on disk. Any thread. Revoked on disable.
+     * changes: in the mod menu, through set_setting_*, or in its settings
+     * file on disk. Any thread. Revoked on disable.
      */
     tome_result (TOME_CALL *on_setting_changed)(tome_mod* mod, tome_setting_fn fn, void* user);
 
