@@ -49,7 +49,8 @@ loader/
     patch.*               call-site and pointer patching, verified before writing
     patches.*             built-in patches (always-on fixes); the registry and version gating
     patches/              one file per patch (memhack_guard: the JASS typecast fix;
-                          path_sanitizer: file-writing native paths)
+                          path_sanitizer: file-writing native paths;
+                          blp_guard: malformed BLP textures)
     natives.*             native registry, thunks, InitNatives hook, JASS strings and code
     hooks.*               inline hooks on mapped functions: patch, entry stub, dispatcher
     mod_manager.*         discovery, state.json, lifecycle, hot reload, crashed mods, safe mode
@@ -695,6 +696,35 @@ reason to make a fix a patch rather than ship it as a mod.
   at game start (`display_text`), and gives mods the count in
   `tome_event_info.script_shadows` and the details through
   `map_script_shadows` (API version 13).
+- **blp-guard** (`patches/blp_guard.cpp`, `docs/known-bugs.md`): refuses a
+  malformed BLP texture before the game's loader decodes it. The 1.27b BLP1
+  loader reads each mipmap's span, and a JPEG texture's shared JPEG header,
+  out of the file using offsets and sizes from the file's own header without
+  checking them against its length, so a crafted `.blp` (a downloaded map's,
+  or a mod's asset) makes it read past the buffer — a crash and an
+  out-of-bounds read. Tome can't decode BLPs itself and the bug is the
+  game's, so the guard hooks `CBLPFile::Open` (the one BLP1 header parser;
+  every texture load reaches it). Open loads the whole file and stores the
+  buffer and its length in the object (`CBLPFile.buffer` / `.size`); an AFTER
+  handler at `INT32_MIN` reads them back and runs the portable validator
+  (`core/blp.*`) over the bytes. When the file is unsafe to decode it sets
+  the result to 0 — exactly what Open returns for a wrong-magic file — so the
+  caller skips the mip/JPEG decode and the texture just fails to load. The
+  validator parses the BLP1 header itself (magic, dimensions, the 16 mip
+  offset/size slots, the JPEG-header size) so it doesn't depend on the
+  game's in-memory layout; it's unit-tested (`tests/test_blp.cpp`) and
+  fuzzed. Unlike the path sanitizer it reserves `CBLPFile::Open`: a mod that
+  dropped the hook would reopen the hole for every texture, so the mod-facing
+  API refuses it. Open also copies a fixed 1180-byte header out of the file
+  before it checks the magic, so a file shorter than that is over-read before
+  the AFTER handler ever runs; the patch additionally rewrites that copy site
+  (`CBLPFile.header_copy`) to an absolute indirect call to a small detour
+  (`tome_blp_header_copy`) that copies only `min(1180, size)` bytes — the
+  length Open just stored — and zero-fills the rest, so no file is read past
+  its end. That rewrite is best-effort and keyed to the exact site bytes
+  (`patch_bytes` refuses a mismatch): on a build that doesn't map the site or
+  whose bytes differ it's skipped, logged as "unclamped", and the AFTER guard
+  alone applies. Covers maps and mods alike.
 - **path-sanitizer** (`patches/path_sanitizer.cpp`, `docs/known-bugs.md`):
   refuses path traversal in every JASS native that takes a file path (38;
   `docs/known-bugs.md` lists them). The writes (`PreloadGenEnd`,
@@ -1230,7 +1260,8 @@ API version 10: `popup`, `popup_close`, `restart_game`.
   extraction and the package checks, asserting every accepted name stays
   inside its folder), raw deflate (`inflate`), `tome.mod.json`, settings
   schemas and keybinds (`json`), map scripts and native declarations
-  (`jass`), and paths, TOCs and package names (`paths`). Built for the host
+  (`jass`), paths, TOCs and package names (`paths`), and BLP textures
+  (`blp`). Built for the host
   with clang, ASan and UBSan in `build-fuzz/`, apart from the mingw build;
   seeds from `fuzz/make_seeds.py`, the corpus in `build-fuzz/corpus/`, and
   crashing inputs kept in `fuzz/regressions/<target>/`. They run 64-bit, so

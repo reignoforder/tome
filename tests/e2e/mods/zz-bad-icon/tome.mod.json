@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "id": "zz-bad-icon",
+  "name": "Bad Icon",
+  "version": "0.1.0",
+  "game": "1.27b",
+  "tome": "*",
+  "sync": "client",
+  "icon": "icon.blp"
+}

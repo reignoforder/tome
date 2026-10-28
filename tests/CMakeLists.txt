@@ -1,6 +1,7 @@
 add_executable(tome_tests
     main.cpp
     test_assets.cpp
+    test_blp.cpp
     test_chat.cpp
     test_command_line.cpp
     test_debug_script.cpp
@@ -59,6 +60,7 @@ add_executable(tome_hook_runtime_tests
     ../loader/src/guard.cpp
     ../loader/src/hooks.cpp
     ../loader/src/log.cpp
+    ../loader/src/patch.cpp
     ../loader/src/paths.cpp
     ../loader/src/unwind.cpp
 )

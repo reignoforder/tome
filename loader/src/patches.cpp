@@ -9,10 +9,12 @@ namespace tome::patches {
 // Each patch is defined in its own file under src/patches/ and listed here.
 extern const Patch kMemhackGuard;
 extern const Patch kPathSanitizer;
+extern const Patch kBlpGuard;
 
 const Patch* const kAll[] = {
     &kMemhackGuard,
     &kPathSanitizer,
+    &kBlpGuard,
 };
 
 namespace {

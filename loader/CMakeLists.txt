@@ -5,6 +5,7 @@ tome_embed_mappings("${CMAKE_CURRENT_BINARY_DIR}/generated/embedded_mappings.cpp
 # resolution). Kept free of Windows APIs so it can be unit-tested.
 add_library(tome_core STATIC
     src/core/assets.cpp
+    src/core/blp.cpp
     src/core/chat.cpp
     src/core/command_line.cpp
     src/core/debug_script.cpp
@@ -63,6 +64,7 @@ add_library(tome_loader SHARED
     src/packages.cpp
     src/patch.cpp
     src/patches.cpp
+    src/patches/blp_guard.cpp
     src/patches/memhack_guard.cpp
     src/patches/path_sanitizer.cpp
     src/paths.cpp

@@ -266,7 +266,8 @@ fi
 check "Assets at startup: $ASSET_FILES files from 3 mods \(0 overridden" "mods' assets mounted from DllMain"
 check "Asset probe .*: [0-9]+ bytes, fnv1a $PROBE_HASH" "the game reads the mod's texture instead of its own"
 check "Bootstrap complete" "bootstrap finished" 15
-check "Patches: 2 applied, 0 skipped: memhack-guard applied.*path-sanitizer applied" "memhack guard and path sanitizer patches applied"
+check "Patches: 3 applied, 0 skipped: memhack-guard applied.*path-sanitizer applied.*blp-guard applied" "memhack guard, path sanitizer and BLP guard patches applied"
+check_absent "blp-guard.*unclamped" "the BLP header-copy clamp was applied"
 check "Main-thread dispatcher installed" "main-thread dispatcher installed"
 check "Events: hooked screens, map load, game start and end, frames, game ticks, shutdown, chat, pause, units, spells, damage, experience, players, resources, keys, menus, dialogs, levels and saved games" "event hooks installed"
 check "\[hello\] 100 ticks" "tick events reach mods"
@@ -575,6 +576,23 @@ echo "mod menu (third launch, simulated clicks)"
 rm -rf "$MODS/broken-json" "$MODS/wrong-arch" "$MODS/needs-ghost" "$MODS/asset-demo" "$MODS/asset-map" \
     "$MODS/asset-restart" "$MODS/hook-a" "$MODS/hook-b" "$MODS/crash" "$MODS/unapproved" "$MODS/unapproved-script"
 set_enabled hello true
+# A mod whose icon is a malformed BLP (valid "BLP1" magic, mip past EOF), to
+# check the blp-guard patch refuses it when the menu decodes the icon. It
+# sorts after hello, so hello stays row 0 and the clicks below are unchanged.
+cp -r "$FIXTURES/zz-bad-icon" "$MODS/zz-bad-icon"
+python3 -I - "$MODS/zz-bad-icon/icon.blp" <<'PY'
+import struct, sys
+h = bytearray(0xA0)
+h[0:4] = b"BLP1"
+struct.pack_into("<I", h, 0x04, 0)          # JPEG content
+struct.pack_into("<I", h, 0x0C, 32)         # width
+struct.pack_into("<I", h, 0x10, 32)         # height
+struct.pack_into("<I", h, 0x18, 0)          # one mip level
+struct.pack_into("<I", h, 0x1C, 0xA0)       # mipOffsets[0]
+struct.pack_into("<I", h, 0x5C, 0x7fffffff) # mipSizes[0]: runs far past EOF
+struct.pack_into("<I", h, 0x9C, 0)          # jpegHeaderSize
+open(sys.argv[1], "wb").write(h)
+PY
 # Click positions are fractions of the window: Mods button, row 0's toggle
 # (twice, once the panel has lowered), Done, then the hello mod's own button
 # (which was hidden and recreated by the toggling). Then the panel again:
@@ -611,6 +629,8 @@ else
     fail "state.json doesn't show hello enabled"
 fi
 check "hello: icon icon\.blp loaded" "the list shows the mod's icon" 15
+check "blp-guard: refused a malformed texture .*mip runs past the file" "the BLP guard refused a malformed icon" 15
+rm -rf "$MODS/zz-bad-icon"
 check "hello: setting shout = On" "the settings page changes a setting" 15
 check "hello: setting greeting = Howdy" "a text setting typed into its box, saved with Enter" 10
 check "\[hello\] setting changed: shout" "the mod hears about it"

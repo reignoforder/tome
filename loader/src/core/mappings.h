@@ -239,6 +239,14 @@ struct BuildMappings {
         uint32_t send_action;               // NetSendAction
         uint32_t on_sync_integer;           // OnNetSyncStoredInteger (hooked by name)
     } net;
+
+    // Optional: 0 when the build doesn't map them (blp-guard is then skipped).
+    struct {
+        uint32_t open;          // CBLPFile::Open
+        uint32_t buffer_offset; // CBLPFile.buffer
+        uint32_t size_offset;   // CBLPFile.size
+        uint32_t header_copy;   // CBLPFile.header_copy (patched by blp-guard)
+    } blp;
 };
 
 // The game's JASS event functions that events.cpp hooks by name (its
@@ -264,8 +272,9 @@ inline constexpr const char* kEventFunctions[] = {
     "CreateUnitObject", "CUnit::Remove", "CAbilityHero::AddXP",
 };
 
-// Fills `out` from `build`. Fails if any symbol is missing or has the wrong
-// kind; each error names the symbol.
+// Fills `out` from `build`. Fails if any symbol is missing (except the
+// optional ones noted above) or has the wrong kind; each error names the
+// symbol.
 bool bind_build(const mappings::Build& build, BuildMappings& out, std::vector<std::string>& errors);
 
 } // namespace tome

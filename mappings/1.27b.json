@@ -883,6 +883,24 @@
       "kind": "function", "rva": "0x0013af40", "conv": "thiscall", "sig": "bool(CGxDeviceOpenGl* this)",
       "bytes": "56 8b f1 ff b6 78 05 00 00 ff 15 ?? ?? ?? ?? 89",
       "doc": "Makes a GL context for the window at +0x578 (GetDC, wglCreateContext in 0x13F5C0), makes it current, queries the driver (0x13F2E0) and sets up the device's GL state (0x13DCC0). Returns 0 and destroys it on failure. Plain ret."
+    },
+    "CBLPFile::Open": {
+      "kind": "function", "rva": "0x008e9790", "conv": "thiscall",
+      "sig": "int(void* this, const char* name, void* context)",
+      "bytes": "55 8b ec 53 56 57 8b d9 e8 a3 f3 ff ff 8b 7d 08",
+      "doc": "Loads a whole BLP1 file into the object (+0x4A4 buffer, +0x4A8 size), copies a fixed 0x127-dword header to +8, checks the magic. Returns 1, or 0 for a failed load or a wrong magic. ret 8. The blp-guard patch hooks it (AFTER). See docs/reverse-engineering.md, BLP textures."
+    },
+    "CBLPFile.buffer": {
+      "kind": "offset", "value": "0x4a4",
+      "doc": "char*: the whole texture file, as loaded (CBLPFile::Open fills it)."
+    },
+    "CBLPFile.size": {
+      "kind": "offset", "value": "0x4a8",
+      "doc": "uint32: the texture file's length in bytes."
+    },
+    "CBLPFile.header_copy": {
+      "kind": "data", "rva": "0x008e97e6",
+      "doc": "The fixed-size header copy in CBLPFile::Open (mov ecx,0x127; rep movsd): blp-guard patches it to clamp the copy to the file's length. Bytes b9 27 01 00 00 f3 a5."
     }
   }
 }

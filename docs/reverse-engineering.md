@@ -738,6 +738,33 @@ call sites in game.dll:
 | 501 / 506 / 507 | SStrCopy / SStrLen / SStrDup |
 | 578 | SStrPrintf |
 
+## BLP textures (for the BLP guard)
+
+The game decodes BLP1 textures in one place: `CBLPFile::Open` (RVA
+`0x8E9790`, `int __thiscall(this, const char* name, void* context)`, `ret 8`).
+It loads the whole file, stores the buffer pointer at `this+0x4A4` and the
+file length at `this+0x4A8`, copies a fixed `0x127`-dword header to `this+8`,
+then checks the magic (`"BLP1"` = `0x31504C42`). On a wrong magic it returns 0
+with the buffer still loaded; the three callers (`0x1B18AE`, `0x1B35C2`,
+`0x70DC0D`) treat 0 as "not a BLP" and don't decode. The mip/JPEG decode
+happens later, in the "get mip" helpers (`0x8E9860` / `0x8E98B0`), which read
+the per-mip span straight from the buffer.
+
+BLP1 header layout (confirmed against the loader; byte offsets from the file
+start, i.e. from `this+8`): `0x00` magic, `0x04` compression (1 = paletted;
+the mip decoder takes the JPEG path for every other value), `0x08` flags, `0x0C` width (read at `this+0x14`), `0x10` height
+(`this+0x18`), `0x18` hasMipmaps (`this+0x20`: 0 → one mip, else the full
+chain from the dimensions), `0x1C` `mipOffsets[16]`, `0x5C` `mipSizes[16]`,
+`0x9C` the JPEG-header size (JPEG) or the 256-entry palette (paletted) — the
+`0x9C` boundary is confirmed by the loader reading mip data from `this+0xA4`.
+The JPEG decoder copies the JPEG header out of the in-object header copy
+(`this+0xA8`), not out of the file, so a header longer than 1020 bytes reads
+past that copy; the paletted decoder ignores `mipSizes` and reads one index
+byte per pixel plus the alpha bits (`0x08`: 1, 4 or 8) from the mip offset.
+The loader never checks a mip offset/size or the JPEG-header size against the
+file length; `docs/known-bugs.md`, "BLP texture loader", and
+`loader/src/patches/blp_guard.cpp`.
+
 ## Methods and tools
 
 - **Disassembly:** `objdump -d -M intel --start-address=0x6f… --stop-address=0x6f… "WarCraft III/game.dll"`.

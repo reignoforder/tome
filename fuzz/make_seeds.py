@@ -10,10 +10,12 @@ import os
 import shutil
 import sys
 import zipfile
+import struct
 import zlib
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 out = sys.argv[1]
+
 seeds = {}
 
 
@@ -73,6 +75,28 @@ add("jass", "constant native F takes code c, real r, unit u returns boolean")
 for text in ["Maps\\a.w3m", "..\\x", "C:\\x", "x::$DATA", "UI\\FrameDef\\a.toc", "a\\\\b", "con.txt",
              "UI\\FrameDef\\Glue\\x.fdf\r\nUI\\a.fdf\r\n", "ui/mod.fdf"]:
     add("paths", text)
+
+def blp(compression=0, w=8, h=8, has_mips=0, jpeg_header=0, mip_off=0x9C + 4, mip_size=16, total=None):
+    b = bytearray(0x9C + 4)
+    b[0:4] = b"BLP1"
+    struct.pack_into("<I", b, 0x04, compression)
+    struct.pack_into("<I", b, 0x0C, w)
+    struct.pack_into("<I", b, 0x10, h)
+    struct.pack_into("<I", b, 0x18, has_mips)
+    struct.pack_into("<I", b, 0x1C, mip_off)
+    struct.pack_into("<I", b, 0x5C, mip_size)
+    struct.pack_into("<I", b, 0x9C, jpeg_header)
+    if total is None:
+        total = max(len(b), mip_off + mip_size if mip_size and mip_off < 1 << 24 else len(b))
+    b += bytes(max(0, total - len(b)))
+    return bytes(b[:total]) if total < len(b) else bytes(b)
+
+
+add("blp", blp())                                   # valid JPEG, one mip
+add("blp", blp(compression=1, total=0x9C + 0x400 + 8))  # valid paletted
+add("blp", blp(mip_size=0x7fffffff, total=0xA4))    # mip past EOF
+add("blp", blp(jpeg_header=0x7fffffff, total=0xA4)) # JPEG header past EOF
+add("blp", b"BLP1" + bytes(8))                       # too short for the header
 
 for target in [os.path.basename(f)[5:-4] for f in glob.glob(os.path.join(ROOT, "fuzz/fuzz_*.cpp"))]:
     d = os.path.join(out, target)

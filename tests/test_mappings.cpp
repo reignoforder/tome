@@ -200,7 +200,36 @@ TEST(mappings_embedded_files_are_complete) {
             CHECK_EQ(bound.play.handle_first, 0x100000u);
             CHECK_EQ(bound.play.spell_target_x_slot, 243u * 4);
             CHECK_EQ(bound.play.player_state_size, 0x10u);
+            CHECK(bound.blp.open != 0);
         }
     }
     CHECK(found_127b);
+}
+
+// blp-guard's symbols are optional: a build without them still binds (the
+// patch is skipped), but a mistyped one is still an error.
+TEST(mappings_bind_blp_symbols_are_optional) {
+    for (size_t i = 0; i < mappings::kEmbeddedFileCount; ++i) {
+        const mappings::EmbeddedFile& file = mappings::kEmbeddedFiles[i];
+        if (std::string(file.name) != "1.27b.json") continue;
+        mappings::Build b;
+        CHECK(parse_text(file.text, b).ok);
+        std::vector<mappings::Symbol> all = b.symbols;
+        std::erase_if(b.symbols, [](const mappings::Symbol& s) { return s.name.starts_with("CBLPFile"); });
+        CHECK(b.symbols.size() + 4 == all.size());
+        BuildMappings bound;
+        std::vector<std::string> errors;
+        CHECK(bind_build(b, bound, errors));
+        CHECK(errors.empty());
+        CHECK_EQ(bound.blp.open, 0u);
+        CHECK_EQ(bound.blp.header_copy, 0u);
+
+        b.symbols = all;
+        for (mappings::Symbol& s : b.symbols) {
+            if (s.name == "CBLPFile.size") s.kind = mappings::Kind::Constant;
+        }
+        errors.clear();
+        CHECK(!bind_build(b, bound, errors));
+        CHECK_EQ(errors.size(), size_t(1));
+    }
 }

@@ -3,6 +3,7 @@
 #include "core/x86.h"
 #include "guard.h"
 #include "log.h"
+#include "patch.h"
 #include "unwind.h"
 
 #include <windows.h>
@@ -189,15 +190,6 @@ void write_jmp(uint8_t* at, const void* to) {
     at[0] = 0xE9;
     uint32_t rel = reinterpret_cast<uintptr_t>(to) - (reinterpret_cast<uintptr_t>(at) + kJmpSize);
     std::memcpy(at + 1, &rel, 4);
-}
-
-bool readable(uintptr_t address, size_t size) {
-    MEMORY_BASIC_INFORMATION mbi;
-    if (!VirtualQuery(reinterpret_cast<const void*>(address), &mbi, sizeof(mbi)) || mbi.State != MEM_COMMIT) {
-        return false;
-    }
-    if (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)) return false;
-    return address + size <= reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
 }
 
 // Replaces the first 5 bytes with `jmp entry`. When they sit inside one

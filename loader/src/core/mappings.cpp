@@ -338,6 +338,12 @@ bool bind_build(const mappings::Build& build, BuildMappings& out, std::vector<st
             field = sym->value;
         }
     };
+    // For symbols only a built-in patch needs: a build that doesn't map them
+    // still binds (the field stays 0 and patches::install skips that patch),
+    // but one mapped with the wrong kind is still an error.
+    auto bind_optional = [&](const char* name, Kind kind, uint32_t& field) {
+        if (build.find(name)) bind(name, kind, field);
+    };
 
     auto& jass = out.jass;
     bind("BindNative", Kind::Function, jass.bind_native);
@@ -521,6 +527,12 @@ bool bind_build(const mappings::Build& build, BuildMappings& out, std::vector<st
     bind("SyncValue::Destroy", Kind::Function, net.sync_value_destroy);
     bind("NetSendAction", Kind::Function, net.send_action);
     bind("OnNetSyncStoredInteger", Kind::Function, net.on_sync_integer);
+
+    auto& blp = out.blp;  // blp-guard's symbols (patches/blp_guard.cpp)
+    bind_optional("CBLPFile::Open", Kind::Function, blp.open);
+    bind_optional("CBLPFile.buffer", Kind::Offset, blp.buffer_offset);
+    bind_optional("CBLPFile.size", Kind::Offset, blp.size_offset);
+    bind_optional("CBLPFile.header_copy", Kind::Data, blp.header_copy);
     // The handshake writes the names into the action and reads the lobby's
     // text; each must leave room for its 0x100 bytes. (Only if they're all
     // mapped: a missing one is reported above.)

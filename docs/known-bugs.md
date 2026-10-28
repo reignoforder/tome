@@ -158,6 +158,62 @@ is malicious maps, not mods, and a mod can bypass any API boundary anyway, so
 reserving it would only cost mods a useful hook. Content isn't touched — the
 escape vector is the path, not the bytes.
 
+### BLP texture loader reads past the file (`CBLPFile::Open`)
+
+Warcraft III's own BLP1 texture loader trusts the file's header. For each
+mipmap it reads an offset and a size from the 16-slot arrays at header offsets
+`0x1C` and `0x5C` and copies that span out of the loaded file; for a JPEG
+texture (any `compression` at `0x04` but 1) it reads a JPEG-header size at `0x9C`
+and copies that many bytes. None of these is checked against the file's actual
+length, and the mip count is derived from the width/height at `0x0C`/`0x10`
+(down to 1×1), so a crafted `.blp` — a mip offset or size past the end, an
+over-long JPEG header, or dimensions implying more than 16 mip levels — makes
+the loader read past the buffer. In a downloaded map or a mod's assets that's
+a crash (a denial of service) and an out-of-bounds read. Separately,
+`CBLPFile::Open` copies a fixed 0x127-dword (1180-byte) header out of the
+buffer *before* it checks the magic, so a file shorter than that is over-read
+regardless of its contents.
+
+**Fix implemented (BLP guard, built-in patch).** Tome doesn't decode BLPs
+itself and the bug is the game's, so `loader/src/patches/blp_guard.cpp`
+(always on; see `architecture.md`, "Patches") hooks `CBLPFile::Open`, the one
+BLP1 header parser every texture load reaches. Open loads the whole file and
+stores the buffer pointer and its length in the object (`CBLPFile.buffer` at
+`+0x4A4`, `CBLPFile.size` at `+0x4A8` on 1.27b); an AFTER handler reads them
+back and runs the portable validator `tome::blp::reject_reason` over the
+bytes. The validator parses the BLP1 header itself and rejects a file whose
+magic is `BLP1` but which is shorter than its header, has a zero dimension or
+dimensions implying more than 16 mip levels, whose JPEG header runs past the end or past the game's 1180-byte header
+copy (which it's copied from), whose decoded mips run past the end (a
+paletted mip is sized by its dimensions and alpha bits, since the game
+ignores `mipSizes` there), or which is paletted without room for its
+256-entry palette. On a rejection the handler sets the result to 0 — exactly what Open
+returns for a wrong-magic file — so the caller skips the mip/JPEG decode and
+the texture fails to load instead of crashing. The hook is reserved
+(`hooks::reserve`): a mod that dropped it would reopen the hole for every
+texture.
+
+The fixed-size header copy runs inside `CBLPFile::Open` before that AFTER
+handler, so the handler can't prevent its over-read. The patch also rewrites
+the copy site itself (`CBLPFile.header_copy`: the `mov ecx,0x127; rep movsd`)
+to an absolute indirect call to a small detour (`tome_blp_header_copy`) that
+copies only `min(1180, size)` bytes — the length the loader just stored — and
+zero-fills the rest, so no file is ever read past its end. The detour runs
+with the loaded buffer and the destination already in registers and reads the
+size through a variable, so no struct offset is baked into the assembly; for a
+file of 1180 bytes or more it's byte-for-byte the original copy. This rewrite
+is best-effort and keyed to the exact bytes at the site (`patch_bytes` refuses
+a mismatch): if a build doesn't map the site or its bytes differ, the clamp is
+skipped and only the AFTER guard applies, which still refuses every malformed
+file — just after that one bounded, read-only copy.
+
+The decision logic is portable and unit-tested (`core/blp.*`,
+`tests/test_blp.cpp`) and fuzzed (`fuzz/fuzz_blp.cpp`); the e2e test feeds the
+menu a mod whose icon is a malformed BLP shorter than the 1180-byte header
+copy, with a mip past its end, checks the
+clamp is applied, and checks the guard refuses the file without crashing the
+game. Covers maps and mods alike.
+
 ## Fixed only after 1.27b
 
 These are all still present in 1.27b.
