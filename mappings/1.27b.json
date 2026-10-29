@@ -1124,6 +1124,9 @@
     },
     "Option.all": { "kind": "constant", "value": "0x50", "doc": "Options::Save: every option." },
     "Option.adapter": { "kind": "constant", "value": "0x3", "doc": "Video\\adapter (default 0): the display adapter (Direct3D's adapter index) the next start uses; start-up's mode picker (0x44A40) takes only that adapter's modes. COptionsMenu::Save overwrites it with the Options screen's chosen mode's adapter." },
+    "Option.reswidth": { "kind": "constant", "value": "0x0", "doc": "Video\\reswidth: the fullscreen display mode's width (with resheight, colordepth and refreshrate, what start-up picks the mode by)." },
+    "Option.resheight": { "kind": "constant", "value": "0x1", "doc": "Video\\resheight: the fullscreen display mode's height." },
+    "Option.colordepth": { "kind": "constant", "value": "0x2", "doc": "Video\\colordepth: the fullscreen display mode's bits per pixel (32 or 16)." },
     "Option.refreshrate": { "kind": "constant", "value": "0x4", "doc": "Video\\refreshrate (default 75): the fullscreen refresh rate the next start aims for. Start-up (0x449C0 through 0x44A40) picks the adapter's display mode closest to reswidth, resheight, colordepth and refreshrate (sum of squared differences; a mode with refresh 0 ignores it), so a value above every mode's gets the fastest. COptionsMenu::Save overwrites it with the refresh rate of the Options screen's chosen mode." },
     "Option.allyFilter": { "kind": "constant", "value": "0x38", "doc": "Gameplay\\allyFilter (default 1): the ally color mode Alt+A cycles and the minimap button shows, as Get/SetAllyColorFilterState (0x1FF0C0, 0x211B10) read and set it (SetInt, then ApplyValue: it applies at once). The game keeps the last one." },
     "Option.customkeys": { "kind": "constant", "value": "0x3d", "doc": "Gameplay\\customkeys (default 0): the Gameplay panel's Custom Keyboard Shortcuts. When the game builds its unit and ability data (0x350DA0, after start-up's sound and so after the first mod load), 1 makes it lay CustomKeys.txt over the data files (GameData::LoadOverrides). Read once: a change applies from the next start." },
@@ -1164,9 +1167,10 @@
       "kind": "offset", "value": "0xd8",
       "doc": "float: the gamma ramp exponent last passed to SetGamma (1.0 from the constructor). The Gamma option g (0-100) gives (100 - g) / 100 + 0.2."
     },
+    "CGxDevice.display_mode": { "kind": "offset", "value": "0x98", "doc": "The fullscreen display mode, 5 ints: its index in the adapter's list for the format (EnumAdapterModes), width, height, bits per pixel (32, 16 or 15: D3DFMT_X8R8G8B8, R5G6B5, X1R5G5B5 in BuildPresentParams) and refresh rate. All 0 when the game started in a window. Start-up fills it from the Video options (0x449C0)." },
     "CGxDevice.fullscreen": {
       "kind": "offset", "value": "0x9c",
-      "doc": "int: nonzero in fullscreen, 0 in a window (both renderers). 0x138990 returns it negated; the gamma setters (D3D 0x13F870, OpenGL 0x13AD60) send a ramp only when it's set. gl-context-restore reads it."
+      "doc": "int: the width of the fullscreen display mode (CGxDevice.display_mode + 4), 0 in a window (both renderers), so nonzero means fullscreen. 0x138990 returns it negated; the gamma setters (D3D 0x13F870, OpenGL 0x13AD60) send a ramp only when it's set. gl-context-restore reads it."
     },
     "CGxDeviceD3d.window": {
       "kind": "offset", "value": "0x574",
