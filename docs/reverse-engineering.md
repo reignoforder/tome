@@ -752,6 +752,36 @@ Morph Alternate" (667 ms) raises it.
   panel interior spans roughly x 0.025–0.41, y −0.085 to −0.50.
 - The UI coordinate space is 0.8 × 0.6, stretched to the window.
 
+### Camera projection (for the widescreen patch)
+
+Found from the six calls to `tan` (`_libm_sse2_tan_precise`, import
+`0xA7C4AC`, thunk `0x78F7BC`); four are in small float wrappers.
+
+| What | RVA | Notes |
+|------|-----|-------|
+| C44Matrix::Perspective | `0x126E30` | `void __thiscall(float* m, float fov, float aspect, float near, float far)`, `ret 0x10`. `t = tan(fov · 0.5 / sqrt(aspect² + 1))` (fov is spread over the diagonal), `m[0] = 1/(t·aspect)`, `m[5] = 1/t`, `m[10] = (far+near)/(far−near)`, `m[11] = 1`, `m[14] = −2·far·near/(far−near)`, the rest 0. Only caller: `0x1ADF40`. The off-center variant just before it (`ret 0x18`) has no `tan`. |
+| CCamera::SetupProjection | `0x1ADF40` | `__thiscall(camera, rect*, unused)`, `ret 8` (its one caller, the wrapper at `0x1ADE90`, takes the rect in `edx` and one stack argument and pushes both; `ret 4`). fov from camera `+0x114` (1.0466 in a game), near `+0xCC` (331), far `+0xAC` (70000), aspect from the viewport rect, which is in UI units: 1.3333 for the world view in every window shape (measured at 1272 × 686). |
+| WorldView::SetupCamera | `0x3640F0` | `void __thiscall(this, float delta, const float* rect)`, `ret 8` (name guessed). If `this+0x38` is 1, first `0x1A2C10` on `+0x5C` with delta; then the wrapper `0x1ADE90` with the camera at `+0x34`. Once per frame, in games only, from the world frame's update (`0x385D55`, `this` = its `+0x19C`). |
+
+Measured in a game at 16:9: `m[0] = 2.3098`, `m[5] = 3.0797` (ratio 0.75,
+correct only for 4:3). Scaling `m[0]` by (4/3) / (window width / height)
+after Perspective gives correct proportions, and mouse picking follows (a
+move order at 90% of the width lands under the cursor), so picking reads
+the same matrix.
+
+Every camera reaches Perspective through the wrapper `0x1ADE90`, which has
+three callers. Counted per 2 s at 16:9 by hooking the wrapper:
+
+| Caller | Where | Calls | What |
+|--------|-------|-------|------|
+| `0x3640F0` (WorldView::SetupCamera) | games | ~1 per frame | the world view |
+| `0x0F64E0` | main menu and games | ~3 per frame in a game | 3D models in UI frames (camera at frame `+0x140`, rect at `+0x12C`): portrait, clock and the like |
+| `0x78D0E0` | main menu only | ~1 per frame | the main menu's 3D background |
+
+Only the world view may be widened: the others sit in 2D art that is still
+stretched, so the widescreen patch scales only Perspective calls made while
+WorldView::SetupCamera runs.
+
 ## Storm
 
 game.dll imports Storm **by ordinal** only. Those Tome uses, all checked against

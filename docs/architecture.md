@@ -762,6 +762,19 @@ reason to make a fix a patch rather than ship it as a mod.
   (right before Reset; the teardown's call with 1 is left alone), which frees
   the slots; `RestoreState` enables them again. Skipped outside Wine
   (`needed`). Reserves nothing.
+- **widescreen** (`patches/widescreen.cpp`, `docs/known-bugs.md`,
+  "Stretched picture on widescreen"): the world view is built for 4:3 and
+  stretched to any other window shape. An AFTER handler on
+  `C44Matrix::Perspective` scales the projection's x term (or, narrower
+  than 4:3, its y term) by the client area's aspect against 4:3
+  (`core/widescreen.*`, unit-tested), so more of the map shows instead.
+  Only while `WorldView::SetupCamera` runs (BEFORE/AFTER handlers there):
+  3D models in UI frames and the main menu's 3D background stay as they
+  are, matching their stretched 2D art. The window size comes from
+  `main_thread::client_size` (kept from `WM_SIZE`), not a call per frame.
+  Picking reads the same matrix. The player can turn it off (Tome >
+  Settings > Widescreen, on by default); it's checked every frame. Only
+  the 3D view: the UI is still stretched. Reserves nothing.
 - **gl-context-restore** (`patches/gl_context_restore.cpp`,
   `docs/known-bugs.md`, "Under Wine"): with the OpenGL renderer in
   fullscreen under Wine, coming back from Alt+Tab leaves most textures
@@ -1024,8 +1037,10 @@ API version 4 (`hook`, `unhook`, `hook_call_next` in `tome.h`).
   Details and Enable/Disable), Details (metadata, status, every problem in
   full: metadata errors, the crash line and its "called from" line as
   logged, schema errors, warnings, waiting assets; Enable/Disable,
-  Settings), Settings, Tome (versions, mods folder, safe mode, Keybinds,
-  Mods Folder) and Keybinds. `build()` turns a page into a generic view
+  Settings), Settings, Tome (versions, mods folder, safe mode, Settings,
+  Mods Folder), Tome's Settings (Tome's own settings, `core/tome_settings.*`,
+  shown like a mod's and saved in `tome/settings.json` by
+  `tome_settings.cpp`; Keybinds in its footer) and Keybinds. `build()` turns a page into a generic view
   (title, summary, rows of name/info/small button/button, or a text body,
   and four footer buttons); `click_row`/`click_footer` change the page and
   return an action (enable, set a setting, set a key, safe mode, ...) that
@@ -1322,7 +1337,13 @@ API version 10: `popup`, `popup_close`, `restart_game`.
   neither the user's prefix nor their settings matter; and, with
   `HEADLESS=1` (the default), an Xvfb server of its own with Mesa's
   software OpenGL, so the window always has the focus, `SetCursorPos`
-  moves only that server's pointer and no GPU is needed. Stopping uses
+  moves only that server's pointer and no GPU is needed. Where no sound
+  server runs (containers, CI) it starts a silent PulseAudio one (a null
+  sink): without a sound device the game shows a modal "Unable to
+  initialize base sound services" dialog over the main menu that takes
+  every click. The prefix is remade when Wine changes (its version and DLL
+  list are recorded), since Wine copies its DLLs into a prefix only when
+  it makes it. Stopping uses
   `wineserver -k` on the test prefix, and "is it running" looks for
   `war3.exe` processes with that `WINEPREFIX`, so the user's own game is
   never touched. `TOME_DEBUG_CLICKS` items can also be `type:<text>@ms`:

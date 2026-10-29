@@ -27,6 +27,7 @@ BUILD="$(realpath -m "${BUILD:-$ROOT/build}")"
 source "$ROOT/tools/test-env.sh"
 GAME="$BUILD/test-env/game"
 STATE_FILE="$BUILD/test-env/display"  # "<Xvfb pid> <display>" of a headless game
+AUDIO_FILE="$BUILD/test-env/audio"  # there while a PulseAudio started by start runs
 LOG_DIR="$GAME"
 if [[ -n "${TOME_HOME:-}" ]]; then
     LOG_DIR="$(winepath -u "$TOME_HOME" 2>/dev/null || echo "$GAME")"
@@ -63,12 +64,18 @@ start)
         echo "$XVFB_PID $XVFB_DISPLAY" >"$STATE_FILE"
         disown "$XVFB_PID" 2>/dev/null
     fi
+    env_audio_start  # left running (the game outlives this script) until stop
+    ((AUDIO_STARTED)) && touch "$AUDIO_FILE"
     rm -f "$LOG"
     (cd "$GAME" && DISPLAY="$(env_display)" setsid env "${envs[@]}" wine war3.exe -window -opengl "$@" \
         >/dev/null 2>&1 &)
     ;;
 stop)
     stop
+    if [[ -f "$AUDIO_FILE" ]]; then
+        AUDIO_STARTED=1; env_audio_stop
+        rm -f "$AUDIO_FILE"
+    fi
     ;;
 wait)
     pattern="${2:?usage: game.sh wait <regex> [seconds]}"

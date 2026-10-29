@@ -1,4 +1,5 @@
 #include "core/mod_menu_model.h"
+#include "core/tome_settings.h"
 #include "test.h"
 
 using namespace tome;
@@ -23,7 +24,9 @@ ModStatus mod(const char* id, bool running) {
 Data data_with(int count) {
     Data d;
     for (int i = 0; i < count; ++i) d.mods.push_back(mod(("m" + std::to_string(i)).c_str(), i % 2 == 0));
-    d.tome = {"0.1.0", "1.27b (1.27.1.7085)", "C:\\Games\\WarCraft III\\mods", ""};
+    d.tome.version = "0.1.0";
+    d.tome.game_build = "1.27b (1.27.1.7085)";
+    d.tome.mods_dir = "C:\\Games\\WarCraft III\\mods";
     return d;
 }
 
@@ -237,7 +240,10 @@ TEST(menu_keybinds_capture) {
     Action safe = click_footer(s, d, 4, 0);
     CHECK(safe.kind == Action::SetSafeMode);
     CHECK(safe.flag);
-    click_footer(s, d, 4, 1);  // Keybinds
+    CHECK_EQ(tome.footer[1], std::string("Settings"));
+    click_footer(s, d, 4, 1);  // Settings
+    CHECK(s.page == Page::TomeSettings);
+    click_footer(s, d, 4, 2);  // Keybinds
     CHECK(s.page == Page::Keybinds);
     CHECK_EQ(build(s, d, 4).rows[0].button, std::string("Ctrl+H"));
     CHECK(build(s, d, 4).rows[0].small.empty());  // the default: nothing to reset
@@ -284,6 +290,8 @@ TEST(menu_keybinds_capture) {
     d.keybinds.erase(d.keybinds.begin());
     CHECK(click_footer(s, d, 4, 2).kind == Action::ResetKeys);
     click_footer(s, d, 4, 3);
+    CHECK(s.page == Page::TomeSettings);
+    click_footer(s, d, 4, 3);
     CHECK(s.page == Page::Tome);
 }
 
@@ -298,11 +306,46 @@ TEST(menu_back) {
     CHECK(s.page == Page::List);
     CHECK(back(s).kind == Action::Close);
     click_footer(s, d, 4, 2);  // Tome
-    click_footer(s, d, 4, 1);  // Keybinds
+    click_footer(s, d, 4, 1);  // Settings
+    click_footer(s, d, 4, 2);  // Keybinds
     s.capture = 0;
     back(s);
     CHECK(s.page == Page::Keybinds);  // the first Esc only cancels the capture
     back(s);
+    CHECK(s.page == Page::TomeSettings);
+    back(s);
+    CHECK(s.page == Page::Tome);
+}
+
+TEST(menu_tome_settings_page) {
+    Data d = data_with(1);
+    d.tome.settings = tome_settings::schema();
+    std::vector<std::string> warnings;
+    d.tome.settings_values = settings::load_values(d.tome.settings, json::Value(), warnings);
+    State s;
+    click_footer(s, d, 4, 2);  // Tome
+    click_footer(s, d, 4, 1);  // Settings
+    CHECK(s.page == Page::TomeSettings);
+    View v = build(s, d, 4);
+    CHECK_EQ(v.title, std::string("Settings"));
+    CHECK_EQ(v.summary, std::string("Tome"));
+    CHECK_EQ(v.rows[0].name, std::string("Widescreen"));
+    CHECK_EQ(v.rows[0].button, std::string("On"));
+    CHECK(!v.rows[0].info.empty());
+    CHECK(v.footer[0].empty());  // one page
+    CHECK_EQ(v.footer[2], std::string("Keybinds"));
+    CHECK_EQ(v.footer[3], std::string("Back"));
+
+    Action a = click_row(s, d, 4, 0, false);
+    CHECK(a.kind == Action::SetTomeSetting);
+    CHECK(a.mod.empty());
+    CHECK_EQ(a.key, std::string("widescreen"));
+    CHECK(a.value.is_bool() && !a.value.as_bool());
+    CHECK(click_row(s, d, 4, 1, false).kind == Action::None);  // the description's spare row
+
+    d.tome.settings_values.set("widescreen", json::Value::boolean(false));
+    CHECK_EQ(build(s, d, 4).rows[0].button, std::string("Off"));
+    CHECK(back(s).kind == Action::None);
     CHECK(s.page == Page::Tome);
 }
 

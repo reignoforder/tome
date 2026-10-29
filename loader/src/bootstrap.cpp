@@ -16,6 +16,7 @@
 #include "overlay.h"
 #include "patches.h"
 #include "paths.h"
+#include "tome_settings.h"
 #include "watcher.h"
 
 #include <string>
@@ -239,6 +240,7 @@ DWORD bootstrap() {
     natives::set_mods_ready();
     overlay::log_probe();
 
+    tome_settings::init(g_paths);
     HWND window = find_game_window(60000);
     if (window && main_thread::install(window)) {
         TOME_INFO("Main-thread dispatcher installed on the game window (main thread %lu)",

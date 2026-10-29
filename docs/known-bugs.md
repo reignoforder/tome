@@ -263,6 +263,31 @@ and crash threads. Which patch each was observed on isn't confirmed.
 - `SetItemPosition` crashes in some situations (`CreateItem` plus
   `RemoveItem` is the reported workaround).
 
+## Stretched picture on widescreen
+
+In a window or resolution that isn't 4:3 (16:9, 16:10, 21:9), 1.27b draws
+the 4:3 picture stretched to fit: units and buildings are a third too wide
+at 16:9, the view shows no more of the map than at 4:3, and the UI is
+stretched the same way (round minimap icons become ovals). 1.29 fixed it
+with real widescreen (official). Checked under Wine on Booty Bay at 800 ×
+600 and 1280 × 720: the same framing in both, every object 4/3 too wide.
+
+The cause is the camera: its projection is built from its viewport in the
+0.8 × 0.6 UI space, so the world camera always gets aspect 4/3
+(`C44Matrix::Perspective`, `docs/reverse-engineering.md`, "Camera
+projection"). **Fixed in Tome for the world view (widescreen, built-in
+patch, on by default, Tome > Settings > Widescreen):** an AFTER handler on
+Perspective scales the world camera's matrix (only the calls made from
+`WorldView::SetupCamera`) by (4/3) / the window's aspect, so the view keeps
+its height and shows more at the sides, as in 1.29; a window narrower than
+4:3 (5:4) shows more at the top and bottom instead. At 4:3 nothing changes.
+3D models inside the UI (portraits, the main menu's background) are left
+alone, since their 2D frames are still stretched. Mouse picking uses the same matrix: checked with a
+selection and a move order at 90% of the width. **Still open:** the 2D UI
+(console, top bar, command card, minimap) stays stretched, and the
+minimap's camera box keeps its 4:3 size. Like 1.29, a wider window sees more
+of the map in multiplayer.
+
 ## Multiplayer cheating
 
 Nothing reliable specific to 1.27b turned up. Client-side maphacks

@@ -5,6 +5,7 @@
 #include "core/main_menu_fdf.h"
 #include "core/mod_menu_model.h"
 #include "core/popup.h"
+#include "core/tome_settings.h"
 #include "frames.h"
 #include "hooks.h"
 #include "keybinds.h"
@@ -15,6 +16,7 @@
 #include "patch.h"
 #include "popups.h"
 #include "restart.h"
+#include "tome_settings.h"
 
 #include <windows.h>
 #include <shellapi.h>
@@ -111,6 +113,8 @@ menu::Data gather() {
     data.tome.game_build = g_build->data->name + " (" + g_build->data->file_version + ")";
     data.tome.mods_dir = narrow(mod_manager().paths().mods_dir);
     data.tome.safe_mode = mod_manager().safe_mode();
+    data.tome.settings = tome_settings::schema();
+    data.tome.settings_values = tome_settings::values();
     return data;
 }
 
@@ -183,9 +187,24 @@ void* icon_frame(Panel& p, const std::string& definition, int row) {
 
 // --- text boxes ----------------------------------------------------------------
 
+// Carries out a SetSetting or SetTomeSetting; false for any other action.
+bool store_setting(const menu::Action& action) {
+    std::string error;
+    bool ok;
+    if (action.kind == menu::Action::SetSetting) {
+        ok = mod_manager().set_setting(action.mod, action.key, action.value, error) == TOME_OK;
+    } else if (action.kind == menu::Action::SetTomeSetting) {
+        ok = tome_settings::set(action.key, action.value, error);
+    } else {
+        return false;
+    }
+    if (!ok) TOME_WARN("Mod menu: %s", error.c_str());
+    return true;
+}
+
 // Saves what the player typed into the page's text boxes.
 void save_edits(Panel& p) {
-    if (!p.open || p.state.page != menu::Page::Settings) return;
+    if (!p.open || !menu::is_settings_page(p.state.page)) return;
     const int rows = ui::menu_rows(p.style);
     menu::Data data = gather();
     menu::View view = menu::build(p.state, data, rows);
@@ -193,12 +212,7 @@ void save_edits(Panel& p) {
         if (!view.rows[row].editable) continue;
         std::string text;
         if (!frames::edit_text(frame(ui::menu_row_frame(p.style, row, "Edit")), text)) continue;
-        menu::Action action = menu::edit_row(p.state, data, rows, row, text);
-        if (action.kind != menu::Action::SetSetting) continue;
-        std::string error;
-        if (mod_manager().set_setting(action.mod, action.key, action.value, error) != TOME_OK) {
-            TOME_WARN("Mod menu: %s", error.c_str());
-        }
+        store_setting(menu::edit_row(p.state, data, rows, row, text));
     }
 }
 
@@ -299,13 +313,8 @@ void apply(Panel& p, const menu::Action& action) {
         offer_restart(before, p.style == MenuStyle::Esc);
         break;
     }
-    case menu::Action::SetSetting: {
-        std::string error;
-        if (mod_manager().set_setting(action.mod, action.key, action.value, error) != TOME_OK) {
-            TOME_WARN("Mod menu: %s", error.c_str());
-        }
-        break;
-    }
+    case menu::Action::SetSetting:
+    case menu::Action::SetTomeSetting: store_setting(action); break;
     case menu::Action::ResetSettings: mod_manager().reset_settings(action.mod); break;
     case menu::Action::SetKey: keybinds::set(action.mod, action.key, action.key_value); break;
     case menu::Action::ResetKeys: keybinds::reset_all(); break;

@@ -37,15 +37,23 @@ int page_count(size_t items, int rows) {
 constexpr int kSettingRows = 2;
 constexpr size_t kSettingInfoMax = 150;
 
+} // namespace
+
+bool is_settings_page(Page page) {
+    return page == Page::Settings || page == Page::TomeSettings;
+}
+
+namespace {
+
 // Items (mods, settings, keybinds) on a page of `rows` rows.
 int per_page(const State& state, int rows) {
-    return state.page == Page::Settings ? std::max(1, rows / kSettingRows) : rows;
+    return is_settings_page(state.page) ? std::max(1, rows / kSettingRows) : rows;
 }
 
 // The item shown on row `row` of the page (from its first one), or -1 for
 // a row that only gives the one above it room.
 int item_on_row(const State& state, int row) {
-    if (state.page != Page::Settings) return row;
+    if (!is_settings_page(state.page)) return row;
     return row % kSettingRows == 0 ? row / kSettingRows : -1;
 }
 
@@ -55,6 +63,36 @@ const ModStatus* find_mod(const Data& data, const std::string& folder) {
         if (m.folder == folder) return &m;
     }
     return nullptr;
+}
+
+// What a settings page shows: the mod's settings (Settings) or Tome's own
+// (TomeSettings, mod null). Null schema and values on other pages and for a
+// mod that's gone.
+struct SettingsSource {
+    const settings::Schema* schema = nullptr;
+    const json::Value* values = nullptr;
+    const ModStatus* mod = nullptr;
+};
+
+SettingsSource settings_source(const State& state, const Data& data) {
+    if (state.page == Page::TomeSettings) return {&data.tome.settings, &data.tome.settings_values, nullptr};
+    if (state.page != Page::Settings) return {};
+    const ModStatus* m = find_mod(data, state.mod);
+    return m ? SettingsSource{&m->settings, &m->settings_values, m} : SettingsSource{};
+}
+
+// The action that gives setting `key` of `source` (schema set) a new value.
+Action set_setting(const SettingsSource& source, const std::string& key, json::Value value) {
+    Action action;
+    if (source.mod) {
+        action.kind = Action::SetSetting;
+        action.mod = source.mod->id;
+    } else {
+        action.kind = Action::SetTomeSetting;
+    }
+    action.key = key;
+    action.value = std::move(value);
+    return action;
 }
 
 // A mod whose tome.mod.json couldn't be used has nothing to turn on.
@@ -181,14 +219,15 @@ void build_list(const State& state, const Data& data, int rows, View& view) {
     view.footer[3] = "Done";
 }
 
-void build_settings(const State& state, const ModStatus& m, int rows, View& view) {
+// A settings page's rows and its Previous and Next; the caller adds the rest.
+void build_settings(const State& state, const SettingsSource& source, int rows, View& view) {
     view.title = "Settings";
-    view.summary = ellipsize(display_name(m), 40);
+    const std::vector<settings::Setting>& all = source.schema->settings;
     for (int item = 0; item < per_page(state, rows); ++item) {
         size_t index = static_cast<size_t>(state.first + item);
-        if (index >= m.settings.settings.size()) break;
-        const settings::Setting& s = m.settings.settings[index];
-        const json::Value* found = m.settings_values.find(s.key);
+        if (index >= all.size()) break;
+        const settings::Setting& s = all[index];
+        const json::Value* found = source.values->find(s.key);
         const json::Value& value = found ? *found : s.fallback;
         std::string shown = settings::display(s, value);
         Row r;
@@ -226,12 +265,10 @@ void build_settings(const State& state, const ModStatus& m, int rows, View& view
         view.rows.push_back(std::move(r));
         for (int spare = 1; spare < kSettingRows; ++spare) view.rows.push_back(Row());
     }
-    if (page_count(m.settings.settings.size(), per_page(state, rows)) > 1) {
+    if (page_count(all.size(), per_page(state, rows)) > 1) {
         view.footer[0] = "Previous";
         view.footer[1] = "Next";
     }
-    view.footer[2] = "Defaults";
-    view.footer[3] = "Back";
 }
 
 void build_keybinds(const State& state, const Data& data, int rows, View& view) {
@@ -284,7 +321,7 @@ void build_tome(const Data& data, View& view) {
     }
     view.body = body;
     view.footer[0] = data.tome.safe_mode.empty() ? "Safe Mode" : "Normal Mode";
-    view.footer[1] = "Keybinds";
+    view.footer[1] = "Settings";
     view.footer[2] = "Mods Folder";
     view.footer[3] = "Back";
 }
@@ -296,9 +333,10 @@ int& first_of(State& state) {
 size_t item_count(const State& state, const Data& data) {
     switch (state.page) {
     case Page::List: return data.mods.size();
-    case Page::Settings: {
-        const ModStatus* m = find_mod(data, state.mod);
-        return m ? m->settings.settings.size() : 0;
+    case Page::Settings:
+    case Page::TomeSettings: {
+        SettingsSource source = settings_source(state, data);
+        return source.schema ? source.schema->settings.size() : 0;
     }
     case Page::Keybinds: return data.keybinds.size();
     default: return 0;
@@ -337,7 +375,17 @@ View build(const State& state, const Data& data, int rows) {
         view.footer[3] = "Back";
         break;
     case Page::Settings:
-        if (m) build_settings(state, *m, rows, view);
+        if (!m) break;
+        build_settings(state, settings_source(state, data), rows, view);
+        view.summary = ellipsize(display_name(*m), 40);
+        view.footer[2] = "Defaults";
+        view.footer[3] = "Back";
+        break;
+    case Page::TomeSettings:
+        build_settings(state, settings_source(state, data), rows, view);
+        view.summary = "Tome";
+        view.footer[2] = "Keybinds";
+        view.footer[3] = "Back";
         break;
     case Page::Tome: build_tome(data, view); break;
     case Page::Keybinds: build_keybinds(state, data, rows, view); break;
@@ -363,17 +411,15 @@ Action click_row(State& state, const Data& data, int rows, int row, bool small) 
         }
         break;
     }
-    case Page::Settings: {
-        const ModStatus* m = find_mod(data, state.mod);
-        if (!m || index >= static_cast<int>(m->settings.settings.size())) break;
-        const settings::Setting& s = m->settings.settings[static_cast<size_t>(index)];
+    case Page::Settings:
+    case Page::TomeSettings: {
+        SettingsSource source = settings_source(state, data);
+        if (!source.schema || index >= static_cast<int>(source.schema->settings.size())) break;
+        const settings::Setting& s = source.schema->settings[static_cast<size_t>(index)];
         if (s.type == settings::Type::String && s.choices.empty()) break;
         if (s.text_input) break;
-        const json::Value* found = m->settings_values.find(s.key);
-        action.kind = Action::SetSetting;
-        action.mod = m->id;
-        action.key = s.key;
-        action.value = settings::step(s, found ? *found : s.fallback, small ? -1 : 1);
+        const json::Value* found = source.values->find(s.key);
+        action = set_setting(source, s.key, settings::step(s, found ? *found : s.fallback, small ? -1 : 1));
         break;
     }
     case Page::Keybinds: {
@@ -399,12 +445,12 @@ Action click_row(State& state, const Data& data, int rows, int row, bool small) 
 
 Action edit_row(State& state, const Data& data, int rows, int row, const std::string& text) {
     Action action;
-    if (state.page != Page::Settings || row < 0 || row >= rows || item_on_row(state, row) < 0) return action;
-    const ModStatus* m = find_mod(data, state.mod);
+    if (!is_settings_page(state.page) || row < 0 || row >= rows || item_on_row(state, row) < 0) return action;
+    SettingsSource source = settings_source(state, data);
     size_t index = static_cast<size_t>(state.first + item_on_row(state, row));
-    if (!m || index >= m->settings.settings.size()) return action;
-    const settings::Setting& s = m->settings.settings[index];
-    const json::Value* found = m->settings_values.find(s.key);
+    if (!source.schema || index >= source.schema->settings.size()) return action;
+    const settings::Setting& s = source.schema->settings[index];
+    const json::Value* found = source.values->find(s.key);
     json::Value value;
     if (s.text_input) {
         // Untouched: the box still shows the value as display() wrote it,
@@ -421,11 +467,7 @@ Action edit_row(State& state, const Data& data, int rows, int row, const std::st
     } else {
         return action;
     }
-    action.kind = Action::SetSetting;
-    action.mod = m->id;
-    action.key = s.key;
-    action.value = value;
-    return action;
+    return set_setting(source, s.key, std::move(value));
 }
 
 Action back(State& state) {
@@ -439,7 +481,8 @@ Action back(State& state) {
     case Page::Details: go(state, Page::List); break;
     case Page::Settings: go(state, Page::Details); break;
     case Page::Tome: go(state, Page::List); break;
-    case Page::Keybinds: go(state, Page::Tome); break;
+    case Page::TomeSettings: go(state, Page::Tome); break;
+    case Page::Keybinds: go(state, Page::TomeSettings); break;
     }
     return action;
 }
@@ -478,12 +521,17 @@ Action click_footer(State& state, const Data& data, int rows, int button) {
             action.kind = Action::SetSafeMode;
             action.flag = data.tome.safe_mode.empty();
         } else if (button == 1) {
-            go(state, Page::Keybinds);
+            go(state, Page::TomeSettings);
         } else if (button == 2) {
             action.kind = Action::OpenModsFolder;
         } else if (button == 3) {
             go(state, Page::List);
         }
+        break;
+    case Page::TomeSettings:
+        if (button == 0 || button == 1) turn_page(state, data, rows, button == 0 ? -1 : 1);
+        else if (button == 2) go(state, Page::Keybinds);
+        else if (button == 3) go(state, Page::Tome);
         break;
     case Page::Keybinds:
         if (button == 0 || button == 1) turn_page(state, data, rows, button == 0 ? -1 : 1);
@@ -491,7 +539,7 @@ Action click_footer(State& state, const Data& data, int rows, int button) {
             state.capture = -1;
             action.kind = Action::ResetKeys;
         } else if (button == 3) {
-            go(state, Page::Tome);
+            go(state, Page::TomeSettings);
         }
         break;
     }

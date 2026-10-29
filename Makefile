@@ -86,11 +86,13 @@ clean:
 # your files.
 
 # Wine wants a HOME owned by the user, so it's a folder in the build; so is
-# TMPDIR, so files E2E_KEEP=1 keeps outlive the container.
+# TMPDIR, so files E2E_KEEP=1 keeps outlive the container, and the runtime
+# folder for the sound server (tools/test-env.sh).
 CONTAINER_BUILD = build-container
 HAVE_GAME     = $(shell test -f "$(GAME_DIR)/war3.exe" && echo yes)
 CONTAINER_RUN = $(ENGINE) run --rm -i $(if $(shell test -t 0 && echo yes),-t) \
                 --security-opt label=disable -v "$(CURDIR):/src" -w /src -e HOME=/src/$(CONTAINER_BUILD)/home -e TMPDIR=/src/$(CONTAINER_BUILD)/tmp \
+                -e XDG_RUNTIME_DIR=/src/$(CONTAINER_BUILD)/run \
                 $(if $(filter podman,$(ENGINE)),--userns=keep-id,--user $$(id -u):$$(id -g)) \
                 $(if $(HAVE_GAME),-v "$(GAME_DIR):/game:ro" -e GAME_DIR=/game) $(IMAGE)
 
@@ -100,12 +102,15 @@ container:
 
 container-shell: container
 	mkdir -p $(CONTAINER_BUILD)/home $(CONTAINER_BUILD)/tmp
+	mkdir -p -m 700 $(CONTAINER_BUILD)/run
 	$(CONTAINER_RUN) bash
 
 container-test: container
 	mkdir -p $(CONTAINER_BUILD)/home $(CONTAINER_BUILD)/tmp
+	mkdir -p -m 700 $(CONTAINER_BUILD)/run
 	$(CONTAINER_RUN) make test BUILD=$(CONTAINER_BUILD)
 
 container-e2e: container
 	mkdir -p $(CONTAINER_BUILD)/home $(CONTAINER_BUILD)/tmp
+	mkdir -p -m 700 $(CONTAINER_BUILD)/run
 	$(CONTAINER_RUN) env E2E_KEEP=$(E2E_KEEP) make e2e BUILD=$(CONTAINER_BUILD)

@@ -18,6 +18,11 @@ bool install(HWND game_window);
 bool installed();
 HWND window();
 
+// The game window's client area in pixels, kept from WM_SIZE (0, 0 while
+// minimized or before install), so code that runs every frame doesn't ask
+// Windows for it. Any thread.
+void client_size(int& width, int& height);
+
 // Queues `fn` for the main thread. If the dispatcher isn't installed (no game
 // window found), runs it immediately on the calling thread instead.
 void post(std::function<void()> fn);

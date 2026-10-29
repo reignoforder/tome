@@ -59,6 +59,10 @@ default) puts it in its own Xvfb; `tools/game.sh` shows it on screen unless
 - **Never kill the game with `pkill -f`/`pgrep -f` and a pattern.** It also
   matches your own shell. Use `tools/game.sh stop`, which ends only the
   test prefix's programs (`wineserver -k`), never the user's own game.
+- **No sound device, no clicks:** without a sound server the game opens a
+  modal sound dialog over the main menu; `tools/test-env.sh` starts a
+  silent PulseAudio where none runs. The container needs `LANG=C.UTF-8`
+  (the scripts' UTF-8 text breaks bash and the checks in the C locale).
 - **One test game at a time** (the e2e test and `tools/game.sh` share the
   test prefix). The user's own game may run alongside, but takes the LAN port.
 - **Tests must use `TOME_HOME`** (a temp folder), never the real `tome/mods/` folder.

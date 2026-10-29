@@ -3,6 +3,8 @@
 #include "log.h"
 #include "unwind.h"
 
+#include <atomic>
+#include <cstdint>
 #include <deque>
 #include <utility>
 
@@ -16,6 +18,11 @@ UINT g_message = 0;
 KeyHook g_key_hook = nullptr;
 ActivateHook g_activate_hook = nullptr;
 DestroyHook g_destroy_hook = nullptr;
+std::atomic<uint32_t> g_client_size{0};  // width in the low half, height in the high half
+
+void store_client_size(uint32_t width, uint32_t height) {
+    g_client_size = (width & 0xFFFF) | (height << 16);
+}
 
 SRWLOCK g_lock = SRWLOCK_INIT;
 std::deque<std::function<void()>> g_queue;
@@ -41,6 +48,7 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) 
     if ((msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) && g_key_hook && g_key_hook(msg, wparam, lparam)) return 0;
     if (msg == WM_ACTIVATEAPP && g_activate_hook) g_activate_hook(wparam != 0);
     if (msg == WM_DESTROY && g_destroy_hook) g_destroy_hook();
+    if (msg == WM_SIZE) store_client_size(LOWORD(lparam), HIWORD(lparam));
     return g_unicode ? CallWindowProcW(g_original_proc, hwnd, msg, wparam, lparam)
                      : CallWindowProcA(g_original_proc, hwnd, msg, wparam, lparam);
 }
@@ -63,10 +71,21 @@ bool install(HWND game_window) {
     }
     g_original_proc = reinterpret_cast<WNDPROC>(previous);
     g_window = game_window;
+    RECT client{};
+    if (GetClientRect(game_window, &client)) {
+        store_client_size(static_cast<uint32_t>(client.right - client.left),
+                          static_cast<uint32_t>(client.bottom - client.top));
+    }
 
     // Run anything queued before the window existed.
     PostMessageW(g_window, g_message, 0, 0);
     return true;
+}
+
+void client_size(int& width, int& height) {
+    uint32_t size = g_client_size.load(std::memory_order_relaxed);
+    width = static_cast<int>(size & 0xFFFF);
+    height = static_cast<int>(size >> 16);
 }
 
 bool installed() {

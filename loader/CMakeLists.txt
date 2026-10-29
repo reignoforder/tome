@@ -32,9 +32,11 @@ add_library(tome_core STATIC
     src/core/resolver.cpp
     src/core/rtti.cpp
     src/core/settings.cpp
+    src/core/tome_settings.cpp
     src/core/units.cpp
     src/core/verify.cpp
     src/core/version.cpp
+    src/core/widescreen.cpp
     src/core/x86.cpp
     src/core/zip.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/generated/embedded_mappings.cpp
@@ -72,12 +74,14 @@ add_library(tome_loader SHARED
     src/patches/gl_context_restore.cpp
     src/patches/memhack_guard.cpp
     src/patches/path_sanitizer.cpp
+    src/patches/widescreen.cpp
     src/paths.cpp
     src/popups.cpp
     src/restart.cpp
     src/settings_api.cpp
     src/sha256.cpp
     src/storm.cpp
+    src/tome_settings.cpp
     src/units.cpp
     src/unwind.cpp
     src/watcher.cpp

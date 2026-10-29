@@ -13,7 +13,9 @@
 //   Details   one mod's metadata and problems; footer Enable/Disable, Settings, Back
 //   Settings  generated from the mod's config.schema.json, two rows per setting (the second
 //             leaves room for the description); footer Previous, Next, Defaults, Back
-//   Tome      versions, mods folder, safe mode; footer Safe Mode, Keybinds, Mods Folder, Back
+//   Tome      versions, mods folder, safe mode; footer Safe Mode, Settings, Mods Folder, Back
+//   TomeSettings  Tome's own settings (core/tome_settings.h), laid out like a mod's;
+//             footer Previous, Next, Keybinds, Back
 //   Keybinds  every mod's keybinds with conflicts; footer Previous, Next, Defaults, Back
 
 #include "json.h"
@@ -26,7 +28,7 @@
 
 namespace tome::menu {
 
-enum class Page { List, Details, Settings, Tome, Keybinds };
+enum class Page { List, Details, Settings, Tome, TomeSettings, Keybinds };
 
 constexpr int kFooterButtons = 4;
 
@@ -53,6 +55,8 @@ struct TomeInfo {
     std::string game_build;  // e.g. "1.27b (1.27.1.7085)"
     std::string mods_dir;
     std::string safe_mode;   // why safe mode is on; "" if it isn't
+    settings::Schema settings;    // Tome's own (core/tome_settings.h)
+    json::Value settings_values;  // ...and their values
 };
 
 struct Data {
@@ -82,6 +86,7 @@ struct Action {
         SetKey,         // mod, key (the keybind's id), key_value
         ResetKeys,      // every keybind back to its default
         SetSafeMode,    // flag
+        SetTomeSetting, // key, value: one of Tome's own settings
         OpenModsFolder,
     };
     Kind kind = None;
@@ -94,9 +99,13 @@ struct Action {
 
 View build(const State& state, const Data& data, int rows);
 
+// Settings or TomeSettings: a page of settings, with text boxes.
+bool is_settings_page(Page page);
+
 // The text box of row `row` was confirmed (Enter, or leaving the page)
 // with `text`: a free-text setting, or a number typed in ("input": "text").
-// Action::None if the value didn't change or the text isn't a number.
+// Action::None if the value didn't change or the text isn't a number. A mod's
+// setting gives SetSetting, one of Tome's own SetTomeSetting.
 Action edit_row(State& state, const Data& data, int rows, int row, const std::string& text);
 
 // Esc: back to the page this one came from; Action::Close on the list.

@@ -1,6 +1,7 @@
 # Everything Tome's build and tests need, so they don't depend on the host:
 # the 32-bit MinGW toolchain, CMake and Ninja, Wine (unit tests, the e2e
-# test), Xvfb and Mesa's software OpenGL (the game off screen, no GPU), the
+# test), Xvfb and Mesa's software OpenGL (the game off screen, no GPU),
+# PulseAudio (a silent sound server, tools/test-env.sh), the
 # Rust target for the Rust examples, Python and ImageMagick.
 #
 #   make container            build this image (tome-dev)
@@ -14,6 +15,7 @@ RUN dnf install -y --setopt=install_weak_deps=False \
         wine-core wine-core.i686 wine-common wine-winefonts wine-ldap.x86_64 \
         mesa-dri-drivers mesa-dri-drivers.i686 mesa-libGL.i686 mesa-libEGL.i686 \
         xorg-x11-server-Xvfb ImageMagick \
+        pulseaudio pulseaudio-utils wine-pulseaudio.x86_64 \
         cargo rust rust-std-static-i686-pc-windows-gnu clang llvm \
     && dnf clean all
 

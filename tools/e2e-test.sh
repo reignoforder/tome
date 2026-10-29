@@ -67,6 +67,7 @@ LAUNCHES=0
 cleanup() {
     stop_game
     env_display_stop
+    env_audio_stop
     if [[ "${E2E_KEEP:-0}" == 1 ]]; then
         echo "e2e: kept test files in $WORK"
     else
@@ -80,6 +81,7 @@ trap 'exit 1' INT TERM HUP
 
 env_game "$GAME" "$BUILD/loader/tome.mix"
 env_display_start
+env_audio_start
 cp -r "$BUILD/mods/hello" "$BUILD/mods/hello-cpp" "$MODS/"
 RUST=0
 if [[ -f "$BUILD/mods/hello-rs/hello_rs.dll" ]]; then
@@ -667,8 +669,8 @@ PY
 # menu's setup and then from the panel's opening. Then the panel again:
 # hello's Details, Settings, the Shout toggle (row 2: a setting takes two), the Greeting text box
 # (row 0: "Hello" replaced by "Howdy", Enter), Esc, Esc (back to the list);
-# Tome, Keybinds, row 1's key (Greet; row 0 is Tome's own), Ctrl+J for it,
-# Ctrl+J again (runs it), Esc three times (closes the panel), then Ctrl+F10
+# Tome, Settings, Keybinds, row 1's key (Greet; row 0 is Tome's own), Ctrl+J for it,
+# Ctrl+J again (runs it), Esc four times (closes the panel), then Ctrl+F10
 # (Tome's key for the menu). They follow the layout in
 # loader/src/core/main_menu_fdf.cpp and sdk/examples/hello/hello.c.
 SAVED_MAP_ARG=("${MAP_ARG[@]}")
@@ -677,8 +679,8 @@ TOME_DEBUG_CLICKS="wait:Main menu set up@0;0.874,0.84@4000;wait:Mod menu opened@
 0.447,0.227@4500;0.447,0.81@6500;0.5,0.892@8000;0.874,0.84@9500;wait:Mod menu opened@9500;0.347,0.227@2500;\
 0.209,0.81@3500;0.447,0.367@4500;0.403,0.227@5300;key:End@5700;key:Backspace@5800;key:Backspace@5900;\
 key:Backspace@6000;key:Backspace@6100;key:Backspace@6200;text:Howdy@6400;key:Enter@7000;key:Esc@8000;\
-key:Esc@9000;0.322,0.81@10500;0.209,0.81@11500;0.447,0.297@12500;key:Ctrl+J@13500;key:Ctrl+J@15500;\
-key:Esc@16500;key:Esc@17500;key:Esc@18500;key:Ctrl+F10@20500" launch
+key:Esc@9000;0.322,0.81@10500;0.209,0.81@11000;0.322,0.81@11500;0.447,0.297@12500;key:Ctrl+J@13500;key:Ctrl+J@15500;\
+key:Esc@16500;key:Esc@17250;key:Esc@18000;key:Esc@18750;key:Ctrl+F10@20500" launch
 MAP_ARG=("${SAVED_MAP_ARG[@]}")
 check "Main menu set up; Mods button added" "Mods button added to the main menu" 30
 check "Quit moved to the lower slot" "Quit shares the bottom box with Mods"

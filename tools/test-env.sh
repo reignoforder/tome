@@ -13,7 +13,11 @@
 #   do, and simulated clicks don't move your mouse. Rendering is Mesa's
 #   software OpenGL there, so no GPU is needed (CI, containers).
 #
-# Needs: wine, Xvfb (HEADLESS=1), ImageMagick's `import` (screenshots).
+# - Sound: a silent PulseAudio server when no sound server runs (containers,
+#   CI), or the game shows a dialog that takes the clicks.
+#
+# Needs: wine, Xvfb (HEADLESS=1), ImageMagick's `import` (screenshots),
+# PulseAudio (only where no sound server runs).
 
 # BUILD and ROOT are set by the script that sources this.
 GAME_DIR="${GAME_DIR:-$ROOT/WarCraft III}"
@@ -117,6 +121,29 @@ env_display_stop() {
     kill "$XVFB_PID" 2>/dev/null
     wait "$XVFB_PID" 2>/dev/null
     XVFB_PID="" XVFB_DISPLAY=""
+}
+
+# --- sound ---------------------------------------------------------------------------
+
+AUDIO_STARTED=0
+
+# env_audio_start: a silent PulseAudio server (a null sink) if there's no
+# sound server, as in containers and on CI. Without a sound device the game
+# opens a dialog over the main menu, and it takes every click.
+env_audio_start() {
+    command -v pulseaudio >/dev/null || return 0
+    if command -v pactl >/dev/null; then
+        pactl info >/dev/null 2>&1 && return 0
+    else  # pulseaudio without its utilities: look for a server's socket
+        [[ -S "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/pulse/native" ]] && return 0
+    fi
+    pulseaudio --daemonize=yes --exit-idle-time=-1 -n --load=module-null-sink \
+        --load=module-native-protocol-unix >/dev/null 2>&1 && AUDIO_STARTED=1
+}
+
+env_audio_stop() {
+    ((AUDIO_STARTED)) && pulseaudio --kill 2>/dev/null
+    AUDIO_STARTED=0
 }
 
 # The DISPLAY the game runs on.

@@ -905,6 +905,21 @@
       "bytes": "55 8b ec 81 ec 84 00 00 00 8b 55 fc 53 8b d9 b9 00 01 00 00",
       "doc": "Clears the device's state caches (render states +0x748, 256 x 12 bytes; texture stages +0x1348/+0x1358; lights +0x1B58, 8 x 0x74) and releases the 7 surfaces at +0x6C0..+0x6D8; with release_textures != 0 also the textures (0x143B00). Called with 0 before IDirect3DDevice9::Reset (0x1404D2) and with 1 by the teardown (0x13FD2B). The d3d-reset-lights patch hooks it (BEFORE). ret 4."
     },
+    "C44Matrix::Perspective": {
+      "kind": "function", "rva": "0x00126e30", "conv": "thiscall", "sig": "void(float* this, float fov, float aspect, float near, float far)",
+      "bytes": "55 8b ec 83 e4 f8 51 f3 0f 10 45 0c f3 0f 59 c0",
+      "doc": "Fills the 4x4 matrix at this with a perspective projection: t = tan(fov * 0.5 / sqrt(aspect^2 + 1)), m[0] = 1/(t*aspect), m[5] = 1/t, m[10] = (far+near)/(far-near), m[11] = 1, m[14] = -2*far*near/(far-near). Only caller: the camera's projection setup 0x1ADF40 (fov from camera +0x114, aspect from its viewport rect, which is in the 0.8 x 0.6 UI space, so a 4:3 picture whatever the window). The widescreen patch hooks it (AFTER). ret 0x10."
+    },
+    "CCamera::SetupProjection": {
+      "kind": "function", "rva": "0x001adf40", "conv": "thiscall", "sig": "void(void* this, const float* rect, int unused)",
+      "bytes": "55 8b ec 81 ec 94 00 00 00 56 8b f1 8d 8d 6c ff",
+      "doc": "Builds a camera's projection for its viewport: calls C44Matrix::Perspective (0x126E30, its only caller) with fov from this +0x114, near +0xCC, far +0xAC and aspect from rect (in the 0.8 x 0.6 UI space, so 4/3 for the world view in any window). Its one caller is the wrapper at 0x1ADE90 (ecx, edx = rect, one stack argument; ret 4), which pushes both arguments; the second isn't read. ret 8."
+    },
+    "WorldView::SetupCamera": {
+      "kind": "function", "rva": "0x003640f0", "conv": "thiscall", "sig": "void(void* this, float delta, const float* rect)",
+      "bytes": "55 8b ec 56 8b f1 83 7e 38 01 75 17 f3 0f 10 45",
+      "doc": "Sets up the world camera for a frame (name guessed): if this +0x38 is 1 it first calls 0x1A2C10 on +0x5C with delta, then the camera wrapper 0x1ADE90 (ecx = this +0x34, edx = rect, which runs CCamera::SetupProjection). Called once per frame in a game only, from 0x385D55 (the world frame's update, this = its +0x19C). The other cameras that reach Perspective don't pass here: 3D models in UI frames (0x0F64E0, in menus and games) and the main menu's 3D background (0x78D0E0). The widescreen patch hooks it (BEFORE and AFTER) to scale only the world view. ret 8."
+    },
     "CGxDeviceOpenGl::CanDraw": {
       "kind": "function", "rva": "0x001442f0", "conv": "thiscall", "sig": "bool(CGxDeviceOpenGl* this)",
       "bytes": "f3 0f 10 89 f0 0b 00 00 33 c0 f3 0f 10 81 ec 0b",

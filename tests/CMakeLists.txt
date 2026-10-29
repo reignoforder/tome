@@ -35,6 +35,7 @@ add_executable(tome_tests
     test_utf8.cpp
     test_verify.cpp
     test_version.cpp
+    test_widescreen.cpp
     test_x86.cpp
     test_zip.cpp
 )
