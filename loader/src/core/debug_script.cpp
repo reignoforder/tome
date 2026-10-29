@@ -50,9 +50,14 @@ bool parse_step(std::string_view item, Step& step) {
             return (step.kind != Kind::Key && step.kind != Kind::Wait) || !step.text.empty();
         }
     }
+    step.kind = Kind::Click;
+    std::string_view move = "move:";
+    if (head.substr(0, move.size()) == move) {
+        step.kind = Kind::Move;
+        head = head.substr(move.size());
+    }
     size_t comma = head.find(',');
     if (comma == std::string_view::npos) return false;
-    step.kind = Kind::Click;
     return parse_fraction(head.substr(0, comma), step.x) && parse_fraction(head.substr(comma + 1), step.y);
 }
 

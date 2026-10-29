@@ -5,6 +5,7 @@
 #include "guard.h"
 #include "hooks.h"
 #include "log.h"
+#include "mods_ready.h"
 #include "patch.h"
 #include "unwind.h"
 
@@ -56,9 +57,7 @@ size_t g_thunk_used = kThunkPage;
 
 BindNativeFn g_bind_native = nullptr;
 InitNativesFn g_init_natives = nullptr;
-HANDLE g_mods_ready = nullptr;
 unsigned g_map_loads = 0;
-constexpr DWORD kModsReadyTimeoutMs = 10000;
 
 // Strings and code (API version 6).
 const void* const* g_game_instance = nullptr;  // CGameWar3.instance
@@ -170,10 +169,7 @@ uint32_t hooked_init_natives() {
     g_codes_seen.clear();
     g_action_triggers.clear();  // the game destroys the old script's handles itself
 
-    if (g_mods_ready && WaitForSingleObject(g_mods_ready, kModsReadyTimeoutMs) == WAIT_TIMEOUT) {
-        TOME_WARN("Mods still loading after %lu ms; binding natives anyway", kModsReadyTimeoutMs);
-        SetEvent(g_mods_ready);  // don't stall later map loads too
-    }
+    mods_ready::wait("binding natives");
 
     size_t count;
     {
@@ -301,12 +297,8 @@ unsigned map_load_count() {
     return g_map_loads;
 }
 
-void set_mods_ready() {
-    if (g_mods_ready) SetEvent(g_mods_ready);
-}
-
 bool install_hooks(uintptr_t game_base, const BuildMappings& build, std::string& report) {
-    g_mods_ready = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    mods_ready::init();
     g_bind_native = reinterpret_cast<BindNativeFn>(game_base + build.jass.bind_native);
     g_init_natives = reinterpret_cast<InitNativesFn>(game_base + build.jass.init_natives);
     const auto& jass = build.jass;

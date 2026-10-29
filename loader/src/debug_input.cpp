@@ -67,10 +67,29 @@ void type_line(HWND window, const std::string& text) {
     press(window, VK_RETURN);
 }
 
-void click(HWND window, double fx, double fy) {
+// The cursor at a fraction of the client area, clamped to its last pixel
+// (1 is the right or bottom edge, for edge scrolling).
+POINT client_point(HWND window, double fx, double fy) {
     RECT rc;
     GetClientRect(window, &rc);
     int x = static_cast<int>(rc.right * fx), y = static_cast<int>(rc.bottom * fy);
+    if (x >= rc.right) x = rc.right - 1;
+    if (y >= rc.bottom) y = rc.bottom - 1;
+    return {x < 0 ? 0 : x, y < 0 ? 0 : y};
+}
+
+void move(HWND window, double fx, double fy) {
+    POINT client = client_point(window, fx, fy);
+    POINT screen = client;
+    ClientToScreen(window, &screen);
+    SetCursorPos(screen.x, screen.y);
+    PostMessageW(window, WM_MOUSEMOVE, 0, MAKELPARAM(client.x, client.y));
+    TOME_INFO("Debug move to %.3f,%.3f (client %ld,%ld)", fx, fy, client.x, client.y);
+}
+
+void click(HWND window, double fx, double fy) {
+    POINT client = client_point(window, fx, fy);
+    int x = client.x, y = client.y;
     LPARAM pos = MAKELPARAM(x, y);
     POINT screen = {x, y};
     ClientToScreen(window, &screen);
@@ -134,6 +153,9 @@ DWORD WINAPI run(LPVOID param) {
             break;
         case Kind::Click:
             click(script->window, step.x, step.y);
+            break;
+        case Kind::Move:
+            move(script->window, step.x, step.y);
             break;
         }
     }

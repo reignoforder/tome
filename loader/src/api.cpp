@@ -10,6 +10,7 @@
 #include "natives.h"
 #include "popups.h"
 #include "settings_api.h"
+#include "storm.h"
 #include "units.h"
 #include "unwind.h"
 
@@ -84,6 +85,13 @@ const tome_symbol* TOME_CALL api_resolve(const char* name) {
         if (std::strcmp(sym.name, name) == 0) return &sym;
     }
     return nullptr;
+}
+
+size_t TOME_CALL api_read_game_file(const char* name, void* buffer, size_t size) {
+    std::string data;
+    if (!name || !storm::init() || !storm::read_file(name, data)) return 0;
+    if (buffer && size) std::memcpy(buffer, data.data(), data.size() < size ? data.size() : size);
+    return data.size();
 }
 
 bool valid_phase(int32_t phase) {
@@ -188,6 +196,7 @@ void init_api(const GameBuild& build) {
     g_api.config_dir = api_config_dir;
     g_api.register_native = api_register_native;
     g_api.resolve = api_resolve;
+    g_api.read_game_file = api_read_game_file;
     frames::fill_api(g_api);
     hooks::init(build.base, build.known ? build.known->data : nullptr);
     g_api.hook = api_hook;

@@ -33,7 +33,7 @@ extern "C" {
  * destructable and item deaths, dialog clicks, skill and build menus, level end, units
  * created and removed, hero experience, player resources, day and night).
  * 13: the map script's memhack pattern (script_shadows, map_script_shadows). */
-#define TOME_API_VERSION 13
+#define TOME_API_VERSION 14
 
 #define TOME_CALL __cdecl
 /* C linkage in C++ too: Tome looks the lifecycle functions up by their plain names. */
@@ -1033,6 +1033,18 @@ typedef struct tome_api {
      * Main thread.
      */
     int32_t (TOME_CALL *map_script_shadows)(tome_script_shadow* out, uint32_t item_size, int32_t max);
+
+    /* --- API version 14: the game's files --- */
+
+    /*
+     * Reads a file as the game would, through its archives and Tome's
+     * asset overlay (highest priority first), e.g. "Units\\HumanUnitFunc.txt":
+     * copies up to `size` bytes into `buffer` and returns the file's whole
+     * size, like setting_string (no terminating NUL); 0 if there's no such
+     * file or it's empty. `buffer` may be NULL when `size` is 0, to ask for
+     * the size. Main thread.
+     */
+    size_t (TOME_CALL *read_game_file)(const char* name, void* buffer, size_t size);
 } tome_api;
 
 /*

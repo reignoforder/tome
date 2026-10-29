@@ -12,6 +12,7 @@
 #include "main_thread.h"
 #include "mod_manager.h"
 #include "mod_menu.h"
+#include "mods_ready.h"
 #include "natives.h"
 #include "overlay.h"
 #include "patches.h"
@@ -43,6 +44,8 @@ std::string g_events_report;
 
 bool g_patches_ok = false;
 std::string g_patches_report;
+bool g_sound_wait_ok = false;
+std::string g_sound_wait_report;
 bool g_esc_hooks_ok = false;
 bool g_handshake_ok = false;
 std::string g_handshake_report;
@@ -214,6 +217,11 @@ DWORD bootstrap() {
             TOME_ERROR("Multiplayer handshake unavailable: %s", g_handshake_report.c_str());
         }
         if (g_patches_ok) TOME_INFO("Patches: %s", g_patches_report.c_str());
+        if (g_sound_wait_ok) {
+            TOME_INFO("Sound start-up: %s", g_sound_wait_report.c_str());
+        } else {
+            TOME_WARN("Sound start-up doesn't wait for mods: %s", g_sound_wait_report.c_str());
+        }
         if (!g_assets_report.empty()) TOME_INFO("Assets at startup: %s", g_assets_report.c_str());
     } else {
         // game.dll wasn't loaded yet when Tome was attached, so this runs
@@ -237,7 +245,7 @@ DWORD bootstrap() {
                   g_safe_mode.c_str());
     }
     mods.refresh();
-    natives::set_mods_ready();
+    mods_ready::set();
     overlay::log_probe();
 
     tome_settings::init(g_paths);
@@ -275,8 +283,8 @@ DWORD bootstrap() {
 
 DWORD WINAPI bootstrap_thread(LPVOID) {
     DWORD result = bootstrap();
-    // Whatever happened, never leave InitNatives waiting.
-    natives::set_mods_ready();
+    // Whatever happened, never leave InitNatives or the sound start-up waiting.
+    mods_ready::set();
     return result;
 }
 
@@ -309,6 +317,7 @@ void start_bootstrap(HMODULE self) {
             // Built-in fixes (always on, independent of events and of Tome's
             // folders): applied to whichever ones fit this build. See patches.h.
             g_patches_ok = patches::install(reinterpret_cast<uintptr_t>(game), *g_early_build, g_patches_report);
+            g_sound_wait_ok = mods_ready::install_sound_wait(g_sound_wait_report);
             if (g_paths_ok) {
                 frames::init(reinterpret_cast<uintptr_t>(game), *g_early_build, g_attach_thread);
                 g_menu_hooks_ok = mod_menu::install_hooks(reinterpret_cast<uintptr_t>(game), *g_early_build,

@@ -322,6 +322,280 @@ BattleNetMainFrame 15, BattleNetChatroom 16; 17 means none. Later entries
 There is no common glue menu class in RTTI: every screen derives from
 CFrame directly.
 
+### Options screen
+
+`COptionsMenu` (vtable `0xAA7170`) is the `OptionsMenu` frame of
+`Glue\OptionsMenu.fdf`: tabs Gameplay, Video and Sound on the right, one
+panel of controls (`GameplayPanel`, `VideoPanel`, `SoundPanel`) at a time
+on the left, over a backdrop sprite that morphs open and closed. The
+separate `enhanced-options` mod adds a fourth tab through SetPanel.
+
+| What | RVA | Notes |
+|------|-----|-------|
+| COptionsMenu::OnEvent | `0x2B4470` | Slot 3, `int __thiscall(CEvent*)`, `ret 4`. Jump table over command ids `0`–`0x18`: Gameplay 0, Video 1, Sound 2 (each enables the control at `+0x29C`, then calls SetPanel through a small thunk: `0x2B4910`, `0x2B7040`, `0x2B6490`); `0xF` hides the old panel (`+0x1E8`) after its fade and runs the backdrop step `0x2AA3A0(0)`; `0x11` fades the new panel (`+0x1E4`) in; `0x12` comes from the opening morph. |
+| COptionsMenu::SetPanel | `0x2BA780` | `void __thiscall(int panel)`, `ret 4`. Returns at once if `+0x16C` is already `panel`. Stores it, fades the current panel frame out (event `0xF` when done), moves it to `+0x1E8`, and picks the new one into `+0x1E4`: `+0x1FC` (0), `+0x234` (1), `+0x26C` (2), none (3). With no old panel it plays the opening morph (`0x2AA3A0(1)`). Only the three tab thunks call it. |
+| `+0x16C` | | the shown panel: 0 gameplay, 1 video, 2 sound, 3 none (the constructor `0x2A6A00` sets 3). |
+| `+0x1E4` | | the panel frame being shown; NULL for 3. Event `0x11` uses it unchecked, so SetPanel(3) from another panel crashes when the backdrop has reopened. Putting another CFrame there before `0x11` makes the game show, fade, and later fade out and hide it like its own panel (verified in game). |
+| `0x2AA3A0` | | `void __thiscall(int open)`, `ret 4`: plays the backdrop sprite's (`+0x184`) sequence {options, morph} to open (then {options, alternate, stand}), or the reverse to close. |
+| COptionsMenu::Save | `0x2B8E80` | `void __thiscall()`, plain `ret`. OK (command 3, `0x2B5EE0`: disables the controls, applies the video choices with `0x2AA490`, Save, then leaves with `0x2B92D0(2)`). Reads every control into Options::SetInt and ends with Options::Save(`0x50`). The ids it writes are the options the screen shows. |
+
+**The options store** (`Options::Get`, `.data 0xD3C5F0`) keeps strings in a
+hash table at `+0x1C` (mask `+0x24`) and integers in one at `+0x44` (mask
+`+0x4C`), keyed by option id (0 to `0x4E`; the table at `.rdata 0xA7EFE8`
+has 16 bytes per id: name, category (index into the names at `0xA7EFCC`:
+Video, Sound, Gameplay, ...), type (0 integer, 1 string), default text).
+
+| What | RVA | Notes |
+|------|-----|-------|
+| Options::GetInt | `0x040FA0` | `bool __thiscall(int id, int* value)`, `ret 8`. A missing value is the default text through atoi, then stored. |
+| Options::GetString | `0x040F30` | `bool __thiscall(int id, char* buffer, int size)`, `ret 0xC`. |
+| Options::SetInt | `0x042B40` | `bool __thiscall(int id, int value)`, `ret 8`. Store only. |
+| Options::Save | `0x042620` | `bool __thiscall(int id)`, `ret 4`. Writes one value to the registry, or all for `0x50`. |
+| Options::ApplyValue | `0x0403E0` | `bool __thiscall(int id, int value)`, `ret 8`. The switch Options::Apply (stored value) ends in: cases for gamma, the video details, sound, scrolling, tooltips, health bars, maxfps, ally and creep filters, autosaveReplay. Others are read where they're used. |
+
+`adapter` (3) is Direct3D's adapter index: start-up's mode picker takes
+only that adapter's modes, and Save writes the chosen mode's adapter to it.
+
+Options the Options screen never writes: `lockfb` (`0xD`), the
+`cinematic*` ones (`0x10`–`0x14`), `maxfps` (`0x16`), `nomidi` and
+`softwaremidi` (`0x22`, `0x23`), `formations` (`0x2C`, the in-game
+formation button's state), `herobar` (`0x2E`, read when the hero bar is
+built: 0 hides the hero icons), `inputsprocket` (`0x30`) and
+`multiboardon` (`0x3C`, read when a multiboard is created: 0 minimizes it).
+
+The hero bar (`CGameUI.hero_bar`, a CHeroBar, which is a frame grid of 7
+CHeroBarButtons, one per row, `0x39E1D1`) can be hidden or shown during a
+game, as the option does when the bar is built: CSimpleFrame.show_flag
+(`+0x90`) to 0 and Hide (vtable `+0x64`), or to 1 and Show (`+0x68`). A
+simple frame's Hide and Show don't reach its child frames, though, and a
+hero button's OnHide and OnShow (vtable `+0x30`, `+0x2C`) hide and show the
+glow of a hero with points to spend (a CSpriteFrame at `+0x1D8`, a model
+drawn on its own): the buttons need Hide and Show too, and Show keeps the
+ones without a hero hidden (their own flag). While the bar is hidden the
+game still shows a new hero's button (its parent isn't the bar), and the
+glow when a hero gains a point whether the button shows or not, so
+Enhanced Options hides them again each frame. Checked in game: hidden and
+shown twice, with a Paladin that had a point to spend.
+
+**Controls** (`CControl` and its subclasses: CHECKBOX, SLIDER, POPUPMENU):
+
+| What | RVA | Notes |
+|------|-----|-------|
+| CControl::HasState | `0x1120C0` | `bool __thiscall(uint32_t flags)`, `ret 4`: all `flags` set in the state at `+0x1D4`. `0x20` is a checkbox's checked bit. |
+| CControl::AddState / RemoveState | `0x112030` / `0x113050` | `void __thiscall(uint32_t flags)`, `ret 4`. If the state changed, tail-call vtable `+0xF0` (the look). No listeners are notified; `0x100080` sends a checkbox's CCheckBoxChangeEvent (`0x400C0064`). |
+| CSlider::SetValue | `0x0FF110` | `void __thiscall(float value, int notify)`, `ret 8`. The value is the float at `+0x1F4`. |
+| CPopupMenu::SetItem | `0x107F00` | `void __thiscall(int item)`, `ret 4`. The selected item is at `+0x1F0`. |
+| CPopupMenu::AddItem | `0x107850` | `int __thiscall(const char* text, int value)`, `ret 8`: adds to the MENU at `+0x1EC` (item count at its `+0x1F0`); the first item becomes the selection and the title. The Resolution menu is filled with it (`0x2B7304`, value -2, as FDF `MenuItem`s). |
+| Enabled | state bit 1 | vtable `+0x10C` (`0x0FD350`) is SetEnabled: AddState(1) or RemoveState(1). The Options tabs are disabled through it while the panels move. |
+
+### Sound start-up
+
+`0x07F8B0` (`__fastcall`, from `0x0820F0`, once) sets Miles up:
+`AIL_set_redist_directory`, `AIL_startup` (`0x07F902`; Miles loads its
+`.mix`/`.asi` plugins then, Tome's `tome.mix` among them), closes a previous
+driver (`.data 0xD3CEE8`) if there is one, then `AIL_open_digital_driver`
+(`0x07F93A`) and keeps the HDIGDRIVER at `0xD3CEE8`. Miles opens the default
+device: DirectSound (it loads `DSOUND.DLL` with LoadLibraryA and looks up
+`DirectSoundCreate` with GetProcAddress, both from its own imports) or WINMM
+`waveOutOpen` (`WAVE_MAPPER`). Nothing reopens it while the game runs (the
+Sound panel's checkboxes switch channels, `0x35A9F0`), so a device change
+needs a restart. Tome makes the open wait for the first mod load
+(`mods_ready.cpp`); the `enhanced-options` mod redirects Miles' two calls.
+
+### Camera
+
+The natives SetCameraField (`0x211E00`) and GetCameraField (`0x1FF430`)
+work on the local player's camera, `CGameUI+0x254` (`0x36B190` returns it),
+through GameCamera::SetField (`0x362ED0`, `void __thiscall(int field, float
+value, float duration, int)`, `ret 0x10`) and GetField (`0x360740`, float
+on the x87 stack, `ret 4`). Fields as common.j numbers them: 0 target
+distance (1650), 1 far z (5000), 2 angle of attack, ... The classic mouse
+wheel steps through four zoom levels, `.rdata 0xA9F4E0` (heights 160,
+angles 304/311/318/325, distances 1650/1600/1500/1400), loaded with movaps at
+`0x35EAA2` and `0x360122`: it only zooms in from the default. CGameUI::Get
+(`0x36CB20`) makes the UI when called with create = 1; read it with 0.
+
+### Local actions and their delay
+
+Every local player action is serialized into a CDataStore and scheduled by
+NetScheduleAction (`0x32C920`, `__fastcall(store, flags)`): the 67 senders,
+one per action type (NetSendAction `0x26CE10` among them), copy the action
+byte from `event+0x14` with `0x6B170` first. In the store, the byte at
+position p is at `[store+4] - [store+8] + p`. Action ids are those of
+replays: 0x10–0x14 unit orders (0x10 no target, as Stop and Hold Position),
+0x16 a selection change (with 0x19 and 0x1A around it), ... Received actions
+come back as game events with id `0xA0000 | action`, their handlers
+registered with `0x32D150(id, handler, flag)`. An order's round trip, from
+NetScheduleAction to the order event for the unit, measured 130 ms in
+single player.
+
+### Text tags
+
+The texttag natives run on the handle manager (`CGameWar3+0x1C`, what
+`0x1E0D70` returns, making it if missing) after checking the id against
+`.data 0xBDB0F0`: Create `0x283BE0` (returns the id), Destroy `0x284600`,
+SetText `0x28BA20` (a C string, height), SetPosUnit `0x28B970` (a CUnit,
+z offset), SetColor `0x28B910` (an 0xAARRGGBB by pointer), SetVelocity
+`0x28BA50` (two floats by pointer), SetLifespan `0x28B940`, SetFadepoint
+`0x28B920`, SetPermanent `0x28B960`, SetVisible `0x28BA60` (it stores a
+hidden bit, 4 at `+0x30` of the tag's record; showing hands the tag to the
+renderer, `0x122750`). All `thiscall`; several tail-call into `0x9A0xxx`,
+which pop as many words as their callers push. Text tags are drawn locally
+and aren't agents. A unit's visibility to a player is its vtable `+0xFC`
+(slot, 0, 4), as IsUnitVisible (`0x2068D0`) asks. Alliances: GetPlayerAlliance
+(`0x2016A0`) reads `CPlayerWar3+0x38` (made on first use by `0x25BA40`),
+16 bytes per type from `+0x38`, a reference at `+8`/`+0xC` that `0x54530`
+resolves to an object with the players' bitmask at `+0x78`.
+
+### Unit data and custom keys
+
+The unit and ability data (`.data 0xD69FBC`) is built by `0x350DA0` from
+the files listed at `.rdata 0xAB6008` (`Units\*Strings.txt`,
+`Units\*Func.txt`, CommandFunc.txt, ItemFunc.txt), after start-up's sound
+(so after the first mod load). With Option.customkeys (`0x3D`) set, it then
+lays `CustomKeys.txt` over them with GameData::LoadOverrides (`0x3534D0`,
+`thiscall(path, table .data 0xCE56CC, 0xB, 1)`, `ret 0x10`; the path goes to
+the ini loader `0x1A8EF0`, which also opens an absolute path). The ally
+color mode (Alt+A) is Option.allyFilter (`0x38`): 0 player colors, 1 team
+colors on the minimap, 2 also on the units (checked in game).
+
+### Command card and cooldowns
+
+The command card is a frame grid (made by `0x39D410` and kept at
+`CGameUI+0x3C8`): 3 rows of 4 `CCommandButton`s (vtable `0xABCFF4`,
+constructor `0x39D5A0`). `0x10EE50` sets a grid's rows and columns (`+0x124`,
+`+0x128`) and `0x10E490(column, row, frame, flag)` fills a cell; the rows
+are 16 bytes each from the pointer at `+0x154`, their cells through `+8`.
+The inventory's six buttons are in the inventory bar (`0x39F380`,
+`CInfoPanel+0x148`, the info panel at `CGameUI+0x3C4`): 8 bytes a slot from
+the pointer at `+0x130`, the button at `+4`. Command buttons are **simple
+frames**: their CLayoutFrame is at `+0`, not at CFrame's `+0xB4` (the game
+calls SetPoint and SetWidth on them directly), and a frame can't be made
+as their child (CreateFrame crashed adding it to a list of named children
+they don't have), so a mod anchors its frames to them from another parent.
+
+A button's `+0x190` is its `CCommandButtonData`, whose `+0x6D4` is the raw
+`CAbility*` behind it (an item's ability in the inventory) and `+8` what it
+tells it. Starting the sweep (`0x3D2F30`) makes the sprite at `+0x19C` on
+first use (`0x3AD950`, skin key `CommandButtonCooldown`) and plays it with
+the callback `0x3AD550`, which reads the remaining time through `0x3B62D0`
+and stops the sweep (`0x3B7C70`) at 0. Both check the ability first: its
+reference (`+0xC`/`+0x10`) through ObjectLookup must give a record tagged
+`'+agl'` at `+0xC` with `+0x20` zero. Then they call the ability's vtable
+`+0x2DC` (the seconds left) or `+0x2E0` (the fraction left), `thiscall(out,
+command)`, `ret 8`. Abilities without a cooldown return 0; those with one
+(`0x4149F0`, `0x4148A0`) read their timer at `+0xD0` (vtable `+0x18`) while
+bit `0x200` of `+0x20` is set and `0x400` isn't, and keep the cooldown's
+length at `+0xB0`. Checked in game: Divine Shield showed 35 to 0, Dust of
+Appearance 20 to 0.
+
+### Frame scale and the in-game UI's layout
+
+Every CLayoutFrame has a scale at `+0x60` (1 by default; 1.31's
+BlzFrameSetScale is the same thing): it multiplies the width (`+0x58`) and
+height (`+0x5C`) the frame reports (`0x110BA0`, `0x110B50`) and the offsets
+of its own anchor points (a point, made by `0x11E3C0`, resolves to
+`x * scale + the relative frame's edge`, `0x11E420`). SetScale is the
+layout's vtable `+0x14`: the base (`0x111540`) stores it and updates the
+layout, CSimpleFrame's (`0x10DD00`) passes the same value to its child
+frames (`+0xD8`) and regions (`+0x120`), CFrame's (`0x0F6410`) to its child
+frames, CSpriteFrame's (`0x0F7700`) also scales the model. A layout's points
+are pointers at `+8 + 4 * point` (TOPLEFT 0 to BOTTOMRIGHT 8); the frames
+anchored to it are a list from `+0x40` (node: next `+8`, dependent `+0xC`;
+`0x111280` adds them). SetAllPoints (`0x1114B0`) clears the points and sets
+TOPLEFT and BOTTOMRIGHT. `0x111390(layout, 0)` queues a layout for update.
+
+CGameUI is itself a CFrame without anchors: its rectangle is set directly
+at `+0x44` (0, 0, 0.6, 0.8), and writing it didn't move what hangs from it.
+Anchored to it are the world frame (`+0x3BC`, BOTTOMLEFT 0.13 up, TOPRIGHT
+0.02 down: the 3D view stops at the console and the top bar), the console
+(`+0x428`, a CSimpleConsole from the FDF frame "ConsoleUI" with the top
+bar's and console's textures; the command card, info panel, resource bar
+and menu buttons are its children), a second CSimpleConsole (`+0x420`),
+two full-screen CFrame layers (`+0x41C` with the minimap `+0x3C0` and the
+clock `+0x3F8`, `+0x424` with the portrait `+0x3F4`), the hero bar
+(`+0x3DC`), the idle worker button (`+0x3E0`), four text message frames and
+three other full-screen frames.
+
+Scaling the in-game UI (Enhanced Options' HUD scale, checked in game at 75%,
+60% and 50%, and changed during a game between them and 100%): scale the
+console, the second console, resource bar, hero bar, idle worker button,
+both layers and the minimap (it isn't in its layer's child list); move the
+scaled frames' left and right anchors to CGameUI in by `0.4 * (1 - s)`,
+divided by their scale (moving the full-size frames too shifted the
+console's art a second time); and move the world frame to the screen's
+edges, so it draws beside the narrower console and top bar. Every change
+starts from the anchors and sizes recorded as the UI was built, so nothing
+moves twice. Behind the bars the world must stay hidden (the console's art
+is open around the portrait and info panel, black only because the world
+stopped at 0.13): two BACKDROP frames with a black texture, over the bars'
+width up to `0.13 s` and down from `0.6 - 0.02 s`, made as children of the
+world frame. Those draw after the world and before everything else. The
+portrait's model is drawn before every other frame, simple frames
+included: a simple frame from CreateSimpleFrame (`0xE47E0`) at level 0
+(`+0x84`, its parent's + 1, orders simple frames; the console's is 1, raised
+by the game at `0x368006` between a hide and a show, vtable `+0x64` and
+`+0x68` with `+0x90` set to 0 and 1 before them) hid the console's art's
+gaps but covered the portrait too, and so did a backdrop in the portrait's
+own layer. Two 3D models need more: the portrait showed nothing when
+scaled, so it stays at 1 with its size and offsets multiplied by hand; the
+clock's model is placed in screen units from its frame's corner, so the
+frame moves to where the model lands at the top center, and it disappeared
+once that offset passed about 0.3, so it's scaled no smaller than 0.7.
+
+Changing the scale while a game runs needs two fixes:
+
+- Text: CSimpleFontString::SetScale (`0x114AF0`, the font string's
+  CLayoutFrame.vtable.SetScale) loads the font again through SetFont
+  (`0x1148A0`) with the height multiplied by 0.6 (`0x8B38A0`) and flags 0,
+  where the string's definition passed its own (`0x116402`). The text came
+  out smaller than at that scale, and SetFont keeps the smaller height
+  (`+0x90`), so each change shrank it again: back at 100% after one change
+  it was about 0.6 of its size. Enhanced Options hooks both: SetScale
+  records the height it starts from, and SetFont, called from inside it,
+  gets that height and the flags the string was last given. Back at 100%
+  the top bar then matched a fresh game (the fix also makes the first
+  scale right). GetFont (`0x19D580`) divides the size by 0.6 and caches
+  fonts as `"%s-%d-%f"` (name, flags, size).
+- The minimap: it lays its picture and its map-to-screen transform
+  (`+0x750`) out from its frame only while it sets itself up (vtable
+  `+0xE4`, `0x3B7E30`), which its update (`+0x2C`, `0x3C1CB0`) does while
+  `+0x1CC` is 0. CMinimap::ReleaseResources (`0x3AEB40`) frees its textures
+  and clears it, so the next update sets it up again from the new size.
+  The game does the same at `0x211DEA`, and the setup calls it first itself.
+
+The clock and the portrait follow without more: they're laid out again
+from their frames. Mouse clicks follow the scaled layout (a click on the
+scaled learn-skill button opened the submenu). Edge scrolling doesn't depend
+on the layout: the camera controller (vtable `0xAB8E60`, constructor
+`0x35D500`) gets the edge as direction events (ids 1 to 10, handler
+`0x361540`) and scrolls at the `mousescroll` speed (`+0x4FC`) unless
+`mousescrolldisable` (option `0x28`, `+0x30`) is set or user control is off
+(`CGameUI+0x1AC`, which cinematic mode clears, `0x36C350`). Checked in game
+by logging the camera target (`0x360900` on CGameUI.camera, what
+GetCameraTargetPositionX reads) with `TOME_DEBUG_CLICKS` `move:` steps:
+every edge, and the bottom edge both over and beside the console, scrolled
+the same at 75% as at 100%.
+
+### Battle.net gateways
+
+The servers the Battle.net button connects to (the magnifier next to it
+opens the Gateway Selection panel) are a `CBattleNetGateways` at
+`CMainMenu+0x4A0`, made by CMainMenu's constructor (`0x2C5A40`) each time the
+main menu is built, and gone with it while another screen shows: first
+LoadRegistry (`0x30E010`) from `HKCU\Software\Blizzard Entertainment\Warcraft
+III\Battle.net Gateways`; if that's missing, `0x30DF80` reads
+`BattleNet\bnserver-WAR3.ini` from the archives (`[Server List Version]`
+`VER=1001`, `[Server Gateways]` `1=uswest.battle.net` ..., then a section per
+host with `ZONE=8` and `ENU=Lordaeron (U.S. West)`); then `realms.ini` is
+merged into a second list.
+
+| What | Where | Notes |
+|------|-------|-------|
+| Registry value | `Battle.net Gateways` | REG_MULTI_SZ: `1001`, the selected index, then host, time zone, name for each gateway. The index is **decimal and counts from 0** (checked in game: `02` selected the third, `11` the twelfth, `0B` the first). Choosing a gateway in the panel and pressing OK didn't write it in a test; the writers (around `0x2E9CF0` and `0x2EFCE3`, through `0x300730`) weren't followed further. |
+| CBattleNetGateways | `+0` version, `+4` selected, `+0xC`/`+0x10` count and entries, `+0x1C`/`+0x20` the second list's | 0x204-byte entries: zone `+0`, host `+4`, name `+0x104`. GetGateway `0x2DECC0` (index across both lists), the selected index or -1 `0x2DF620`. |
+| Connecting | `0x2E5D65` | Formats `%s.WAR3.battle.net;%s` with the host: the game tries `<host>.WAR3.battle.net` first, then the host itself. |
+
 ### Control clicks and observers
 
 `CObserver` (vtable `0xA84314`, 12 bytes: vtable, reference count at `+4`,
@@ -361,7 +635,7 @@ freed) on any control instead; that works on every screen and in games.
 
 The frame rate has nothing to do with the game's speed: the simulation runs
 on the net client's 25 ms turns (above). What limits frames, measured under
-Wine (the separate `fps-unlock` mod is built on it):
+Wine (the separate `enhanced-options` mod, once `fps-unlock`, is built on it):
 
 | What | RVA | Notes |
 |------|-----|-------|
@@ -371,8 +645,8 @@ Wine (the separate `fps-unlock` mod is built on it):
 | Options::Apply | `0x040310` | `int __thiscall(int option)`, `ret 4`: applies an option's stored value through the switch at `0x0403E0` (`ret 8`, id − 5 indexes `0x04098C`). Startup applies a list of them (`0x043ED0`). |
 | maxfps | option `0x16` | Video\maxfps in the registry, default 200, also registered by name by `0x37AA70` with the callback `0x379E20` (store, then apply). Its case (`0x040607`) calls Scheduler::SetPeriod((int)(1000.0 / maxfps), 0). maxfps 60 gave 64.5 fps, 200 gave ~218, 1000 gave ~430 (vsync off, menu). |
 | GetTickCount | import slot `0xA7C148` | 118 calls through the thunk `0x092A10`, a few `call [slot]`. Windows advances it every 15.6 ms; frames can't come faster than that (Wine: 1 ms). Rounding it down to 16 ms steps under Wine dropped maxfps 200 to 62.5 fps, the classic ~64 cap. The net clock `0x092A20` uses QueryPerformanceCounter instead when `.data 0xD3D5C4` is set, else GetTickCount; the net client subtracts readings unsigned and caps its bank at 4000 ms (`0x32D812`), so a clock that steps back would run the game up to 4 s ahead. |
-| CGxDeviceD3d::BuildPresentParams | `0x13FED0` | `void __thiscall(D3DPRESENT_PARAMETERS*)`, `ret 4`. Callers: CreateDevice (`0x13FC20`, IDirect3D9 vtable `+0x40`) and the reset after a lost device (`0x1404DD`, IDirect3DDevice9 `+0x40`). PresentationInterval (`+0x34`) is always 0 (DEFAULT): vsync on. OpenGL never calls `wglSwapIntervalEXT`, so the driver decides. |
-| CGxDeviceD3d::CanDraw | `0x140410` | `bool __thiscall(device)`, plain `ret`. Device vtable `+0x3C`, before every frame. TestCooperativeLevel; on `D3DERR_DEVICENOTRESET` (or a resize pending at `+0x730`) ReleaseForReset(0), BuildPresentParams, `IDirect3DDevice9::Reset` (`+0x40`), RestoreState. False while the device is lost. |
+| CGxDeviceD3d::BuildPresentParams | `0x13FED0` | `void __thiscall(D3DPRESENT_PARAMETERS*)`, `ret 4`. Callers: CreateDevice (`0x13FC20`, IDirect3D9 vtable `+0x40`) and the reset after a lost device (`0x1404DD`, IDirect3DDevice9 `+0x40`). In fullscreen the size, format and refresh rate (`+0x30`) are those of display mode `+0x98` (picked at start-up) of adapter `+0x94` from the IDirect3D9 at `+0x580` (EnumAdapterModes, vtable `+0x1C`); in a window `Windowed` (`+0x20`) is 1 and the format the desktop's (GetAdapterDisplayMode, `+0x20`). PresentationInterval (`+0x34`) is always 0 (DEFAULT): vsync on. OpenGL never calls `wglSwapIntervalEXT`, so the driver decides. |
+| CGxDeviceD3d::CanDraw | `0x140410` | `bool __thiscall(device)`, plain `ret`. Device vtable `+0x3C`, before every frame. TestCooperativeLevel; on `D3DERR_DEVICENOTRESET` (or, in a window only, a resize pending at `+0x730`) ReleaseForReset(0), BuildPresentParams, `IDirect3DDevice9::Reset` (`+0x40`), RestoreState. False while the device is lost. Running the same four steps from a BEFORE hook on it resets the device on demand, in a window or fullscreen: Enhanced Options does so to change vsync (and the fullscreen refresh rate) during a game. Checked in a window under Wine: Reset returned 0 every time, the game drew on, and the frame rate went from 165 (vsync, a 165 Hz monitor) to 190 and back. |
 | CGxDeviceD3d::ReleaseForReset | `0x13FDC0` | `void __thiscall(device, int release_textures)`, `ret 4`. Clears the state caches (render states `+0x748`, 256 hashed `{kind, state, value}` slots of 12 bytes, which `0x142C60` checks before every SetRenderState; texture stages `+0x1348`/`+0x1358`; lights `+0x1B58`, 8 × `0x74`) and releases the surfaces at `+0x6C0..+0x6D8`; with 1 also the textures (`0x143B00`). Called with 0 before Reset (`0x1404D2`), with 1 by the teardown (`0x13FD2B`). The d3d-reset-lights patch hooks it. |
 | CGxDeviceD3d::RestoreState | `0x142E50` | `void __thiscall(device)`, plain `ret`. After CreateDevice (`0x13FC9A`) and Reset (`0x1404FA`): z, lighting and fog states, the 8 lights from `+0x3C0` (enabled 0–4 on the main menu), the cull mode, then SetGamma(gamma, force 1). |
 | CGxDeviceD3d::SetGamma | `0x13F870` | `void __thiscall(device, float exponent, int force)`, `ret 8`. Vtable `+0x1C`. Returns early if the exponent equals the cached one (`CGxDevice.gamma`, `+0xD8`) and force is 0. In fullscreen (`+0x9C` nonzero) with `D3DCAPS2_FULLSCREENGAMMA` (`0x20000` in `+0x594`) sends `SetGammaRamp` with `(i/255)^(exponent + rand()/32767/1000) × 65535`. The Gamma option g gives exponent `(100 − g)/100 + 0.2` (Options::Apply, `0x04057F`, through `0x136B80`). |
@@ -734,10 +1008,16 @@ keys `GlueSpriteLayerTopLeft` / `GlueSpriteLayerTopRight` /
 | CSpriteFrame::SetModel | vtable `+0xE8` | `__thiscall(const char* path, -1, 0)` |
 | CSpriteFrame::GetInstance | `0x0F7060` | `void* __thiscall()`; returns `*[sprite+0x178]` when `[sprite+0x174]` is set |
 | SetAnimation | `0x1A42B0` | `void __fastcall(instance, const int* tags, int count, int flags)`, `ret 8`. Picks the sequence matching the tag set. |
-| Tag registration | `0x352A60` | Tag ids in order: birth 0, death 1, stand 2, morph 3, alternate 4, found 5, mainmenu 6, … options `0x17`, realmselection `0x18`, maincancelpanel `0x19` (word list at `.rdata` `0x6FAB7EA0`). |
+| Tag registration | `0x352A60` | Tag ids in order: birth 0, death 1, stand 2, morph 3, alternate 4, found 5, mainmenu 6, singleplayer 7, singleplayerskirmish 8, campaign 9, multiplayer `0xA`, multiplayerpregamechat `0xB`, viewreplay `0xC`, battlenetchatroom `0xD`, battlenetcustom `0xE`, battlenetcustomcreate `0xF`, battlenetwelcome `0x10`, battlenetamm `0x11`, battlenetadvancedoptions `0x12`, battlenetchannel `0x13`, battlenetprofile `0x14`, battlenetteamchat `0x15`, battlenetuserlist `0x16`, options `0x17`, realmselection `0x18`, maincancelpanel `0x19` (names at `.rdata` `0x6FAB7EA0` on). |
+| Sprite layers | `0x2E0930` | `__thiscall` on the CGlueMgr: makes the background (`+0x190`), top-left (`+0x194`) and top-right (`+0x198`) CSpriteFrames once. The glue manager is `.data 0xD698EC` (`CGlueMgr.instance`), set after its constructor (`0x2C54E0`) returns; CGlueMgr::Get makes it on first use, and making it makes these sprites, which call SetAnimation: a SetAnimation hook must read the global, not call Get (it recursed into a stack overflow). |
 
 Example: tags `{stand, options, alternate}` select "Options Stand Alternate"
-(the lowered left panel). "Options Morph" (1000 ms) lowers it, and "Options
+(the lowered left panel). The top-right box is sized per screen: "Options
+Stand" holds 3 buttons (from `0.110625`, 0.059 apart), "SinglePlayer Stand"
+5 (from `0.15`, under a header plate), "SinglePlayerSkirmish" more,
+"MainCancelPanel" only the bottom box, and RealmSelection has no box. The
+`enhanced-options` mod swaps `options` for `singleplayer` in the top-right
+sprite's SetAnimation calls to fit a fourth tab. "Options Morph" (1000 ms) lowers it, and "Options
 Morph Alternate" (667 ms) raises it.
 
 ### Layout facts (from the game's FDFs)
@@ -751,6 +1031,34 @@ Morph Alternate" (667 ms) raises it.
 - Options left-panel content starts at `TOPLEFT 0.025, −0.085` (title). The
   panel interior spans roughly x 0.025–0.41, y −0.085 to −0.50.
 - The UI coordinate space is 0.8 × 0.6, stretched to the window.
+
+### Graphics start-up and window mode
+
+Graphics start-up (`0x44ED0`, plain `ret`) reads three DWORDs from
+`HKCU\Software\Blizzard Entertainment\Warcraft III` with Storm's registry
+helper (`0x7C6C6`): `Gfx Fullscreen` (default 1), `Gfx SwTNL` and `Gfx
+OpenGL`. The command line overrides them: `-fullscreen` (id 8) forces
+fullscreen and `-window` (id 9) windowed, through `CmdLine::IsSet`
+(`0x64770`, `__fastcall(int id)`; the flags are Storm's `SCmdRegisterArgList`
+table at `.rdata 0xA80C40`: d3d 0, opengl 1, swtnl 2, classic 3, crash 4,
+datadir 5, loadfile 6, gametype 7, fullscreen 8, window 9). It then creates
+the device (`0x136720`) and keeps it at `.data 0xD3C648` (`GxDevice.current`);
+`CGxDevice.fullscreen` (`+0x9C`) says which mode it got. Neither changes
+while the game runs: switching needs a restart (the `enhanced-options` mod
+writes `Gfx Fullscreen` and offers one).
+
+The fullscreen display mode: start-up's `0x449C0` reads options 0–4
+(reswidth, resheight, colordepth, refreshrate, adapter) and `0x44A40` picks
+the adapter's mode (`0x136940`'s list, 0x18 bytes each: adapter, ?, width,
+height, bit depth, refresh) with the smallest sum of squared differences;
+the refresh term counts only for modes that report one. `refreshrate`
+defaults to 75, so a monitor with 60, 120 and 144 Hz modes gets 60. In
+fullscreen Direct3D, BuildPresentParams takes the refresh rate from
+`IDirect3D9::EnumAdapterModes(adapter +0x94, format, index +0x98)`. The
+Options screen's own list (`0x44BB0`, `.data 0xD3C634`: count `+4`, entries
+`+8` of 0x1C bytes, the mode index for `0x136AD0` at `+0x18`) is matched
+without the refresh rate, and Save writes the matched entry's refresh rate
+to option 4.
 
 ### Camera projection (for the widescreen patch)
 

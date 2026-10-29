@@ -160,6 +160,7 @@ static_assert(offsetof(tome_api, on_service) == 200);
 static_assert(offsetof(tome_api, subscribe) == 204);
 static_assert(offsetof(tome_api, publish) == 208);
 static_assert(offsetof(tome_api, map_script_shadows) == 212);
+static_assert(offsetof(tome_api, read_game_file) == 216);
 
 TEST(abi_layout_is_append_only) {
     // Everything is checked at compile time; this only keeps the file in the list.

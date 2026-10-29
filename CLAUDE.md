@@ -82,11 +82,18 @@ default) puts it in its own Xvfb; `tools/game.sh` shows it on screen unless
 - **UI opened from code** only shows once the menu has finished appearing (about 3 s after Setup).
 - **Screenshots:** `tools/game.sh shot file.png` (ImageMagick `import` of the
   game's display). Simulate clicks with `TOME_DEBUG_CLICKS="x,y@ms;..."`
-  (fractions of the window). Start each part with `wait:<log text>@0`
+  (fractions of the window; `move:x,y@ms` moves the cursor without a
+  click, 1 being the last pixel, for edge scrolling). Start each part with `wait:<log text>@0`
   (`Main menu set up`, `Screen: <name>`, `Game started: `): later times
   count from the wait, so slow software rendering doesn't break the script.
 - **Check `ret N` before mapping a function's `sig`.** A hook pops what
   the signature says; one stack argument too few crashed the game.
+- **A game on screen reads your real mouse:** once its window has the focus
+  (`restore@ms`), a cursor at or past the window's edge scrolls the camera,
+  off the map into black. For screenshots of a game, set
+  `mousescrolldisable` to 1 in the test prefix
+  (`WINEPREFIX=$PWD/build/test-env/wine wine reg add 'HKCU\Software\Blizzard Entertainment\Warcraft III\Gameplay' /v mousescrolldisable /t REG_DWORD /d 1 /f`)
+  and back to 0 after.
 - **Keys in tests:** `TOME_DEBUG_CLICKS` items `key:Ctrl+J@ms` press a key
   through `keybd_event` (real modifier state); the window needs the focus,
   which it always has in Xvfb (`HEADLESS=1`), not always on screen.

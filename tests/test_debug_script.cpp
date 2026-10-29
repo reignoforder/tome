@@ -27,6 +27,18 @@ TEST(debug_script_parses_every_kind) {
     CHECK_EQ(steps[6].at_ms, uint32_t(5000));
 }
 
+TEST(debug_script_move) {
+    std::vector<std::string> bad;
+    auto steps = parse("move:0,1@100;move:0.5@5;move:,0.5@5", bad);
+    CHECK_EQ(steps.size(), size_t(1));
+    if (!steps.empty()) {
+        CHECK(steps[0].kind == Kind::Move);
+        CHECK(steps[0].x == 0.0 && steps[0].y == 1.0);
+        CHECK_EQ(steps[0].at_ms, uint32_t(100));
+    }
+    CHECK_EQ(bad.size(), size_t(2));
+}
+
 TEST(debug_script_reports_bad_items) {
     std::vector<std::string> bad;
     auto steps = parse("0.5,0.5;close@x;0.1,0.2@30;;close@10extra;key:@5;minimize@;-1,0.5@5;0.5@5;closer@5", bad);

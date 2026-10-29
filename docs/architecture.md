@@ -140,7 +140,14 @@ docs/
      (a TICK, a hook) could be called before the mod is set up: while a
      mod's `tome_mod_load` or `tome_mod_enable` runs, guarded calls into it
      from other threads are skipped (`tome_mod::starting_on`). Then it
-     signals `natives::set_mods_ready()`, which InitNatives waits on (≤ 10 s);
+     signals `mods_ready::set()`, which two of the game's steps wait on
+     (≤ 10 s, `mods_ready.cpp`): InitNatives, and the game opening its sound
+     device (a BEFORE handler at the highest priority on game.dll's
+     `AIL_open_digital_driver` import, installed in DllMain, which runs
+     inside Miles' `AIL_startup` just before). Mods are thus loaded and
+     enabled before sound starts, and can choose the device; the open call's
+     own hook chain is fixed by then, so they act in `tome_mod_load` (e.g. by
+     patching Miles) rather than by hooking that import;
    - finds the game window and installs the main-thread dispatcher;
    - starts the file watcher.
 4. **Later changes** (state.json edits, DLL rebuilds, menu clicks) always run

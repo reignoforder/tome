@@ -63,6 +63,7 @@ add_library(tome_loader SHARED
     src/mappings.cpp
     src/mod_manager.cpp
     src/mod_menu.cpp
+    src/mods_ready.cpp
     src/natives.cpp
     src/overlay.cpp
     src/packages.cpp

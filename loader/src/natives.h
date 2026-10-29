@@ -22,11 +22,6 @@ namespace tome::natives {
 // right after the built-in ones. Safe to call from DllMain.
 bool install_hooks(uintptr_t game_base, const BuildMappings& build, std::string& report);
 
-// Signals that the initial mod load finished. Until then (at most 10 s) the
-// InitNatives hook waits, so a map that loads immediately (-loadfile) never
-// sees natives whose mod hasn't been enabled yet. Idempotent.
-void set_mods_ready();
-
 // How many maps have started loading (InitNatives calls after startup; the
 // game's startup call runs before Tome is loaded). Main thread.
 unsigned map_load_count();

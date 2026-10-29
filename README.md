@@ -145,8 +145,10 @@ A mod is a folder with a `tome.mod.json` and, optionally, a 32-bit DLL:
 
 The SDK builds without the rest of this repository too:
 `cmake --build build --target sdk-dist` makes `build/tome-sdk-<version>.zip`.
-`fps-unlock`, which lifts the frame rate above 60, is a mod built against
-the SDK in its own repository next to this one.
+`enhanced-options`, which adds what the game's Options screen is missing
+(window modes, refresh rate, frame rates above 60 with vsync and an FPS
+counter), is a mod built against the SDK in its own repository next to
+this one. It replaces the earlier `fps-unlock`.
 
 ## Environment variables
 

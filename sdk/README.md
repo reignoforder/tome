@@ -59,6 +59,8 @@ helpers check for you.
   publish and subscribe to messages.
 - **The mapping database** [2]: addresses of game functions and data by name
   (`resolve`), so a mod needs no build-specific numbers.
+- **Game files** [14]: read any file as the game would, through its archives
+  and the mods' assets (`read_game_file`).
 
 A mod built against an older `tome.h` keeps working with a newer Tome: the
 API only ever grows.
@@ -124,6 +126,11 @@ For your own test setups:
   thread that called the game function. The game isn't thread-safe: change
   it only from those calls. Each function in `tome.h` says where it may be
   called.
+- **Before sound starts.** The first mod load (each mod's `tome_mod_load`
+  and `tome_mod_enable`) finishes before the game opens its sound device
+  (Miles' `AIL_open_digital_driver`): Tome holds the game until then (at
+  most 10 s). Code that must run before that, such as choosing the device,
+  goes in `tome_mod_load`.
 - **Crashes stay contained.** A fault in a mod's code, or a C++ exception or
   Rust panic the helpers catch, stops that call, logs where it happened, and
   disables the mod. The game keeps running. Threads a mod starts itself

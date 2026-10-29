@@ -124,6 +124,10 @@
       "kind": "offset", "value": "0xd4",
       "doc": "void __thiscall Show(void). Also shows every child."
     },
+    "CLayoutFrame.points": { "kind": "offset", "value": "0x8", "doc": "The frame's anchor points, one pointer per point (TOPLEFT 0 ... BOTTOMRIGHT 8), NULL where unset. A point (made by 0x11E3C0) holds the relative CLayoutFrame* at +4, the relative point at +8 and the offsets x, y at +0xC, +0x10, multiplied by the frame's own scale. SetAllPoints (0x1114B0) clears the points (0x110A00) and sets TOPLEFT and BOTTOMRIGHT." },
+    "CLayoutFrame.dependents": { "kind": "offset", "value": "0x40", "doc": "The frames anchored to this one (0x111280 adds them): a list whose first node is here and ends at a value <= 0; a node's next is at +8, the dependent CLayoutFrame* at +0xC, flags at +0x10." },
+    "CLayoutFrame.scale": { "kind": "offset", "value": "0x60", "doc": "float, 1 by default: multiplies the frame's width (+0x58) and height (+0x5C) (0x110BA0, 0x110B50) and its anchor offsets. A top-level frame without anchors keeps its rectangle at +0x44 (left, bottom, top, right; CGameUI's is 0, 0, 0.6, 0.8)." },
+    "CLayoutFrame.vtable.SetScale": { "kind": "offset", "value": "0x14", "doc": "vtable slot of the CLayoutFrame: void(CLayoutFrame* this, float scale), thiscall, ret 4. The base (0x111540) stores CLayoutFrame.scale and updates the layout; CSimpleFrame's (0x10DD00, the frame itself) passes it to its child frames (+0xD8) and regions (+0x120), CFrame's (0x0F6410, on frame + CFrame.layout) to its child frames, and CSpriteFrame's (0x0F7700) also scales its model. Children get the same value, not a product." },
     "CLayoutFrame::SetPoint": {
       "kind": "function", "rva": "0x00111600", "conv": "thiscall",
       "sig": "void(CLayoutFrame* this, int point, CLayoutFrame* relative, int relative_point, float x, float y, int update)",
@@ -146,9 +150,12 @@
       "bytes": "55 8b ec 83 ec 10 53 8b d9 89 55 fc 56 8b 73 30",
       "doc": "Picks the sequence whose name matches the tags, e.g. {stand, options, alternate}."
     },
+    "AnimTag.birth": { "kind": "constant", "value": 0 },
+    "AnimTag.death": { "kind": "constant", "value": 1 },
     "AnimTag.stand": { "kind": "constant", "value": 2 },
     "AnimTag.morph": { "kind": "constant", "value": 3 },
     "AnimTag.alternate": { "kind": "constant", "value": 4 },
+    "AnimTag.singleplayer": { "kind": "constant", "value": 7, "doc": "The Single Player screen's sequences; on the top-right sprite (CGlueMgr.sprite_top_right) a box for 5 buttons, where \"options\" is one for 3." },
     "AnimTag.options": { "kind": "constant", "value": 23 },
 
     "CGlueMenu::BindControl": {
@@ -173,11 +180,64 @@
       "doc": "Binds the menu buttons."
     },
 
+    "COptionsMenu.vtable": { "kind": "data", "rva": "0x00aa7170", "doc": "The Options screen (Glue\\OptionsMenu.fdf); its OptionsMenu frame is the COptionsMenu." },
+    "COptionsMenu::OnEvent": {
+      "kind": "function", "rva": "0x002b4470", "conv": "thiscall",
+      "sig": "int(COptionsMenu* this, CEvent* event)",
+      "bytes": "55 8b ec 8b 45 08 56 8b f1 8b 40 08 83 f8 18 77",
+      "doc": "vtable slot 3. Command id at event + 8, jump table over 0-0x18: the tabs Gameplay 0, Video 1, Sound 2 (each enables the control at +0x29C, then SetPanel); 0xF, 0x11 and 0x12 are steps of the panel animations. ret 4."
+    },
+    "COptionsMenu::SetPanel": {
+      "kind": "function", "rva": "0x002ba780", "conv": "thiscall",
+      "sig": "void(COptionsMenu* this, int panel)",
+      "bytes": "55 8b ec 8b 45 08 57 8b f9 39 87 6c 01 00 00 0f",
+      "doc": "Switches the shown panel (OptionsPanel.*), stored at +0x16C; returns at once if it's already that one. Fades the old panel frame (+0x1E4, kept in +0x1E8) out and picks the new one (+0x1FC gameplay, +0x234 video, +0x26C sound, none for 3); with no old panel, plays the panel backdrop's opening morph first. Only the three tabs' handlers call it. ret 4."
+    },
+    "COptionsMenu::AnimateBackdrop": {
+      "kind": "function", "rva": "0x002aa3a0", "conv": "thiscall",
+      "sig": "void(COptionsMenu* this, int open)",
+      "bytes": "55 8b ec 83 ec 1c a1 ?? ?? ?? ?? 33 c5 89 45 fc 83 7d 08 00 56 6a 00 6a 00 8b f1 b9 01",
+      "doc": "Plays the panel backdrop sprite's (+0x184) opening morph (open 1; event OptionsMenuEvent.panel_fade_in when done) or closing morph (0; event 0x12, which opens it again for the next panel). Name guessed. ret 4."
+    },
+    "COptionsMenu::Save": {
+      "kind": "function", "rva": "0x002b8e80", "conv": "thiscall", "sig": "void(COptionsMenu* this)",
+      "bytes": "55 8b ec 83 ec 08 53 56 8b f1 57 89 75 f8 e8 3d",
+      "doc": "OK on the Options screen (command 3, 0x2B5EE0, after applying the video choices): reads every control into Options::SetInt (sliders' +0x1F4 through ftol, checkboxes' CControlState.checked, popups' +0x1F0, the resolution's display mode into ids 0-4), then Options::Save(Option.all). Plain ret."
+    },
+    "COptionsMenu.panel": { "kind": "offset", "value": "0x16c", "doc": "int: the shown panel, an OptionsPanel.* (the constructor 0x2A6A00 sets 3, none)." },
+    "COptionsMenu.panel_frame": { "kind": "offset", "value": "0x1e4", "doc": "CFrame*: the frame of the panel being shown, NULL for OptionsPanel.none. The one fading out is at +0x1E8." },
+    "OptionsMenuEvent.panel_fade_in": { "kind": "constant", "value": "0x11", "doc": "COptionsMenu::OnEvent command posted when the backdrop has opened: shows and fades in the panel frame (+0x1E4) without checking it for NULL, so it crashes after SetPanel(OptionsPanel.none) from another panel." },
+    "CEvent.command": { "kind": "offset", "value": "0x8", "doc": "int: the command id a glue menu's OnEvent switches on (a control's registration command, or an animation step's id)." },
+    "OptionsPanel.gameplay": { "kind": "constant", "value": 0, "doc": "COptionsMenu::SetPanel: GameplayPanel." },
+    "OptionsPanel.video": { "kind": "constant", "value": 1, "doc": "COptionsMenu::SetPanel: VideoPanel." },
+    "OptionsPanel.sound": { "kind": "constant", "value": 2, "doc": "COptionsMenu::SetPanel: SoundPanel." },
+    "OptionsPanel.none": { "kind": "constant", "value": 3, "doc": "COptionsMenu::SetPanel: no panel, as the screen opens." },
+
     "CGlueMgr::Get": {
       "kind": "function", "rva": "0x002de540", "conv": "cdecl", "sig": "CGlueMgr*(void)",
       "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 08 a1 ?? ?? ?? ?? 33 c5 50 8d 45 f4 64 a3 00 00 00 00 a1 ?? ?? ?? ?? 85 c0 75 3d",
       "doc": "The glue (menu) manager singleton, created on first use."
     },
+    "CGlueMgr.instance": { "kind": "data", "rva": "0x00d698ec", "doc": "CGlueMgr*: the glue manager, set once its constructor (0x2C54E0) has returned. NULL before; reading it creates nothing, unlike CGlueMgr::Get (whose construction builds the sprite layers, which call SetAnimation)." },
+    "CGlueMgr.sprite_background": { "kind": "offset", "value": "0x190", "doc": "CSpriteFrame*: the glue screens' background sprite layer (skin key GlueSpriteLayerBackground), made by 0x2E0930." },
+    "CGlueMgr.sprite_top_left": { "kind": "offset", "value": "0x194", "doc": "CSpriteFrame*: the top-left sprite layer (GlueSpriteLayerTopLeft, TopLeftPanel[-Expansion].mdx): the chained panel on the left." },
+    "CGlueMgr.sprite_top_right": { "kind": "offset", "value": "0x198", "doc": "CSpriteFrame*: the top-right sprite layer (GlueSpriteLayerTopRight, TopRightPanel[-Expansion].mdx): the chained box behind each screen's buttons on the right, sized per screen by its sequences (\"Options Stand\": 3 buttons)." },
+    "CMainMenu.gateways": { "kind": "offset", "value": "0x4a0", "doc": "CBattleNetGateways*: the Battle.net gateways (servers), made by CMainMenu's constructor (0x2C5A40, from 0x2C5C2F) each time the main menu is built: LoadRegistry(\"Warcraft III\", \"Battle.net Gateways\"), else BattleNet\\bnserver-WAR3.ini from the archives, then realms.ini merged into a second list. Gone while another screen shows: the registry is what lasts." },
+    "CBattleNetGateways::LoadRegistry": {
+      "kind": "function", "rva": "0x0030e010", "conv": "thiscall", "sig": "bool(CBattleNetGateways* this, const char* key, const char* value)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 81 ec 44 02 00 00 a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 89 8d b0",
+      "doc": "Reads the gateways from a REG_MULTI_SZ under HKCU\\Software\\Blizzard Entertainment\\<key> (Storm's registry), e.g. (\"Warcraft III\", \"Battle.net Gateways\"): a version (at least 1001), the selected index (decimal, counted from 0 across both lists), then host, time zone and name for each. Replaces the version, the selection and the first list; false (and nothing changed) if the value is missing or malformed. ret 8."
+    },
+    "CBattleNetGateways.version": { "kind": "offset", "value": "0x0", "doc": "int: the list's version (1001)." },
+    "CBattleNetGateways.selected": { "kind": "offset", "value": "0x4", "doc": "int: the selected gateway, an index into the first list and then the second (0x2DF620 returns -1 if it's past both)." },
+    "CBattleNetGateways.count": { "kind": "offset", "value": "0xc", "doc": "uint32_t: gateways in the first list (the registry's or bnserver-WAR3.ini's)." },
+    "CBattleNetGateways.entries": { "kind": "offset", "value": "0x10", "doc": "Gateway*: the first list, 0x204 bytes each." },
+    "CBattleNetGateways.extra_count": { "kind": "offset", "value": "0x1c", "doc": "uint32_t: gateways in the second list (realms.ini's)." },
+    "CBattleNetGateways.extra_entries": { "kind": "offset", "value": "0x20", "doc": "Gateway*: the second list." },
+    "Gateway.size": { "kind": "constant", "value": "0x204", "doc": "A Battle.net gateway: int time zone at +0, host at +4 (0x100 chars), name at +0x104 (0x100 chars). CBattleNetGateways::GetGateway is 0x2DECC0." },
+    "Gateway.zone": { "kind": "offset", "value": "0x0", "doc": "int: the gateway's time zone (hours west of UTC: 8 for U.S. West)." },
+    "Gateway.host": { "kind": "offset", "value": "0x4", "doc": "char[0x100]: the server's host name." },
+    "Gateway.name": { "kind": "offset", "value": "0x104", "doc": "char[0x100]: the name the Gateway Selection panel shows." },
     "CGlueMgr::SetScreen": {
       "kind": "function", "rva": "0x00303c90", "conv": "fastcall", "sig": "void(int screen, int force)",
       "bytes": "55 8b ec 81 ec 8c 02 00 00 a1 ?? ?? ?? ?? 33 c5 89 45 fc 53 56",
@@ -242,11 +302,24 @@
     "CItem.vtable": { "kind": "data", "rva": "0x00b77aa8", "doc": "CItem's vtable (RTTI)." },
     "CDestructable.vtable": { "kind": "data", "rva": "0x00b7d708", "doc": "CDestructable's vtable (RTTI)." },
     "CDestructable.type_id": { "kind": "offset", "value": "0x30", "doc": "uint32_t: the destructable type, e.g. 'LTlt' (GetDestructableTypeId, 0x1FFA70); GetUnitTypeName names it too." },
+    "CAbility.vtable.GetCooldownRemaining": { "kind": "offset", "value": "0x2dc", "doc": "vtable slot: float*(CAbility* this, float* out, uint32_t command), thiscall, ret 8: the seconds left on the ability's cooldown, 0 when none (the base class always 0). Abilities with a cooldown (0x4149F0) read their timer at +0xD0 (vtable +0x18) while flag 0x200 of +0x20 is set and 0x400 isn't; +0xB0 is the cooldown's length. +0x2E0 gives the fraction left. The command card's sweep calls both (0x3D2F30, 0x3B62D0) with CCommandButtonData.command." },
     "CAbility.type_id": { "kind": "offset", "value": "0x34", "doc": "uint32_t: the ability's type, e.g. 'AHwe' (GetSpellAbilityId reads it through 0x684140)." },
     "CAbilitySpell.vtable.GetTargetWidget": { "kind": "offset", "value": "0x3c8", "doc": "vtable slot: CWidget*(CAbility* this), thiscall: the spell's target widget or null (GetSpellTargetUnit, 0x202D00). Spell abilities only (CAbilitySpell and its subclasses, e.g. CAbilityItemHeal); every ability a spell event passes is one." },
     "CAbilitySpell.vtable.GetTargetX": { "kind": "offset", "value": "0x3cc", "doc": "vtable slot: float*(CAbility* this, float* out), thiscall, ret 4: the target point's x (GetSpellTargetX, 0x202E30). CAbilitySpell itself returns 0." },
     "CAbilitySpell.vtable.GetTargetY": { "kind": "offset", "value": "0x3d0", "doc": "vtable slot: like GetTargetX, for y (GetSpellTargetY, 0x202F10)." },
     "CUnit.type_id": { "kind": "offset", "value": "0x30", "doc": "uint32_t: the unit type, e.g. 'hpea' (GetUnitTypeId)." },
+    "CUnit.vtable.IsVisibleTo": { "kind": "offset", "value": "0xfc", "doc": "vtable slot: int(CUnit* this, int player_slot, int, int flags), thiscall: whether the player sees the unit now (fog, invisibility). IsUnitVisible (0x2068D0) passes (slot, 0, 4)." },
+    "CPlayerWar3.alliances": { "kind": "offset", "value": "0x38", "doc": "The player's alliance settings, NULL until first used (0x25BA40 makes them): 16 bytes per alliance type from +0x38, each a reference (+8, +0xC) the object lookup 0x54530 resolves to an object whose +0x78 is a bitmask of player slots. GetPlayerAlliance (0x2016A0) reads it so; type 0 is ALLIANCE_PASSIVE." },
+    "PlayerAlliances.passive": { "kind": "offset", "value": "0x38", "doc": "The ALLIANCE_PASSIVE entry of CPlayerWar3.alliances (type t is at 0x38 + 16 t): an object reference, its two words at +8 and +0xC, for ObjectLookup." },
+    "AllianceFlags.players": { "kind": "offset", "value": "0x78", "doc": "uint32_t: the bitmask of player slots an alliance entry's object holds (bit n: allied with player n)." },
+    "ObjectLookup": {
+      "kind": "function", "rva": "0x00054530", "conv": "fastcall", "sig": "void*(uint32_t id_a, uint32_t id_b)",
+      "bytes": "53 56 8b 35 ?? ?? ?? ?? 8b da 57 8b f9 c1 ef 1f",
+      "doc": "Resolves a two-word object reference (as kept at +8/+0xC of alliance entries, or +0xC/+0x10 of a unit handle's record) to the object, or NULL. Read only. Plain ret."
+    },
+    "ObjectRecord.tag": { "kind": "offset", "value": "0xc", "doc": "uint32_t: the type tag of what ObjectLookup returns; ObjectTag.agent for a game object (an agent: unit, ability, ...). The game checks it with ObjectRecord.dead before trusting a raw agent pointer (0x3B62D0 does, with the agent's own reference at +0xC/+0x10)." },
+    "ObjectRecord.dead": { "kind": "offset", "value": "0x20", "doc": "int: nonzero once the agent is gone (ObjectLookup still finds its record)." },
+    "ObjectTag.agent": { "kind": "constant", "value": "0x2b61676c", "doc": "'+agl', ObjectRecord.tag of an agent (881 compares in game.dll)." },
     "CUnit.owner": { "kind": "offset", "value": "0x58", "doc": "int: the owner's player slot (the unit's vtable +0xEC returns it; GetOwningPlayer)." },
     "CUnit.flags": { "kind": "offset", "value": "0x5c", "doc": "uint32_t flags; see UnitFlag.*." },
     "UnitFlag.dead": { "kind": "constant", "value": "0x100", "doc": "CUnit.flags: dead (vtable +0x13C, IsUnitType DEAD)." },
@@ -706,11 +779,86 @@
       "bytes": "55 8b ec 83 7d 10 00 8b 55 0c 74 16 85 d2 74 12 8b 01 52 ff 75 08 68 64 00 09",
       "doc": "Makes clicks on the control reach listener->OnEvent with `command` (event 0x40090064). The registration holds a reference to the listener (refcount at +4)."
     },
+    "CControl::HasState": {
+      "kind": "function", "rva": "0x001120c0", "conv": "thiscall", "sig": "bool(CControl* this, uint32_t flags)",
+      "bytes": "55 8b ec 8b 91 d4 01 00 00 33 c0 23 55 08 3b 55",
+      "doc": "True if every bit of flags is set in the control's state (+0x1D4), e.g. CControlState.checked. ret 4."
+    },
+    "CControl::AddState": {
+      "kind": "function", "rva": "0x00112030", "conv": "thiscall", "sig": "void(CControl* this, uint32_t flags)",
+      "bytes": "55 8b ec 8b 81 d4 01 00 00 8b 91 d8 01 00 00 0b",
+      "doc": "Sets bits of the control's state (+0x1D4; bits forced on at +0x1D8 stay); if that changed anything, tail-calls vtable +0xF0 with the changed bits, which updates its look. Doesn't notify listeners. ret 4."
+    },
+    "CControl::RemoveState": {
+      "kind": "function", "rva": "0x00113050", "conv": "thiscall", "sig": "void(CControl* this, uint32_t flags)",
+      "bytes": "55 8b ec 8b 55 08 8b 81 d4 01 00 00 f7 d2 23 d0",
+      "doc": "Clears bits of the control's state, as CControl::AddState sets them. ret 4."
+    },
+    "CControlState.enabled": { "kind": "constant", "value": "0x1", "doc": "CControl state bit of an enabled control: off, it's greyed and ignores clicks. vtable +0x10C (SetEnabled) sets or clears just this bit." },
+    "CControlState.checked": { "kind": "constant", "value": "0x20", "doc": "CControl state bit of a checked CHECKBOX/GLUECHECKBOX; clicking toggles it." },
+    "CSlider::SetValue": {
+      "kind": "function", "rva": "0x000ff110", "conv": "thiscall", "sig": "void(CSlider* this, float value, int notify)",
+      "bytes": "55 8b ec f3 0f 10 45 08 56 8b f1 f3 0f 10 8e f0",
+      "doc": "Moves a SLIDER to value; the Options screen passes notify 1. ret 8."
+    },
+    "CSlider.value": { "kind": "offset", "value": "0x1f4", "doc": "float: a SLIDER's value." },
+    "CPopupMenu::SetItem": {
+      "kind": "function", "rva": "0x00107f00", "conv": "thiscall", "sig": "void(CPopupMenu* this, int item)",
+      "bytes": "55 8b ec 8b 45 08 56 8b f1 50 8b 8e ec 01 00 00",
+      "doc": "Selects a POPUPMENU's item by index (its MENU's MenuItem order). ret 4."
+    },
+    "CPopupMenu::AddItem": {
+      "kind": "function", "rva": "0x00107850", "conv": "thiscall", "sig": "int(CPopupMenu* this, const char* text, int value)",
+      "bytes": "55 8b ec 56 57 ff 75 0c 8b f1 ff 75 08 8b 8e ec",
+      "doc": "Adds an item to the popup's MENU (+0x1EC), as an FDF MenuItem \"text\", value does (the Options screen passes -2, like its FDFs); the first item becomes the selected one and the title. The Options screen fills its Resolution menu with it (0x2B7304). ret 8."
+    },
+    "CPopupMenu.menu": { "kind": "offset", "value": "0x1ec", "doc": "CMenu*: the popup's list of items (FDF PopupMenuFrame)." },
+    "CMenu.item_count": { "kind": "offset", "value": "0x1f0", "doc": "uint32_t: a MENU's number of items." },
+    "CPopupMenu.item": { "kind": "offset", "value": "0x1f0", "doc": "int: a POPUPMENU's selected item." },
     "CControl::Click": {
       "kind": "function", "rva": "0x00112100", "conv": "thiscall", "sig": "void(CControl* this, int button)",
       "bytes": "55 8b ec 56 68 64 00 09 40 8b f1 e8 80 00 f6 ff",
       "doc": "Clicks the control as the player would: if it's enabled (0x072190 with 0x40090064), fills the event at 0xCE3BA8 (button at +0x10, the control at +0x14) and dispatches it through its vtable +0x10, which notifies its listeners. ret 4. Mouse paths pass the mouse event's button; a shortcut path (0x0FEA8F) passes 1."
     },
+    "CLayoutFrame::ClearAllPoints": {
+      "kind": "function", "rva": "0x00110a00", "conv": "thiscall", "sig": "void(CLayoutFrame* this)",
+      "bytes": "53 8b d9 56 57 8b 7b 04 8d 73 08 85 ff 74 2d 90",
+      "doc": "Removes all of the frame's anchor points (SetAllPoints, 0x1114B0, calls it first)."
+    },
+    "CreateSimpleFrame": {
+      "kind": "function", "rva": "0x000e47e0", "conv": "fastcall", "sig": "CSimpleFrame*(const char* template_name, CSimpleFrame* parent, int context)",
+      "bytes": "55 8b ec 56 51 b9 ?? ?? ?? ?? 8b f2 e8 ef a6 fd",
+      "doc": "CreateFrame for SIMPLEFRAME definitions (the template must be a simple one, flag 0x8000000 at +0x48, else NULL). The parent may be NULL (the console is made so, 0x367FED). The new frame gets its parent's level + 1 and scale (SetParent 0x10DDA0). ret 4."
+    },
+    "CSimpleFrame.level": { "kind": "offset", "value": "0x84", "doc": "int: the frame's level, its parent's + 1 (0 without a parent); a lower level draws first. Only takes effect when the frame is shown again: the game raises the console's by 1 between a hide and a show (0x368006)." },
+    "CSimpleFrame.shown": { "kind": "offset", "value": "0x94", "doc": "int: nonzero while the frame is shown." },
+    "CSimpleFrame.show_flag": { "kind": "offset", "value": "0x90", "doc": "int: whether the frame should show. The game sets it to 0 before CSimpleFrame.vtable.Hide and to 1 before Show (0x368016, 0x10DDBE); Show (0x10DE60) does nothing while it's 0 or while the parent (+0x6C) isn't shown (CSimpleFrame.shown)." },
+    "CSimpleFrame.children": { "kind": "offset", "value": "0xd8", "doc": "The frame's child frames, a list (node: next at +4, the child at +8; ends at a value <= 0). CSimpleFrame's SetScale walks it. Hide and Show don't: they only hide or show the frame's own regions (+0x120), so a child's OnHide (vtable +0x30) and OnShow (+0x2C) don't run with its parent's." },
+    "CSimpleFrame.vtable.OnHide": { "kind": "offset", "value": "0x30", "doc": "vtable slot of a simple frame: void(CSimpleFrame* this), thiscall, what Hide (0x10D410) calls for the frame itself (OnShow is +0x2C, from Show 0x10DE60); empty in CSimpleFrame (0x10D830). CHeroBarButton's (0x3C03C0) hides the glow of a hero with points to spend (a CSpriteFrame at +0x1D8), and its OnShow (0x3C1910) shows it if the hero has some (+0x1D4). The game also shows that glow when the hero gains a point, whether the button shows or not." },
+    "CSimpleFrame.vtable.Hide": { "kind": "offset", "value": "0x64", "doc": "vtable slot of a simple frame: void(CSimpleFrame* this), thiscall. Not CFrame's +0xD0." },
+    "CSimpleFrame.vtable.Show": { "kind": "offset", "value": "0x68", "doc": "vtable slot of a simple frame: void(CSimpleFrame* this), thiscall. Not CFrame's +0xD4." },
+    "CLayoutFrame::SetHeight": {
+      "kind": "function", "rva": "0x00111520", "conv": "thiscall", "sig": "void(CLayoutFrame* this, float height)",
+      "bytes": "55 8b ec f3 0f 10 45 08 f3 0f 11 41 5c c7 45 08",
+      "doc": "Stores the height at +0x5C, then updates the layout (tail call to 0x111390, ret 4). Like SetWidth."
+    },
+    "CSimpleFontString::SetScale": {
+      "kind": "function", "rva": "0x00114af0", "conv": "thiscall", "sig": "void(CSimpleFontString* this, float scale)",
+      "bytes": "55 8b ec 81 ec 88 00 00 00 a1 ?? ?? ?? ?? 33 c5 89 45 fc f3 0f 10 55",
+      "doc": "CLayoutFrame.vtable.SetScale of a font string (vtable 0xA8D760; CSimpleFrame's SetScale calls it for its regions). If the scale changed, stores it (0x111540) and, with a font loaded (+0x8C), loads it again through SetFont (0x1148A0: height at +0x90, font made at scale x height, the text laid out again) through SetFont with the height multiplied by 0.6 (0x8B38A0) and flags 0: the text comes out smaller than the string's own font at that scale, and SetFont keeps the smaller height, so every change shrinks it again (checked in game). ret 4."
+    },
+    "CSimpleFontString::SetFont": {
+      "kind": "function", "rva": "0x001148a0", "conv": "thiscall", "sig": "int(CSimpleFontString* this, const char* font, float height, int flags)",
+      "bytes": "55 8b ec f3 0f 10 45 0c 56 8b f1 57 bf 01 00 00",
+      "doc": "Stores the height (+0x90), releases the old font (+0x8C) and gets the font at CLayoutFrame.scale x height with the flags (FDF FontFlags; part of the font cache's key \"%s-%d-%f\", 0x19D580), then lays the text out again (0x115260, height x scale). A string definition calls it with its font, height and flags (0x116402). Returns nonzero if the font was made. ret 0xC."
+    },
+    "CSimpleFontString.height": { "kind": "offset", "value": "0x90", "doc": "float: the font height as set (FDF Font, SetFont 0x1148A0), in UI units before CLayoutFrame.scale. CSimpleFontString::SetScale passes it to SetFont multiplied by 0.6." },
+    "CMinimap::ReleaseResources": {
+      "kind": "function", "rva": "0x003aeb40", "conv": "thiscall", "sig": "void(CMinimap* this)",
+      "bytes": "56 57 8b f1 e8 47 71 00 00 8b 8e 7c 01 00 00 85",
+      "doc": "Frees the minimap's textures and clears +0x1CC. The minimap's per-frame update (vtable +0x2C, 0x3C1CB0) sets it up again while +0x1CC is 0 (vtable +0xE4, 0x3B7E30), from its frame's rectangle: the only time its picture and its map-to-screen transform (+0x750) follow the frame's size. The setup calls it first, as does the destructor and 0x211DEA (on CGameUI.minimap). ret."
+    },
+    "CLayoutFrame.width": { "kind": "offset", "value": "0x58", "doc": "float: the frame's width as set (SetWidth), before CLayoutFrame.scale; the height follows at +0x5C." },
     "CLayoutFrame::SetWidth": {
       "kind": "function", "rva": "0x001116c0", "conv": "thiscall", "sig": "void(CLayoutFrame* this, float width)",
       "bytes": "55 8b ec f3 0f 10 45 08 f3 0f 11 41 58 c7 45 08",
@@ -746,6 +894,39 @@
     "CGameUI.paused_by_player": { "kind": "offset", "value": "0x258", "doc": "int: set by CGameUI::SetPaused from a player's pause or resume (a3 = 1): 1 while a player has the game paused." },
     "CGameUI.paused_by_trigger": { "kind": "offset", "value": "0x260", "doc": "int: set by CGameUI::SetPaused when a5 = 1 (PauseGame): 1 while a trigger has the game paused; a player's resume can't end that." },
     "CGameUI.mode": { "kind": "offset", "value": "0x1b4", "doc": "The current mode object (CEscMenu while the Esc menu is open)." },
+    "CGameUI.camera": { "kind": "offset", "value": "0x254", "doc": "The local player's game camera (0x36B190 returns it), what SetCameraField and GetCameraField change and read." },
+    "GameCamera::SetField": {
+      "kind": "function", "rva": "0x00362ed0", "conv": "thiscall", "sig": "void(GameCamera* this, int field, float value, float duration, int unknown)",
+      "bytes": "55 8b ec f3 0f 10 45 10 0f 57 d2 f3 0f 5c c2 83",
+      "doc": "Moves a camera field (CameraField.*) to value over duration seconds: what the native SetCameraField (0x211E00) does, on CGameUI.camera, with unknown = 1. Name guessed. ret 0x10."
+    },
+    "GameCamera::GetField": {
+      "kind": "function", "rva": "0x00360740", "conv": "thiscall", "sig": "float(GameCamera* this, int field)",
+      "bytes": "55 8b ec 8b 45 08 83 ec 24 83 f8 09 0f 87 f7 00",
+      "doc": "A camera field's current value (on the x87 stack): what the native GetCameraField (0x1FF430) returns. Name guessed. ret 4."
+    },
+    "CameraField.target_distance": { "kind": "constant", "value": "0x0", "doc": "CAMERA_FIELD_TARGET_DISTANCE: the camera's distance from its target, 1650 by default." },
+    "CameraField.farz": { "kind": "constant", "value": "0x1", "doc": "CAMERA_FIELD_FARZ: the far clipping distance, 5000 by default; farther terrain isn't drawn." },
+    "CameraPresets": { "kind": "data", "rva": "0x00a9f4e0", "doc": "float[4][4]: the classic zoom levels the mouse wheel steps through in a game (the camera code loads them with movaps, 0x35EAA2, 0x360122): heights 160, angles of attack 304/311/318/325, distances 1650/1600/1500/1400. The wheel only zooms in from the default." },
+    "CGameUI.world_frame": { "kind": "offset", "value": "0x3bc", "doc": "The CWorldFrameWar3 (a CFrame) the world is drawn in: anchored to the game UI with BOTTOMLEFT (0, 0.13) and TOPRIGHT (0, -0.02) (0x367EA7), between the console and the top bar. Moving its anchors moves the 3D view's edges." },
+    "CGameUI.console": { "kind": "offset", "value": "0x428", "doc": "The console, a CSimpleConsole (simple frame) made from the FDF frame the skin key \"SimpleConsole\" names (\"ConsoleUI\", UI\\FrameDef\\UI\\ConsoleUI.fdf: the top bar's and the bottom console's textures), anchored to all of the game UI. The command card, info panel, resource bar and top-left menu buttons are its children: its scale reaches them." },
+    "CGameUI.console_upper": { "kind": "offset", "value": "0x420", "doc": "A second CSimpleConsole (0x3A1690), anchored to all of the game UI." },
+    "CGameUI.minimap_layer": { "kind": "offset", "value": "0x41c", "doc": "A full-screen CFrame (0x0F54C0) holding the minimap (CMinimap, CGameUI +0x3C0) and the clock (CTimeOfDayIndicator, +0x3F8)." },
+    "CGameUI.portrait_layer": { "kind": "offset", "value": "0x424", "doc": "A full-screen CFrame (0x0F54C0) holding the portrait (CPortraitButton, CGameUI +0x3F4)." },
+    "CGameUI.resource_bar": { "kind": "offset", "value": "0x3cc", "doc": "The CResourceBar (simple frame), anchored TOPRIGHT to the game UI." },
+    "CGameUI.hero_bar": { "kind": "offset", "value": "0x3dc", "doc": "The CHeroBar (simple frame), the hero icons: TOPLEFT to the game UI at (0.0037, -0.0262)." },
+    "CGameUI.peon_bar": { "kind": "offset", "value": "0x3e0", "doc": "The CPeonBar (simple frame), the idle worker button: BOTTOMLEFT to the game UI at (0.0037, 0.17)." },
+    "CGameUI.minimap": { "kind": "offset", "value": "0x3c0", "doc": "The CMinimap (a CFrame), anchored to CGameUI.minimap_layer's BOTTOMLEFT at (0.0094, 0.0069) and (0.1488, 0.145). Not in the layer's child list: the layer's scale doesn't reach it." },
+    "CGameUI.portrait": { "kind": "offset", "value": "0x3f4", "doc": "The CPortraitButton (a CSpriteFrame), 0.09 x 0.0856, BOTTOMLEFT to CGameUI.portrait_layer's at (0.2075, 0.0306)." },
+    "CGameUI.time_of_day": { "kind": "offset", "value": "0x3f8", "doc": "The CTimeOfDayIndicator (a CSpriteFrame), the clock: BOTTOMLEFT to CGameUI.minimap_layer's at (0, 0). Its model is placed in screen units from that corner (it shows at the top center), so scaling the frame moves it toward the corner." },
+    "CGameUI.command_card": { "kind": "offset", "value": "0x3c8", "doc": "The command card (made by 0x39D410 in 0x368340): a CFrameGrid of 3 rows by 4 columns of CCommandButton (vtable 0xABCFF4), made once per game." },
+    "CGameUI.info_panel": { "kind": "offset", "value": "0x3c4", "doc": "The info panel (0x39E6D0), which holds the inventory." },
+    "CInfoPanel.inventory": { "kind": "offset", "value": "0x148", "doc": "The inventory bar (0x39F380)." },
+    "CInventoryBar.slots": { "kind": "offset", "value": "0x130", "doc": "Pointer to 6 entries of 8 bytes, one per slot (top left first, by rows): the slot's CCommandButton at +4." },
+    "CFrameGrid.rows": { "kind": "offset", "value": "0x154", "doc": "Pointer to the grid's rows, 16 bytes each: the row's cells (CFrame*, one per column) through the pointer at +8. Rows at +0x124, columns at +0x128 (0x10EE50 sets them); 0x10E490 puts a frame in a cell (column, row, frame, flag)." },
+    "CCommandButton.data": { "kind": "offset", "value": "0x190", "doc": "The button's CCommandButtonData (what it does), NULL on an empty button. The cooldown sweep sprite is at +0x19C (made on first use, 0x3AD950)." },
+    "CCommandButtonData.ability": { "kind": "offset", "value": "0x6d4", "doc": "CAbility*: the ability behind the button (an item's for an inventory slot), or NULL. Raw: check it through its reference (+0xC/+0x10, ObjectLookup, ObjectRecord.dead) as 0x3B62D0 does." },
+    "CCommandButtonData.command": { "kind": "offset", "value": "0x8", "doc": "uint32_t: what the button tells its ability, passed to CAbility.vtable.GetCooldownRemaining." },
     "CGameUI.esc_menu": { "kind": "offset", "value": "0x228", "doc": "The CEscMenu (vtable 0xABDF34), made once per game." },
     "CEscMenu::Reset": {
       "kind": "function", "rva": "0x003cdd10", "conv": "thiscall", "sig": "void(CEscMenu* this)",
@@ -823,6 +1004,69 @@
       "bytes": "56 8b f1 8b 46 14 85 c0 74 12 6a 00 68 c8 0a 00 00 68 ?? ?? ?? ?? 50 e8 dc b5",
       "doc": "Frees what a sync action's value object (CNetEventSyncStoredInteger.value_object) holds; the native's builder calls it after sending. Plain ret."
     },
+    "TextTags::Create": {
+      "kind": "function", "rva": "0x00283be0", "conv": "thiscall", "sig": "int(HandleManager* this)",
+      "bytes": "55 8b ec 83 ec 14 6a ff 6a 01 6a 01 8d 45 f8 c7",
+      "doc": "A new text tag (floating text), as CreateTextTag (0x1FC4D0) makes it on CGameWar3.handles: returns its id, below the limit at .data 0xBDB0F0. Text tags are drawn locally and aren't agents: making one on one client doesn't shift handle ids. Plain ret."
+    },
+    "TextTags::Destroy": {
+      "kind": "function", "rva": "0x00284600", "conv": "thiscall", "sig": "void(HandleManager* this, int id)",
+      "bytes": "55 8b ec 81 c1 c8 02 00 00 5d e9 81 c1 71 00 cc",
+      "doc": "DestroyTextTag (0x1FD1A0). ret 4."
+    },
+    "TextTags::SetText": {
+      "kind": "function", "rva": "0x0028ba20", "conv": "thiscall", "sig": "void(HandleManager* this, int id, const char* text, float height)",
+      "bytes": "55 8b ec f3 0f 10 45 10 51 f3 0f 11 04 24 81 c1",
+      "doc": "SetTextTagText (0x214C00) with the text already a C string (UTF-8; color codes work); height in screen units, as TextTagSize2Height gives (size * 0.023 / 10). ret 0xC."
+    },
+    "TextTags::SetPosUnit": {
+      "kind": "function", "rva": "0x0028b970", "conv": "thiscall", "sig": "void(HandleManager* this, int id, CUnit* unit, float z_offset)",
+      "bytes": "55 8b ec 83 ec 0c 56 8b 75 0c 57 8b f9 85 f6 74",
+      "doc": "Puts the text at the unit, z_offset above it: SetTextTagPosUnit (0x214B60) after checking the handle. ret 0xC."
+    },
+    "TextTags::SetColor": {
+      "kind": "function", "rva": "0x0028b910", "conv": "thiscall", "sig": "void(HandleManager* this, int id, const uint32_t* argb)",
+      "bytes": "55 8b ec 81 c1 c8 02 00 00 5d e9 91 5d 71 00 cc",
+      "doc": "SetTextTagColor (0x2149C0): one 0xAARRGGBB value, by pointer. Tail call to 0x9A16B0. ret 8."
+    },
+    "TextTags::SetVelocity": {
+      "kind": "function", "rva": "0x0028ba50", "conv": "thiscall", "sig": "void(HandleManager* this, int id, const float* xy)",
+      "bytes": "55 8b ec 81 c1 c8 02 00 00 5d e9 d1 5d 71 00 cc",
+      "doc": "SetTextTagVelocity (0x214C50): two floats, by pointer, in screen units a second. ret 8."
+    },
+    "TextTags::SetLifespan": {
+      "kind": "function", "rva": "0x0028b940", "conv": "thiscall", "sig": "void(HandleManager* this, int id, float seconds)",
+      "bytes": "55 8b ec f3 0f 10 45 0c 51 f3 0f 11 04 24 81 c1 c8 02 00 00 ff 75 08 e8 94 5d 71 00 5d c2 08 00 55 8b ec 81",
+      "doc": "SetTextTagLifespan (0x214A50). A tag that isn't permanent goes away at the end of it. ret 8."
+    },
+    "TextTags::SetFadepoint": {
+      "kind": "function", "rva": "0x0028b920", "conv": "thiscall", "sig": "void(HandleManager* this, int id, float seconds)",
+      "bytes": "55 8b ec f3 0f 10 45 0c 51 f3 0f 11 04 24 81 c1 c8 02 00 00 ff 75 08 e8 94 5d 71 00 5d c2 08 00 55 8b ec f3",
+      "doc": "SetTextTagFadepoint (0x214A10): when it starts fading out. ret 8."
+    },
+    "TextTags::SetVisible": {
+      "kind": "function", "rva": "0x0028ba60", "conv": "thiscall", "sig": "void(HandleManager* this, int id, int visible)",
+      "bytes": "55 8b ec 33 c0 39 45 0c 0f 94 c0 89 45 0c 81 c1",
+      "doc": "SetTextTagVisibility (0x214CB0): clears or sets the tag's hidden bit (4 at +0x30 of its record) through 0x9A06C0; showing it also hands it to the renderer (0x122750). ret 8."
+    },
+    "TextTags::SetPermanent": {
+      "kind": "function", "rva": "0x0028b960", "conv": "thiscall", "sig": "void(HandleManager* this, int id, int permanent)",
+      "bytes": "55 8b ec 81 c1 c8 02 00 00 5d e9 71 52 71 00 cc",
+      "doc": "SetTextTagPermanent (0x214A90). ret 8."
+    },
+    "GameData::LoadOverrides": {
+      "kind": "function", "rva": "0x003534d0", "conv": "thiscall", "sig": "void(GameData* this, const char* path, void* table, int count, int flag)",
+      "bytes": "55 8b ec 83 ec 14 56 57 8b f1 e8 c1 56 e5 ff ff",
+      "doc": "Lays an ini file over the unit and ability data (.data 0xD69FBC, made by 0x350DA0 from the Units\\*Func.txt and *Strings.txt files listed at .rdata 0xAB6008): what Option.customkeys does with \"CustomKeys.txt\" (0x350E6C; table .data 0xCE56CC, count 0xB, flag 1). The path goes to the ini loader 0x1A8EF0 with flag. Name guessed. ret 0x10."
+    },
+    "NetScheduleAction": {
+      "kind": "function", "rva": "0x0032c920", "conv": "fastcall", "sig": "void(CDataStore* action, int flags)",
+      "bytes": "55 8b ec 83 ec 0c 53 56 8b d9 b9 0d 00 00 00 57 8b",
+      "doc": "Where every local player action goes once serialized: the 67 senders (one per action type, e.g. NetSendAction and 0x26B5B0) copy the action byte (CNetEvent.action) into a CDataStore with 0x6B170, write the rest, and call this to schedule it for every player and the replay. The action byte is the store's first. Name guessed. Plain ret."
+    },
+    "CDataStore.buffer": { "kind": "offset", "value": "0x4", "doc": "char*: the bytes; the one at position p is at buffer + p - CDataStore.base (0x6B170 writes a byte that way)." },
+    "CDataStore.base": { "kind": "offset", "value": "0x8", "doc": "uint32_t: the position of the buffer's first byte." },
+    "CNetEvent.action": { "kind": "offset", "value": "0x14", "doc": "uint8_t: the action id (as replays number them: 0x10-0x14 unit orders, 0x16 a selection change, ...); the senders write it first." },
     "NetSendAction": {
       "kind": "function", "rva": "0x0026ce10", "conv": "fastcall", "sig": "void(CNetEvent* action, int flags)",
       "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 81 ec d4 05 00 00 a1 ?? ?? ?? ?? 33 c5 89 45 f0 56 57 50 8d 45 f4 64 a3 00 00 00 00 8b fa 8b f1 c7 85 28 fa ff ff 00 00 00 00 c7 85 2c fa ff",
@@ -836,6 +1080,10 @@
     "CPlayerWar3.controller": { "kind": "offset", "value": "0x268", "doc": "int: the mapcontrol (0 user, 1 computer, ...), as GetPlayerController (0x201710) reads it." },
     "CPlayerWar3.race": { "kind": "offset", "value": "0x260", "doc": "int: the player's race as GetPlayerRace (0x2017C0) reads it: 1 human, 2 orc, 3 undead, 4 night elf. 1 is also what the native returns for a player that doesn't exist." },
 
+    "Import.AIL_open_digital_driver": {
+      "kind": "import", "rva": "0x00a7cd24", "conv": "stdcall", "sig": "void*(uint32_t frequency, int32_t bits, int32_t channels, uint32_t flags)", "target": "mss32.dll!_AIL_open_digital_driver@16",
+      "doc": "Opens the sound device. game.dll's sound start-up (0x07F8B0) calls it once (0x07F93A), right after AIL_startup (0x07F902, during which Miles loads tome.mix), and keeps the HDIGDRIVER at .data 0xD3CEE8; Miles creates DirectSound (DSOUND.DLL through LoadLibraryA/GetProcAddress, the default device) or a waveOut device (WINMM waveOutOpen) in it. Tome holds it until the first mod load has finished (mods_ready.cpp)."
+    },
     "Import.GetTickCount": {
       "kind": "import", "rva": "0x00a7c148", "conv": "stdcall", "sig": "uint32_t(void)", "target": "kernel32.dll!GetTickCount",
       "doc": "game.dll's clock for nearly everything: the main loop's scheduler (0x07B1C0) runs its tasks, the frame among them, by it, and frames take their time from it (0x092620). Mostly called through the thunk 0x092A10 (jmp [slot]). Windows advances it in 15.6 ms steps, which holds the frame rate near 64 whatever maxfps says."
@@ -854,6 +1102,33 @@
       "kind": "constant", "value": "0x16",
       "doc": "Video\\maxfps (default 200). Applying it sets the main loop's period to (int)(1000.0 / maxfps) ms with Scheduler::SetPeriod."
     },
+    "Options::GetInt": {
+      "kind": "function", "rva": "0x00040fa0", "conv": "thiscall", "sig": "bool(Options* this, int option, int* value)",
+      "bytes": "55 8b ec 53 56 8b 75 08 8b d9 83 fe 4f 7c 08 5e",
+      "doc": "An integer option's value (Option.* id): from the store (hash table at +0x44, mask +0x4C), or else the table's default text (.rdata 0xA7EFE8 + 16 * id + 0xC) through atoi, which it then stores. False for an id of 0x4F or more. ret 8."
+    },
+    "Options::SetInt": {
+      "kind": "function", "rva": "0x00042b40", "conv": "thiscall", "sig": "bool(Options* this, int option, int value)",
+      "bytes": "55 8b ec 56 8b 75 08 83 fe 4f 7c 07 33 c0 5e 5d",
+      "doc": "Stores an integer option's value. Doesn't apply it (Options::ApplyValue) or write it to the registry (Options::Save). ret 8."
+    },
+    "Options::Save": {
+      "kind": "function", "rva": "0x00042620", "conv": "thiscall", "sig": "bool(Options* this, int option)",
+      "bytes": "55 8b ec b8 0c 11 00 00 e8 b3 c3 74 00 a1 ?? ??",
+      "doc": "Writes one option to the registry (Warcraft III\\<Video, Sound, Gameplay, ...>\\<name>), or every option for Option.all. COptionsMenu::Save ends with Save(Option.all). ret 4."
+    },
+    "Options::ApplyValue": {
+      "kind": "function", "rva": "0x000403e0", "conv": "thiscall", "sig": "bool(Options* this, int option, int value)",
+      "bytes": "55 8b ec 8b 45 08 83 f8 4f 7c 06 33 c0 5d c2 08",
+      "doc": "Applies a value to the running game without storing it: the switch Options::Apply ends in. Only some options have a case (gamma, video detail, sound, scrolling, tooltips, health bars, maxfps, ...); for the others (herobar, multiboardon, customkeys, ...) it does nothing and the game reads the option where it uses it. ret 8."
+    },
+    "Option.all": { "kind": "constant", "value": "0x50", "doc": "Options::Save: every option." },
+    "Option.adapter": { "kind": "constant", "value": "0x3", "doc": "Video\\adapter (default 0): the display adapter (Direct3D's adapter index) the next start uses; start-up's mode picker (0x44A40) takes only that adapter's modes. COptionsMenu::Save overwrites it with the Options screen's chosen mode's adapter." },
+    "Option.refreshrate": { "kind": "constant", "value": "0x4", "doc": "Video\\refreshrate (default 75): the fullscreen refresh rate the next start aims for. Start-up (0x449C0 through 0x44A40) picks the adapter's display mode closest to reswidth, resheight, colordepth and refreshrate (sum of squared differences; a mode with refresh 0 ignores it), so a value above every mode's gets the fastest. COptionsMenu::Save overwrites it with the refresh rate of the Options screen's chosen mode." },
+    "Option.allyFilter": { "kind": "constant", "value": "0x38", "doc": "Gameplay\\allyFilter (default 1): the ally color mode Alt+A cycles and the minimap button shows, as Get/SetAllyColorFilterState (0x1FF0C0, 0x211B10) read and set it (SetInt, then ApplyValue: it applies at once). The game keeps the last one." },
+    "Option.customkeys": { "kind": "constant", "value": "0x3d", "doc": "Gameplay\\customkeys (default 0): the Gameplay panel's Custom Keyboard Shortcuts. When the game builds its unit and ability data (0x350DA0, after start-up's sound and so after the first mod load), 1 makes it lay CustomKeys.txt over the data files (GameData::LoadOverrides). Read once: a change applies from the next start." },
+    "Option.herobar": { "kind": "constant", "value": "0x2e", "doc": "Gameplay\\herobar (default 1): 0 hides the hero icons at the left of the in-game UI. Read when the hero bar is built (0x39E265), so it applies from the next game. Not on the Options screen." },
+    "Option.multiboardon": { "kind": "constant", "value": "0x3c", "doc": "Gameplay\\multiboardon (default 1): 0 shows a map's multiboards minimized. Read when a multiboard is created (0x37447F). Not on the Options screen." },
     "Scheduler::SetPeriod": {
       "kind": "function", "rva": "0x00073630", "conv": "fastcall", "sig": "void(int period_ms, void* context)",
       "bytes": "55 8b ec 51 57 8b fa 89 4d fc 85 ff 75 0d 33 c9",
@@ -862,7 +1137,7 @@
     "CGxDeviceD3d::BuildPresentParams": {
       "kind": "function", "rva": "0x0013fed0", "conv": "thiscall", "sig": "void(CGxDeviceD3d* this, D3DPRESENT_PARAMETERS* params)",
       "bytes": "55 8b ec 83 ec 14 a1 ?? ?? ?? ?? 33 c5 89 45 fc 56 8b 75 08 57 6a",
-      "doc": "Fills the D3DPRESENT_PARAMETERS for CreateDevice (call at 0x13FC2E) and for Reset after a lost device (0x1404DD). PresentationInterval (+0x34) is always 0, D3DPRESENT_INTERVAL_DEFAULT: vsync on. ret 4."
+      "doc": "Fills the D3DPRESENT_PARAMETERS for CreateDevice (call at 0x13FC2E) and for Reset after a lost device (0x1404DD). In fullscreen the size, format and FullScreen_RefreshRateInHz (+0x30) come from the display mode chosen at start-up (CGxDeviceD3d.d3d); in a window Windowed (+0x20) is 1 and the format is the desktop's. PresentationInterval (+0x34) is always 0, D3DPRESENT_INTERVAL_DEFAULT: vsync on. ret 4."
     },
     "CGxDeviceD3d::CanDraw": {
       "kind": "function", "rva": "0x00140410", "conv": "thiscall", "sig": "bool(CGxDeviceD3d* this)",
@@ -884,6 +1159,7 @@
       "bytes": "55 8b ec 51 56 6a eb ff 75 08 ff 15 ?? ?? ?? ??",
       "doc": "The Direct3D window's procedure (device from GWL_USERDATA). Tracks WM_SETFOCUS/WM_KILLFOCUS in .data 0xD54400; on WM_SYSKEYUP with VK_TAB while focused (Alt+Tab away) it calls SetGamma(1.0, 1) to give the desktop a neutral ramp, writes the user's exponent back into CGxDevice.gamma without applying it, and calls the callback at +0x570 with 1. RestoreState applies it again after the device Reset that follows. ret 0x10."
     },
+    "GxDevice.current": { "kind": "data", "rva": "0x00d3c648", "doc": "CGxDevice*: the graphics device, made by graphics start-up (0x44ED0) through 0x136720; NULL before. Start-up reads HKCU Warcraft III \"Gfx Fullscreen\" (default 1; -fullscreen forces 1, -window 0), \"Gfx SwTNL\" and \"Gfx OpenGL\" first." },
     "CGxDevice.gamma": {
       "kind": "offset", "value": "0xd8",
       "doc": "float: the gamma ramp exponent last passed to SetGamma (1.0 from the constructor). The Gamma option g (0-100) gives (100 - g) / 100 + 0.2."
@@ -896,6 +1172,8 @@
       "kind": "offset", "value": "0x574",
       "doc": "HWND: the device's window (CanDraw's GetClientRect, DestroyWindow in 0x1401E0)."
     },
+    "CGxDeviceD3d.d3d": { "kind": "offset", "value": "0x580", "doc": "IDirect3D9*: what made the device. BuildPresentParams asks it for the fullscreen display mode (EnumAdapterModes, vtable +0x1C, with CGxDevice.adapter, the format and the mode index at +0x98) and the desktop's (GetAdapterDisplayMode, +0x20) in a window." },
+    "CGxDevice.adapter": { "kind": "offset", "value": "0x94", "doc": "int: the display adapter the device uses (Video adapter, Direct3D). The fullscreen display mode is mode number +0x98 of its list for the format, picked at start-up." },
     "CGxDeviceD3d.d3d_device": {
       "kind": "offset", "value": "0x584",
       "doc": "IDirect3DDevice9*: the device (0 before CreateDevice and after teardown)."
