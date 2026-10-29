@@ -205,6 +205,10 @@ TEST(mappings_embedded_files_are_complete) {
             CHECK_EQ(bound.gl.create_context, 0x0013af40u);
             CHECK_EQ(bound.gl.destroy_context, 0x0013afa0u);
             CHECK_EQ(bound.gl.fullscreen_offset, 0x9cu);
+            CHECK_EQ(bound.sound.create_midi, 0x00356c90u);
+            CHECK_EQ(bound.sound.sound_offset, 0x24u);
+            CHECK_EQ(bound.sound.midi_offset, 0x28u);
+            CHECK_EQ(bound.sound.ambient_category, 8u);
         }
     }
     CHECK(found_127b);

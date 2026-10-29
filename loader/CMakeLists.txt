@@ -68,6 +68,7 @@ add_library(tome_loader SHARED
     src/packages.cpp
     src/patch.cpp
     src/patches.cpp
+    src/patches/ambient_sound.cpp
     src/patches/background_mute.cpp
     src/patches/blp_guard.cpp
     src/patches/d3d_reset_lights.cpp

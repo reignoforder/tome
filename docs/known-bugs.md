@@ -240,7 +240,7 @@ new bugs; those don't apply to 1.27b.
 
 | Issue | Details | Status | Source |
 | --- | --- | --- | --- |
-| Ambient sound disabled | 1.27a known issue: "Disabled ambient sound while a MIDI issue is being resolved." | No later patch note mentions turning it back on, so it may still be off in 1.27b. Check in game | Official ([1.27a](https://bnetdocs.org/news/105/warcraft-iii-1-27a-patch)) |
+| Ambient sound disabled | 1.27a known issue: "Disabled ambient sound while a MIDI issue is being resolved." | Still off in 1.27b. **Fixed in Tome** (ambient-sound): see "Ambient sound" below | Official ([1.27a](https://bnetdocs.org/news/105/warcraft-iii-1-27a-patch)) |
 | High CPU use | "We're aware that the CPU is being used more than it should" (Dec 2016) | No fix found in 1.28.x notes | Official ([BNETDocs](https://bnetdocs.org/news/125/what-s-next-for-warcraft-3)) |
 | Cinematics | Missing codec; "fixed internally and will be pushed out in a future patch" | Promised after 1.27b | Official ([BNETDocs](https://bnetdocs.org/news/125/what-s-next-for-warcraft-3)) |
 | Mac replays | 1.27b made Mac players unable to save replays | Fix promised for 1.27c | Official ([BNETDocs](https://bnetdocs.org/news/125/what-s-next-for-warcraft-3)) |
@@ -359,6 +359,33 @@ and the flag existed; once the game was back, the music played again and the
 flag was gone. Killed while away, the next start removed the flag. Not checked on
 Windows yet.
 
+## Ambient sound
+
+A map's day and night ambience (birds, crickets, wind) never plays in
+1.27b: 1.27a turned it off ("Disabled ambient sound while a MIDI issue is
+being resolved") and no later patch turned it back on. Those sounds are MIDI
+sequences with a DLS bank, made by `CreateMIDISound` from Blizzard.j's
+`SetAmbientDaySound`/`SetAmbientNightSound`, which every melee map and most
+custom maps call. Since 1.27a the native makes a plain sound from the label
+instead, which can't find MIDI labels, so it's empty and never plays. The
+MIDI driver, the DLS synthesizer and the rest of the MIDI sound code are
+still there and work (saved games still use them).
+
+**Fixed in Tome (ambient-sound, built-in patch):** a REPLACE handler on
+`CSound::InitMIDI` (the innermost, so mods' handlers still run) makes the sound with the game's own MIDI constructor
+(`CreateMIDISnd`) and gives it the ambient category, so the Ambient sounds
+option still turns it off. Labels that aren't MIDI ones fall back to the
+game's code. Only what each player hears changes: the native returns the
+same handle as before.
+
+Checked under Wine on Booty Bay with music off: without the patch the
+game's audio stream was silent (`parec --monitor-stream`, RMS 0); with it
+the Lordaeron summer ambience played (RMS ~170), and with Ambient sounds
+off it was silent again. Details in `docs/reverse-engineering.md`, "Sound".
+Not checked on Windows yet; what "MIDI issue" Blizzard had isn't known (the
+game always uses Miles' software synthesizer for MIDI, never the system's
+MIDI device).
+
 ## What Tome could do
 
 1. **Map script guard:** before a map's script runs, refuse or warn on
@@ -369,9 +396,7 @@ Windows yet.
 3. **Port the cheap 1.28 crash fixes:** ignore invalid command card
    coordinates. (Path traversal in `PreloadGenEnd` and every other native that
    takes a file path is already handled by the path-sanitizer patch, above.)
-4. **Ambient sound:** confirm whether it's off and whether the game has
-   a switch to turn it back on.
-5. **Raise the hashtable and game cache limits** as 1.29.1 did, if a
+4. **Raise the hashtable and game cache limits** as 1.29.1 did, if a
    mod needs them (it changes game behaviour, so every player needs
    the same mod).
 

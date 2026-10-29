@@ -826,6 +826,60 @@ The loader never checks a mip offset/size or the JPEG-header size against the
 file length; `docs/known-bugs.md`, "BLP texture loader", and
 `loader/src/patches/blp_guard.cpp`.
 
+## Sound (for the ambient-sound patch)
+
+The game plays through Miles (`Mss32.dll`). Startup (`0x357600`, the sound
+setup) reads the Sound options from the registry: the option table at
+`.rdata 0xA7F000` lists them in order (16-byte rows; index 0x1A `music`,
+0x1B `musicvolume`, 0x1C `sfx`, 0x1D `sfxvolume`, 0x1E `ambient`, 0x1F
+`movement`, 0x20 `unit`, 0x21 `subtitles`, 0x22 `nomidi`, 0x23
+`softwaremidi`, 0x25 `donotusewaveout`), and the option setter `0x0403E0`
+switches on the index. The enabled categories are a flags word at
+`.data 0xCE5518`: `0x8` sound effects, `0x10` movement, `0x20` unit sounds,
+`0x200` music, `0x400` ambient (`0x3571A0` sets bits, `0x357110` clears them;
+clearing `0x8` also clears `0x430`). Map loading clears `0x8` while it runs
+(`0x1D8F50`/`0x1DB6D0` around `0x1E5A10`) and sounds started meanwhile are
+resumed when it's set again.
+
+The MIDI driver is opened by `0x07FA60` (from `0x07F8B0`, unless the `nomidi`
+flag 4 is set): `AIL_open_XMIDI_driver`, with the null driver
+(`AIL_OPEN_XMIDI_NULL_DRIVER`) when flag 8 is set, then a DLS synthesizer
+(S3BASE.DLL, VORT_DLS.DLL, else Miles' software one on the digital driver).
+1.27b always sets flag 8 (`or eax, 8` at `0x357712`; `softwaremidi` is read
+and ignored), so MIDI always goes through the software synthesizer. Handles:
+digital driver `.data 0xD3CEE8`, MIDI driver `0xD3CEF0`, DLS `0xD3CEF4`;
+all three are open under Wine.
+
+**Ambient sound (1.27a "disabled while a MIDI issue is being resolved"):**
+the day and night ambience is MIDI: `UI\SoundInfo\MIDISounds.slk` labels
+(`LordaeronSummerDay` …) name a `.mid` and a `.dls` bank under
+`Sound\Ambient\`. Blizzard.j's `SetAmbientDaySound`/`SetAmbientNightSound`
+(unchanged in War3Patch.mpq) call `CreateMIDISound(label, 20, 20)`. The
+native (`0x1FBE40`) makes a `CSound` and calls `CSound::InitMIDI`
+(`0x2385B0`), which in 1.27b only forwards to `0x238450` (label, looping 1,
+0, 0, fade in, fade out, 0): a plain label sound, made by `0x356DB0`, whose
+lookup (`0x343A30`) searches only the WAV label tables (`.data 0xD6A54C`,
+`0xD6A514`). The MIDI labels live in their own table (`0xD6A64C`, filled by
+`0x34CDE0`, looked up by `0x341D60`), so the result is NULL, `CSound.sound`
+(`+0x24`) stays empty and StartSound does nothing. Measured: the call
+returned NULL for every ambient label, and the game's audio stream was
+silent with music off.
+
+The MIDI path is otherwise intact: `CreateMIDISnd` (`0x356C90`, fastcall
+`(label, open_arg, fade_in, fade_out, category)`, `ret 0xC`; `open_arg`
+in edx goes on to the sequence open `0x081B70`, the saved-game loader passes
+0) makes the MIDI object;
+`CSound.midi` (`+0x28`) holds it; StartSound (`0x240640`) plays `+0x24` with
+`0x359130` or else `+0x28` with `0x359070` (which loads the DLS bank,
+`0x34CB80` → `0x0821C0`, and refuses with "Midi sound disabled." while the
+flags lack `0x8`, or `0x400` for a sound of category `0x8`); the release
+(`0x23B000`) frees `+0x28` with `0x357A00`; saved games restore it
+(`0x23C95B` → `0x357E20`, which calls `0x356C90`). The ambient-sound patch
+(`loader/src/patches/ambient_sound.cpp`) makes `CSound::InitMIDI` call
+`CreateMIDISnd` with category `0x8` (`SoundCategory.ambient`) instead;
+measured, the ambience plays (stream RMS ~170 with music off, 0 without the
+patch) and the Ambient sounds option still silences it.
+
 ## Methods and tools
 
 - **Disassembly:** `objdump -d -M intel --start-address=0x6f… --stop-address=0x6f… "WarCraft III/game.dll"`.

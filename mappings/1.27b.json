@@ -969,6 +969,30 @@
     "CBLPFile.header_copy": {
       "kind": "data", "rva": "0x008e97e6",
       "doc": "The fixed-size header copy in CBLPFile::Open (mov ecx,0x127; rep movsd): blp-guard patches it to clamp the copy to the file's length. Bytes b9 27 01 00 00 f3 a5."
+    },
+    "CSound::InitMIDI": {
+      "kind": "function", "rva": "0x002385b0", "conv": "thiscall",
+      "sig": "void(CSound* this, const char* label, int fade_in, int fade_out)",
+      "bytes": "55 8b ec 6a 00 ff 75 10 ff 75 0c 6a 00 6a 00 6a",
+      "doc": "Only caller: the CreateMIDISound native (0x1FBE40, at 0x1FBEEA). Since 1.27a ('ambient sound disabled while a MIDI issue is resolved') it makes a plain looping sound from the label (0x238450 with looping 1, which looks it up with 0x356DB0 in the WAV label tables), and MIDISounds.slk labels aren't there, so CSound.sound stays NULL and every map's day/night ambience is silent. The ambient-sound patch hooks it (BEFORE) and makes the MIDI sound instead. ret 0xC."
+    },
+    "CreateMIDISnd": {
+      "kind": "function", "rva": "0x00356c90", "conv": "fastcall",
+      "sig": "void*(const char* label, int open_arg, int fade_in, int fade_out, uint32_t category)",
+      "bytes": "55 8b ec 51 53 56 57 6a 00 6a fe 68 ?? ?? ?? ??",
+      "doc": "Makes a MIDI sound object (0x14C bytes, LOOPMIDISNDOBJECT) from a MIDISounds.slk label (lookup 0x341D60 in the table at .data 0xD6A64C), opening its sequence on the Miles MIDI driver; category goes to +0x1C (SoundCategory.*). NULL for an unknown label or without a MIDI driver. open_arg (edx) is passed on as the last argument of the sequence open (0x081B70); the saved-game loader passes 0. The result belongs in CSound.midi. Since 1.27a only the saved-game loader (0x357F87) still calls it; ambient-sound calls it for CreateMIDISound. ret 0xC."
+    },
+    "CSound.sound": {
+      "kind": "offset", "value": "0x24",
+      "doc": "The sound's WAV object (0x356DB0's result), or NULL. StartSound (0x240640) plays it with 0x359130 if set, else CSound.midi."
+    },
+    "CSound.midi": {
+      "kind": "offset", "value": "0x28",
+      "doc": "The sound's MIDI object (CreateMIDISnd's result), or NULL. StartSound plays it with 0x359070, the release (0x23B000) frees it with 0x357A00, saved games restore it (0x23C95B)."
+    },
+    "SoundCategory.ambient": {
+      "kind": "constant", "value": 8,
+      "doc": "Sound object category bit (+0x1C) for ambient sounds: such a sound plays only while the global sound flags (.data 0xCE5518) have 0x400, the Ambient sounds option."
     }
   }
 }

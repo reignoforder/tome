@@ -292,7 +292,7 @@ fi
 check "Assets at startup: $ASSET_FILES files from 3 mods \(0 overridden" "mods' assets mounted from DllMain"
 check "Asset probe .*: [0-9]+ bytes, fnv1a $PROBE_HASH" "the game reads the mod's texture instead of its own"
 check "Bootstrap complete" "bootstrap finished" 15
-check "Patches: [0-9]+ applied, 0 skipped: memhack-guard applied.*path-sanitizer applied.*blp-guard applied.*d3d-reset-lights applied.*gl-context-restore applied.*background-mute applied" "every built-in patch applied"
+check "Patches: [0-9]+ applied, 0 skipped: memhack-guard applied.*path-sanitizer applied.*blp-guard applied.*d3d-reset-lights applied.*gl-context-restore applied.*background-mute applied.*widescreen applied.*ambient-sound applied" "every built-in patch applied"
 check_absent "blp-guard.*unclamped" "the BLP header-copy clamp was applied"
 check "Main-thread dispatcher installed" "main-thread dispatcher installed"
 check "Events: hooked screens, map load, game start and end, frames, game ticks, shutdown, chat, pause, units, spells, damage, experience, players, resources, keys, menus, dialogs, levels and saved games" "event hooks installed"
@@ -351,6 +351,7 @@ if ((${#MAP_ARG[@]})); then
     echo "game events (-loadfile)"
     check "\[hello\] map load: .+ \(Maps\\\\TomeE2E\\\\e2e\.w3m\)" "map load event with the map's name and path"
     check "\[hello\] game start: " "game start event" 30
+    check "ambient-sound: made '[A-Za-z]+Day' as a MIDI sound" "the map's ambient sound was made (CreateMIDISound)"
     check "\[hello\] 200 game ticks: 1\.000 s of game time" "game ticks follow game time (200 steps of 5 ms)" 15
     check "\[hello\] map description: ." "map load event with the map's description"
     check "\[map\] TomeLogInteger\(84(0[1-9]|1[0-2])\)" "the map selected some of its units" 15

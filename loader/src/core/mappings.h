@@ -261,6 +261,15 @@ struct BuildMappings {
         uint32_t create_context;     // CGxDeviceOpenGl::CreateContext
         uint32_t fullscreen_offset;  // CGxDevice.fullscreen
     } gl;
+
+    // Optional: 0 when the build doesn't map them (ambient-sound is then
+    // skipped). The hooked CSound::InitMIDI is found by name, not stored here.
+    struct {
+        uint32_t create_midi;       // CreateMIDISnd
+        uint32_t sound_offset;      // CSound.sound
+        uint32_t midi_offset;       // CSound.midi
+        uint32_t ambient_category;  // SoundCategory.ambient
+    } sound;
 };
 
 // The game's JASS event functions that events.cpp hooks by name (its

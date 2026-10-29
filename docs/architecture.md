@@ -752,6 +752,16 @@ reason to make a fix a patch rather than ship it as a mod.
   `patches::background_mute_start` (bootstrap, on the main thread) undoes a
   mute that a crashed run left. Needs no game.dll symbols, so it covers any
   build and runs everywhere. Reserves nothing.
+- **ambient-sound** (`patches/ambient_sound.cpp`, `docs/known-bugs.md`,
+  "Ambient sound"): 1.27a turned off maps' day and night ambience:
+  `CreateMIDISound` calls `CSound::InitMIDI`, which now makes a plain sound
+  from the label, and MIDI labels aren't in the plain tables, so the sound
+  stays empty. The innermost REPLACE handler there (priority `INT32_MIN`,
+  so mods' BEFORE and REPLACE handlers still run first) makes it with the
+  game's own MIDI constructor (`CreateMIDISnd`) into `CSound.midi`, with the
+  ambient category (`SoundCategory.ambient`, so the Ambient sounds option
+  still applies), in place of the game's body; a label that isn't a MIDI one
+  hands on to it. Only what each player hears changes. Reserves nothing.
 - **d3d-reset-lights** (`patches/d3d_reset_lights.cpp`, `docs/known-bugs.md`,
   "Under Wine"): works around a wined3d bug that leaks the active-light slots
   of every enabled light on `IDirect3DDevice9::Reset`, so the lights the game

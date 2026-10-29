@@ -14,6 +14,7 @@ extern const Patch kD3dResetLights;
 extern const Patch kGlContextRestore;
 extern const Patch kBackgroundMute;
 extern const Patch kWidescreen;
+extern const Patch kAmbientSound;
 
 const Patch* const kAll[] = {
     &kMemhackGuard,
@@ -23,6 +24,7 @@ const Patch* const kAll[] = {
     &kGlContextRestore,
     &kBackgroundMute,
     &kWidescreen,
+    &kAmbientSound,
 };
 
 namespace {

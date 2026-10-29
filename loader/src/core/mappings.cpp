@@ -541,6 +541,12 @@ bool bind_build(const mappings::Build& build, BuildMappings& out, std::vector<st
     bind_optional("CGxDeviceOpenGl::DestroyContext", Kind::Function, gl.destroy_context);
     bind_optional("CGxDeviceOpenGl::CreateContext", Kind::Function, gl.create_context);
     bind_optional("CGxDevice.fullscreen", Kind::Offset, gl.fullscreen_offset);
+
+    auto& sound = out.sound;  // ambient-sound's symbols (patches/ambient_sound.cpp)
+    bind_optional("CreateMIDISnd", Kind::Function, sound.create_midi);
+    bind_optional("CSound.sound", Kind::Offset, sound.sound_offset);
+    bind_optional("CSound.midi", Kind::Offset, sound.midi_offset);
+    bind_optional("SoundCategory.ambient", Kind::Constant, sound.ambient_category);
     // The handshake writes the names into the action and reads the lobby's
     // text; each must leave room for its 0x100 bytes. (Only if they're all
     // mapped: a missing one is reported above.)
