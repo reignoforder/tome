@@ -6,6 +6,8 @@
 #include "core/mod_menu_model.h"
 #include "core/popup.h"
 #include "core/tome_settings.h"
+#include "crash_handler.h"
+#include "crash_loop.h"
 #include "frames.h"
 #include "hooks.h"
 #include "keybinds.h"
@@ -639,6 +641,8 @@ int __thiscall hooked_menu_setup(void* menu, int a, int b) {
     frames::on_main_menu_setup(menu);
     // No map is loaded now, so asset changes that waited for one to end apply.
     mod_manager().on_main_menu();
+    crash_loop::on_main_menu();
+    crash_handler::check_filter();
     return result;
 }
 

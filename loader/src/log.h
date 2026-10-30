@@ -28,6 +28,11 @@ size_t kept_size();
 
 void write(Level level, const char* fmt, ...) __attribute__((format(gnu_printf, 2, 3)));
 
+// Writes `message` as is, unless another thread is writing right now: for
+// the crash handler, which mustn't wait for a lock the crashed thread may
+// hold (it gives up after about 100 ms). False if it wasn't written to the file.
+bool try_write(Level level, const char* message);
+
 #define TOME_DEBUG(...) ::tome::log::write(::tome::log::Level::Debug, __VA_ARGS__)
 #define TOME_INFO(...)  ::tome::log::write(::tome::log::Level::Info, __VA_ARGS__)
 #define TOME_WARN(...)  ::tome::log::write(::tome::log::Level::Warn, __VA_ARGS__)

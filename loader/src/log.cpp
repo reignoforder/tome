@@ -61,22 +61,17 @@ size_t kept_size() {
     return g_kept.size();
 }
 
-void write(Level level, const char* fmt, ...) {
-    char message[2048];
-    va_list args;
-    va_start(args, fmt);
-    vsnprintf(message, sizeof(message), fmt, args);
-    va_end(args);
+namespace {
 
+// One line as it goes into the file: time, thread, level, message, CRLF.
+int format_line(char (&line)[2200], Level level, const char* message) {
     SYSTEMTIME now;
     GetLocalTime(&now);
-
-    char line[2200];
     int len = snprintf(line, sizeof(line), "[%02u:%02u:%02u.%03u] [%5lu] [%s] %s\r\n",
                        now.wHour, now.wMinute, now.wSecond, now.wMilliseconds,
                        GetCurrentThreadId(), level_name(level), message);
     if (len < 0) {
-        return;
+        return -1;
     }
     if (len >= static_cast<int>(sizeof(line))) {
         // Cut short: still one line, for find_kept and readers of the file.
@@ -84,10 +79,11 @@ void write(Level level, const char* fmt, ...) {
         line[len - 2] = '\r';
         line[len - 1] = '\n';
     }
+    return len;
+}
 
-    OutputDebugStringA(line);
-
-    ExclusiveLock hold(g_lock);
+// With g_lock held.
+void emit(const char* message, const char* line, int len) {
     if (g_keep && std::strncmp(message, "Debug ", 6) != 0) g_kept.append(line, static_cast<size_t>(len));
     if (g_file != INVALID_HANDLE_VALUE) {
         // Unbuffered on our side: if the game crashes, everything up to the
@@ -95,6 +91,41 @@ void write(Level level, const char* fmt, ...) {
         DWORD written;
         WriteFile(g_file, line, static_cast<DWORD>(len), &written, nullptr);
     }
+}
+
+} // namespace
+
+void write(Level level, const char* fmt, ...) {
+    char message[2048];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(message, sizeof(message), fmt, args);
+    va_end(args);
+
+    char line[2200];
+    int len = format_line(line, level, message);
+    if (len < 0) return;
+    OutputDebugStringA(line);
+
+    ExclusiveLock hold(g_lock);
+    emit(message, line, len);
+}
+
+bool try_write(Level level, const char* message) {
+    char line[2200];
+    int len = format_line(line, level, message);
+    if (len < 0) return false;
+    OutputDebugStringA(line);
+    // Another thread's write takes microseconds; a crashed thread's never ends.
+    // Sleep(1) can take a whole timer tick (15.6 ms), so count the time, not the tries.
+    const DWORD start = GetTickCount();
+    while (!TryAcquireSRWLockExclusive(&g_lock)) {
+        if (GetTickCount() - start >= 100) return false;
+        Sleep(1);
+    }
+    emit(message, line, len);
+    ReleaseSRWLockExclusive(&g_lock);
+    return true;
 }
 
 } // namespace tome::log

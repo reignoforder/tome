@@ -2,6 +2,8 @@
 
 #include "core/command_line.h"
 #include "core/text.h"
+#include "crash_handler.h"
+#include "crash_loop.h"
 #include "debug_input.h"
 #include "events.h"
 #include "frames.h"
@@ -57,13 +59,18 @@ GameBuild g_build;
 std::string g_safe_mode;  // why safe mode is on (from DllMain); empty if it isn't
 
 // Safe mode (docs/research.md §9): the -tomesafe flag, Shift held while the
-// game starts, or a tome/safe file. Returns what asked for it, or "".
+// game starts, a tome/safe file, or a crash loop (crash_loop.h). Returns
+// what asked for it, or "".
 std::string safe_mode_reason(const Paths& paths) {
     std::string reason;
     auto add = [&](const char* what) { reason += (reason.empty() ? "" : ", ") + std::string(what); };
     if (command_line::has_flag(GetCommandLineW(), L"-tomesafe")) add("-tomesafe");
     if (GetAsyncKeyState(VK_SHIFT) & 0x8000) add("Shift held at startup");
     if (GetFileAttributesW((paths.tome_dir + L"\\safe").c_str()) != INVALID_FILE_ATTRIBUTES) add("tome/safe");
+    if (!text::iequals(paths.host_exe, L"worldedit.exe")) {
+        std::string loop = crash_loop::check(paths);
+        if (!loop.empty()) add(loop.c_str());
+    }
     return reason;
 }
 
@@ -134,6 +141,7 @@ DWORD bootstrap() {
     for (const std::string& note : g_layout_notes) TOME_INFO("Layout: %s", note.c_str());
     TOME_INFO("game.dll already loaded when tome.mix was attached: %s",
               g_game_loaded_at_attach ? "yes" : "no");
+    crash_loop::log_status();
 
     if (text::iequals(g_paths.host_exe, L"worldedit.exe")) {
         TOME_INFO("Running inside the World Editor; editor support isn't implemented yet. Tome is idle.");
@@ -223,6 +231,7 @@ DWORD bootstrap() {
             TOME_WARN("Sound start-up doesn't wait for mods: %s", g_sound_wait_report.c_str());
         }
         if (!g_assets_report.empty()) TOME_INFO("Assets at startup: %s", g_assets_report.c_str());
+        crash_handler::start(g_build);
     } else {
         // game.dll wasn't loaded yet when Tome was attached, so this runs
         // concurrently with the game; a map loading right now could miss Tome's natives.
@@ -320,8 +329,12 @@ void start_bootstrap(HMODULE self) {
             g_sound_wait_ok = mods_ready::install_sound_wait(g_sound_wait_report);
             if (g_paths_ok) {
                 frames::init(reinterpret_cast<uintptr_t>(game), *g_early_build, g_attach_thread);
+                crash_handler::install(g_paths, g_attach_thread);
+                crash_handler::set_report_sink(crash_loop::note_crash);
                 g_menu_hooks_ok = mod_menu::install_hooks(reinterpret_cast<uintptr_t>(game), *g_early_build,
                                                           g_menu_hooks_report);
+                // Only a start whose main menu Tome can see counts (crash_loop.h).
+                if (g_menu_hooks_ok && !text::iequals(g_paths.host_exe, L"worldedit.exe")) crash_loop::count_start();
                 if (g_menu_hooks_ok) mod_menu::reload_frame_definitions(g_menu_reload_report);
                 g_events_ok = events::install(reinterpret_cast<uintptr_t>(game), *g_early_build, g_events_report);
                 if (g_events_ok) {

@@ -1103,6 +1103,21 @@
       "kind": "import", "rva": "0x00a7c148", "conv": "stdcall", "sig": "uint32_t(void)", "target": "kernel32.dll!GetTickCount",
       "doc": "game.dll's clock for nearly everything: the main loop's scheduler (0x07B1C0) runs its tasks, the frame among them, by it, and frames take their time from it (0x092620). Mostly called through the thunk 0x092A10 (jmp [slot]). Windows advances it in 15.6 ms steps, which holds the frame rate near 64 whatever maxfps says."
     },
+    "CrashHandler::Install": {
+      "kind": "function", "rva": "0x000199f0", "conv": "fastcall", "sig": "void(const char* path)",
+      "bytes": "56 57 8b f9 e8 57 3a 02 00 b8 ?? ?? ?? ?? c7 05 ?? ?? ?? ??",
+      "doc": "game.dll's own crash handler: stores the handler (0x019AB0, .data 0xD78520) and sets CrashHandler::Filter as the unhandled-exception filter (keeping the one before at .data 0xD78524), then copies `path` (the game folder) to .data 0xD78570. Called early in the game's main function (0x045080, at 0x0450F6), before Miles loads tome.mix. Plain ret. Not hooked: Tome's crash handler (crash_handler.h) puts its own filter in front of this one."
+    },
+    "CrashHandler::Filter": {
+      "kind": "function", "rva": "0x0003b590", "conv": "stdcall", "sig": "int32_t(void* exception_pointers)",
+      "bytes": "55 8b ec 81 ec 20 03 00 00 a1 ?? ?? ?? ?? 33 c5 89 45 fc",
+      "doc": "The unhandled-exception filter CrashHandler::Install sets: calls the handler at .data 0xD78520 (0x019AB0: the game's error log and minidump, then BlizzardError.exe and its dialog) and maps its result to EXCEPTION_* values. ret 4."
+    },
+    "CrashHandler::Remove": {
+      "kind": "function", "rva": "0x0003b670", "conv": "cdecl", "sig": "void(void)",
+      "bytes": "a1 ?? ?? ?? ?? 85 c0 74 11 50 ff 15 ?? ?? ?? ?? c7 05 ?? ?? ?? ??",
+      "doc": "Puts back the filter CrashHandler::Install replaced (.data 0xD78524), if any. Plain ret."
+    },
     "Options::Get": {
       "kind": "function", "rva": "0x00040ed0", "conv": "cdecl", "sig": "void*(void)",
       "bytes": "a1 ?? ?? ?? ?? 85 c0 75 2a 50 68 e1 00 00 00 68",

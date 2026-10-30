@@ -8,8 +8,12 @@
  *   hook    in a REPLACE handler of RCString::GetText, on its own probe
  *           string, before calling next; tome_mod_enable logs what the call
  *           returned
+ *   thread  on a thread of its own, started in tome_mod_enable: a crash
+ *           outside every call Tome guards (crash_handler.h reports it)
  */
 #include "../hook_probe.h"
+
+#include <windows.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -25,6 +29,12 @@ static probe_string probe = {{0}, &probe_rep_};
 
 static void crash(void) {
     *(volatile int*)0 = 1;
+}
+
+static DWORD WINAPI crash_thread(LPVOID unused) {
+    (void)unused;
+    crash();
+    return 0;
 }
 
 static void read_mode(tome_mod* mod) {
@@ -76,6 +86,10 @@ TOME_EXPORT void TOME_CALL tome_mod_enable(tome_mod* mod) {
     if (strcmp(mode, "tick") == 0) {
         ticks = 0;
         api->on_event(mod, TOME_EVENT_TICK, on_tick, NULL);
+    }
+    if (strcmp(mode, "thread") == 0) {
+        HANDLE thread = CreateThread(NULL, 0, crash_thread, NULL, 0, NULL);
+        if (thread) CloseHandle(thread);
     }
     if (strcmp(mode, "hook") == 0) {
         const char* text;

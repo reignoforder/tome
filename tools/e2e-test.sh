@@ -168,6 +168,10 @@ launch() {
     [[ "${TOME_DEBUG_CLICKS:-}" =~ @[0-9]+(;|$) ]] && die "a TOME_DEBUG_CLICKS step has a fixed time (@ms); wait for what it needs instead"
     rm -f "$LOG"
     MARK=0
+    # Each launch starts with no failed starts counted (crash_loop.h): a run
+    # stopped right after its checks doesn't count against the next. STARTS
+    # sets the count instead.
+    if [[ -n "${STARTS:-}" ]]; then printf '%s\n\n' "$STARTS" >"$HOME_DIR/tome/startups"; else rm -f "$HOME_DIR/tome/startups"; fi
     env_registry_load "$WORK/user.reg.e2e"
     (cd "$GAME" && DISPLAY="$(env_display)" TOME_HOME="$TOME_HOME_WIN" TOME_DEBUG_CLICKS="${TOME_DEBUG_CLICKS:-}" \
         TOME_DEBUG_ASSET="$PROBE" TOME_DEBUG_APPROVE="$APPROVED" \
@@ -323,6 +327,7 @@ fi
 echo "startup"
 check "Recognized Warcraft III 1\.27b \([0-9]+ mapped symbols\)" "game build recognized from the mapping database" 30
 check "Signatures match \(functions and call sites\)" "game.dll matches the byte signatures"
+check "Crash reports: tome\\\\crashes, in front of the filter [Gg]ame\.dll\+0x3b590" "crash reports go in front of game.dll's filter"
 check "JASS natives: redirected 3 of 3 InitNatives call sites" "InitNatives hooked"
 check "\[hello\] enabled \(1 time" "hello loaded and enabled"
 check "broken-json +error: tome\.mod\.json: line 2" "broken JSON reported with position"
@@ -923,15 +928,23 @@ touch "$HOME_DIR/tome/safe"
 # again while the panel is still lowering (it drops clicks then).
 SAVED_MAP_ARG=("${MAP_ARG[@]}")
 MAP_ARG=(-tomesafe)
-TOME_DEBUG_CLICKS="wait:Screen ready: main menu;0.874,0.84;until:Mod menu opened;settle;\
+# Three starts before this one stopped short of the main menu: a crash loop
+# turns safe mode on too.
+STARTS=3 TOME_DEBUG_CLICKS="wait:Screen ready: main menu;0.874,0.84;until:Mod menu opened;settle;\
 0.447,0.227;until:Mod menu: enabling hello" launch
 MAP_ARG=("${SAVED_MAP_ARG[@]}")
-check "Safe mode \(-tomesafe, tome/safe\): no mod starts this session" "-tomesafe and tome/safe turn safe mode on" 30
+check "Safe mode \(-tomesafe, tome/safe, the last 3 starts didn't reach the main menu\): no mod starts this session" \
+    "-tomesafe, tome/safe and a crash loop turn safe mode on" 30
+check "Startup check: the last 3 start\(s\) didn't reach the main menu" "the crash loop is logged"
 check "Assets at startup: no mod assets" "no mod assets mounted"
 check "hello +1\.0\.0 +disabled: safe mode" "mods are listed as disabled by safe mode" 15
 check_absent "\[hello\] loaded" "no mod DLL loaded"
 check "Mod menu: enabling hello" "the mod menu enables a mod despite safe mode" 15
 check "\[hello\] enabled \(1 time" "and it starts"
+check "Startup check: the game got going; the count of failed starts is back to 0" "the main menu sets the count back"
+if [[ -e "$HOME_DIR/tome/startups" ]]; then fail "tome/startups is gone"; else pass "tome/startups is gone"; fi
+# tome/safe is there already: nothing to offer.
+check_absent "Popup [0-9]+ shown: \"Safe Mode\"" "no popup offering to keep safe mode"
 if python3 -I -c "import json,sys; sys.exit(0 if json.load(open('$STATE'))['mods']['hello']['enabled'] else 1)"; then
     pass "state.json still has hello enabled"
 else

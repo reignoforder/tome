@@ -41,6 +41,7 @@ loader/
     settings.*            config.schema.json subset, settings values, menu steps
     keys.*                key names, declared keybinds, keybinds.json, conflicts
     popup.*               popup layout (rows, paged columns), keys, TomePopup.fdf
+    crash_report.*        tome/startups, the crash loop popup, crash report text
   src/                    Windows side (tome.mix)
     dllmain.cpp           pins the module, calls start_bootstrap
     bootstrap.*           startup sequence (see below)
@@ -58,6 +59,8 @@ loader/
     mod_manager.*         discovery, state.json, lifecycle, hot reload, crashed mods, safe mode
     mod_handle.h          tome_mod, the handle mods get
     guard.*               crash isolation: an SEH frame around every call into a mod
+    crash_handler.*       crash reports for faults outside mod calls (a filter in front of the game's)
+    crash_loop.*          counts starts that don't get going; safe mode after a crash loop
     api.*                 the tome_api table given to mods
     main_thread.*         window-message dispatcher (the main-thread safe point)
     watcher.*             change notifications (+ timestamp polling under Wine: every 1.5 s, or 50x as long as a poll takes)
@@ -114,7 +117,8 @@ docs/
    - resolves paths (`TOME_HOME` support) and deletes archives left in
      `tome/cache` by the previous session, except its last assets archive
      (see "Asset overlay");
-   - checks for safe mode (see "Crash isolation and safe mode");
+   - checks for safe mode (see "Crash isolation and safe mode"), a crash
+     loop among the reasons (`crash_loop::check`);
    - identifies the build from the in-memory PE header;
    - checks the build's byte signatures and call sites against the loaded
      module (`verify_loaded_build`); on any mismatch nothing is patched;
@@ -405,7 +409,8 @@ clicks. Tome's own handlers (no mod) aren't guarded.
   directly. A crash in `tome_mod_load` is a load failure with the same rules.
 - **Not covered:** threads a mod starts itself, a fault in the game's own
   code outside any mod call, and process-ending errors that bypass SEH
-  (`__fastfail`, `/GS` failures, heap corruption detection).
+  (`__fastfail`, `/GS` failures, heap corruption detection). The first two
+  get a crash report (below); the game still ends.
 
 ### Safe mode
 
@@ -424,6 +429,66 @@ The mod menu's Tome page turns safe mode on and off during a session
 (`ModManager::set_safe_mode_now`): on stops every mod; off forgets the
 session's choices, starts the mods `state.json` wants, and deletes
 `tome/safe` so the next start is normal too.
+
+### Crash loops
+
+`crash_loop.cpp`, `core/crash_report.*`. A mod that crashes the game
+before the main menu (an asset the game can't load, a thread of its own,
+memory it broke) would otherwise mean deleting `tome.mix` by hand.
+
+- **Counting:** in DllMain, once the main menu hook is installed (so
+  getting there can be seen), `count_start` adds 1 to `tome/startups`
+  (`<count>\n<report stem>\n`, written atomically). The main menu's Setup or
+  a game starting (`-loadfile` and the World Editor's Test Map never show
+  the menu), followed by `kGoodAfterMs` (5 s) of the game running on, sets
+  it back: the file is deleted. A start closed before then counts as failed
+  too. The World Editor and builds without the menu hook don't count.
+- **The loop:** `crash_loop::check` (DllMain, in `safe_mode_reason`) reads
+  the count; 3 (`kStartsBeforeSafeMode`) or more turns safe mode on with the
+  reason `the last 3 starts didn't reach the main menu`. That start counts
+  too, so a crash in safe mode keeps it there.
+- **The offer:** once that start gets going, a popup (Tome's own, through
+  `popups::show`) says what happened, names the last crash among those
+  starts if Tome reported one (the report's summary line; `note_crash`
+  records its stem in `tome/startups`), and offers **Keep Safe Mode**
+  (creates `tome/safe`, turned off with the mod menu's Normal Mode) or
+  **This Start Only** (Enter, Esc). Not shown if `tome/safe` is there already.
+
+### Crash reports
+
+`crash_handler.cpp`, `core/crash_report.*`. For faults outside the guarded
+calls: a mod's own threads, the game's code, Tome's own code.
+
+- **Where:** game.dll sets an unhandled-exception filter of its own early in
+  its main function, before Miles loads `tome.mix` (`CrashHandler::Install`,
+  `reverse-engineering.md`, "Crash handler"). Tome's goes in front of it in
+  DllMain (`SetUnhandledExceptionFilter`, which returns the game's), writes
+  its report, then calls the game's, which writes the game's own error log
+  and starts BlizzardError.exe as before. The main menu checks that nothing
+  replaced it since (`check_filter`) and goes in front again if something
+  did. Installed only when the build's signatures match, like every other
+  change Tome makes.
+- **The writer:** a thread of Tome's own (started at bootstrap, with
+  `MiniDumpWriteDump` from the system's `dbghelp.dll` looked up then): the
+  crashed thread may have no stack left or hold a lock. The filter hands it
+  the exception and waits up to 15 s (`kWriteTimeoutMs`); a stuck writer
+  (a lock the crash left held, such as the heap's) just means no report.
+  One report at a time; a second thread crashing meanwhile waits for that
+  report, then goes to the game's filter unreported; a fault while writing
+  (in the writer or the crashed thread) goes straight to the game's filter.
+  A filter that `check_filter` put Tome's in front of and that chains back
+  to Tome's (the one it replaced) gets the game's filter once, not another
+  report: a per-thread depth (a TLS slot) tells Tome it's been there.
+- **What:** `tome/crashes/crash-<yyyymmdd-hhmmss>.txt` and `.dmp` (the
+  five newest are kept). The text: a summary line (`access violation
+  writing 0x00000000 at crash.1.dll+0x1420 (mod crash)`), the exception,
+  the thread (and whether it's the game's main thread), registers, likely
+  callers (return addresses on the stack, as the guard finds them), the
+  mods as of the last refresh (`set_mods`, with whose DLL is whose), and
+  the last 80 lines of `tome.log`. The minidump has the referenced memory,
+  thread data and unloaded modules. A line goes into `tome.log` too, through
+  `log::try_write`, which gives up instead of waiting for a lock the crashed
+  thread may hold.
 
 ## Natives
 
@@ -1353,7 +1418,10 @@ API version 10: `popup`, `popup_close`, `restart_game`.
   hooks in priority order with revoking and the patch installed once,
   metadata errors, a 64-bit DLL, state.json edits, hot reload, removed
   mods, packages (unpacked, a folder winning, an update reloading, removal),
-  safe mode at startup and from the menu, shutdown, and chat commands: the
+  safe mode at startup and from the menu, crash loops (`tome/startups`
+  counted, the loop, the count set back) and crash reports (written for a
+  fake crash, and for a real access violation nothing handles, through
+  Tome's filter to the one before it), shutdown, and chat commands: the
   fake image carries every mapped function's bytes, so `events::install`
   hooks them all, and `CGameUI::HandleSlashCommand` is a runnable function
   that handles nothing (its mapped prologue, a cookie it can read and an
@@ -1473,9 +1541,12 @@ API version 10: `popup`, `popup_close`, `restart_game`.
     REPLACE hook handler (the original still runs), `tome_mod_enable` and
     `tome_mod_load`; each time the mod is stopped and its status says where,
     and turning it off and on retries it;
-  - safe mode (sixth launch, `-tomesafe` and `tome/safe`): nothing loads,
-    statuses say safe mode, the mod menu enables a mod anyway, state.json
-    is unchanged;
+  - safe mode (sixth launch, `-tomesafe`, `tome/safe` and three failed
+    starts in `tome/startups`): nothing loads, statuses say safe mode, the
+    mod menu enables a mod anyway, state.json is unchanged, the main menu
+    sets the count back, and no popup offers safe mode (`tome/safe` is
+    there); every other launch starts with no count. The first launch checks
+    that the crash filter went in front of the game's;
   - the asset overlay: a texture override seen through Storm, a TOC and FDF
     from a mod's assets loaded by the map, a `Blizzard.j` override run by
     the game, live removal and re-adding, and (fourth launch: main menu →

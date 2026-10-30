@@ -1,6 +1,6 @@
 # Tome roadmap
 
-Status as of 2026-10-29. Design rationale: `research.md`. How it works:
+Status as of 2026-10-30. Design rationale: `research.md`. How it works:
 `architecture.md`. Game internals: `reverse-engineering.md`.
 
 ## Done
@@ -68,10 +68,13 @@ Rust mods need Windows 10 (`WaitOnAddress`; Rust's own minimum).
 5. **Real Windows:** everything so far ran under Wine with Mesa. One manual
    pass on Windows 10/11 with Direct3D and Defender on: install, Mods menu,
    approving a DLL mod, settings, keybinds, a LAN game, safe mode, uninstall.
-6. **Crash loops** (§9): count startups that never reach the main menu and
-   offer safe mode after a few in a row, so a bad mod never means deleting
-   `tome.mix` by hand. A crash report (minidump and the log's tail in
-   `tome/`) for faults outside mod calls. Later: guard threads mods start
+6. ~~**Crash loops** (§9)~~ Done: starts that don't reach the main menu
+   (or a game) are counted in `tome/startups`; after 3 in a row the next
+   start is in safe mode, and a popup names the last crash and offers to
+   keep safe mode (`tome/safe`). Faults outside mod calls get
+   `tome/crashes/crash-<time>.txt` (summary, registers, likely callers, the
+   mods, the log's tail) and a minidump, from a filter in front of
+   game.dll's own, which still runs. Later: guard threads mods start
    through the API.
 7. **The handshake in `tools/e2e-test.sh`:** a two-instance run (own Wine
    prefix and network namespace for the second, `architecture.md`, "Testing

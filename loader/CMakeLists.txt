@@ -10,6 +10,7 @@ add_library(tome_core STATIC
     src/core/chat.cpp
     src/core/command_line.cpp
     src/core/context_restore.cpp
+    src/core/crash_report.cpp
     src/core/debug_script.cpp
     src/core/frames.cpp
     src/core/game_lock.cpp
@@ -53,6 +54,8 @@ target_compile_options(tome_core PRIVATE ${TOME_CXX_OPTIONS})
 add_library(tome_runtime OBJECT
     src/api.cpp
     src/bootstrap.cpp
+    src/crash_handler.cpp
+    src/crash_loop.cpp
     src/debug_input.cpp
     src/events.cpp
     src/frames.cpp

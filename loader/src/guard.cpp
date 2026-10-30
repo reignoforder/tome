@@ -1,5 +1,6 @@
 #include "guard.h"
 
+#include "core/crash_report.h"
 #include "core/hooks.h"
 #include "log.h"
 #include "paths.h"
@@ -39,7 +40,6 @@ static_assert(offsetof(GuardFrame, esp) == 8 && offsetof(GuardFrame, resume) == 
 
 // ExceptionFlags while handlers are called to unwind, not to handle.
 constexpr DWORD kUnwinding = 0x2 | 0x4;  // EXCEPTION_UNWINDING, EXCEPTION_EXIT_UNWIND
-constexpr DWORD kCppException = 0xE06D7363;  // MSVC's throw
 
 } // namespace
 
@@ -160,26 +160,8 @@ namespace {
 FaultSink g_sink = nullptr;
 
 const char* exception_name(DWORD code) {
-    switch (code) {
-    case EXCEPTION_ACCESS_VIOLATION: return "access violation";
-    case EXCEPTION_ILLEGAL_INSTRUCTION: return "illegal instruction";
-    case EXCEPTION_PRIV_INSTRUCTION: return "privileged instruction";
-    case EXCEPTION_INT_DIVIDE_BY_ZERO: return "integer division by zero";
-    case EXCEPTION_INT_OVERFLOW: return "integer overflow";
-    case EXCEPTION_STACK_OVERFLOW: return "stack overflow";
-    case EXCEPTION_BREAKPOINT: return "breakpoint";
-    case EXCEPTION_DATATYPE_MISALIGNMENT: return "misaligned data";
-    case EXCEPTION_ARRAY_BOUNDS_EXCEEDED: return "array bounds exceeded";
-    case EXCEPTION_IN_PAGE_ERROR: return "in-page error";
-    case EXCEPTION_FLT_DIVIDE_BY_ZERO: return "floating-point division by zero";
-    case EXCEPTION_FLT_INVALID_OPERATION: return "invalid floating-point operation";
-    case EXCEPTION_FLT_OVERFLOW: return "floating-point overflow";
-    case EXCEPTION_FLT_UNDERFLOW: return "floating-point underflow";
-    case EXCEPTION_FLT_STACK_CHECK: return "floating-point stack check";
-    case kCppException: return "uncaught C++ exception";
-    case TOME_EXCEPTION_MOD_FAILED: return "the mod reported a failure (logged above)";
-    default: return nullptr;
-    }
+    if (code == TOME_EXCEPTION_MOD_FAILED) return "the mod reported a failure (logged above)";
+    return crash_report::exception_name(code);
 }
 
 // "hello.3.dll+0x1a2b", or the bare address outside any module.
@@ -279,6 +261,10 @@ void report(tome_mod* mod, const char* what, const char* detail, const GuardFram
 }
 
 } // namespace
+
+bool looks_like_return_address(uint32_t value) {
+    return return_address(value);
+}
 
 void set_fault_sink(FaultSink sink) {
     g_sink = sink;

@@ -2,6 +2,7 @@
 
 #include "core/chat.h"
 #include "core/jass.h"
+#include "crash_loop.h"
 #include "storm.h"
 #include "frames.h"
 #include "guard.h"
@@ -612,6 +613,7 @@ void TOME_CALL after_enter_game(tome_mod*, tome_hook_call*, void*) {
     g_time_of_day = -1;
     read_map(current_game());  // a saved game's map info is only complete now
     TOME_INFO("Game started: %s", g_map_name.c_str());
+    crash_loop::on_game_start();
     if (!g_script_shadows.empty()) {
         // The player didn't choose to trust this map's script; say so where
         // they'll see it, not only in tome.log. The guard has blocked it.

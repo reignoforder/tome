@@ -1093,6 +1093,32 @@ Only the world view may be widened: the others sit in 2D art that is still
 stretched, so the widescreen patch scales only Perspective calls made while
 WorldView::SetupCamera runs.
 
+## Crash handler
+
+game.dll has its own crash handling, found from its import of
+`SetUnhandledExceptionFilter` (IAT slot `0xA7C348`, three calls):
+
+- `CrashHandler::Install` (`0x0199F0`, fastcall, `ecx` = the game folder)
+  stores the handler `0x019AB0` at .data `0xD78520` and sets
+  `CrashHandler::Filter` (`0x03B590`) as the unhandled-exception filter,
+  keeping the previous one at .data `0xD78524`. Its one caller is the
+  game's main function (`0x045080`, at `0x0450F6`), early, before the
+  sound start-up that loads `tome.mix`: when Tome attaches, the game's
+  filter is the current one (seen at run time: Tome's `SetUnhandledExceptionFilter`
+  returns `game.dll+0x3b590`, and the e2e test checks it).
+- `CrashHandler::Filter` calls the handler and maps its result to
+  `EXCEPTION_*`; the handler writes the game's error log and minidump and
+  starts `BlizzardError.exe` ("The application encountered an unexpected
+  error", with a report ID). Nothing else references the filter: no
+  `__except` in the main loop uses it, so a fault reaches it only unhandled.
+- `CrashHandler::Remove` (`0x03B670`) puts the previous filter back.
+- Storm.dll imports `SetUnhandledExceptionFilter` too and can write
+  minidumps (`dbghelp.dll`); not looked at further.
+
+Tome's crash reports (`architecture.md`, "Crash reports") put a filter in
+front of the game's and call it afterwards, so these aren't hooked; they're
+mapped for reference.
+
 ## Storm
 
 game.dll imports Storm **by ordinal** only. Those Tome uses, all checked against

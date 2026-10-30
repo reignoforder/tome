@@ -18,6 +18,7 @@
 
 #include "mod_handle.h"
 
+#include <cstdint>
 #include <type_traits>
 
 namespace tome::guard {
@@ -40,6 +41,10 @@ enum Flags : unsigned {
 // (tome_mod::starting_on).
 bool call(tome_mod* mod, const char* what, const char* detail, void (*fn)(void*), void* context,
           unsigned flags = kNone);
+
+// Whether `value` looks like a return address: inside a module, right
+// after a call instruction. For finding likely callers on a stack.
+bool looks_like_return_address(uint32_t value);
 
 template <typename F>
 bool run(tome_mod* mod, const char* what, const char* detail, F&& f, unsigned flags = kNone) {

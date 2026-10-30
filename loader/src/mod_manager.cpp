@@ -4,6 +4,7 @@
 #include "core/game_lock.h"
 #include "core/hash.h"
 #include "core/json.h"
+#include "crash_handler.h"
 #include "frames.h"
 #include "guard.h"
 #include "hooks.h"
@@ -496,6 +497,7 @@ bool ModManager::load(Runtime& rt, const Installed& mod, std::string& error) {
     }
 
     rt.module = module;
+    crash_handler::add_module(reinterpret_cast<uintptr_t>(module), mod.meta.id);
     rt.source_dll = mod.dll;
     rt.stamp = mod.dll_stamp;
     rt.enable_fn = lookup<tome_mod_lifecycle_fn>(module, "tome_mod_enable");
@@ -1729,6 +1731,15 @@ void ModManager::refresh_locked(std::vector<Installed> installed, assets::Moment
         }
     }
     status_ = std::move(status);
+
+    // For crash reports (crash_handler.h): what ran, and whose DLL is whose.
+    std::vector<crash_report::ModLine> lines;
+    for (const ModStatus& s : status_) lines.push_back({s.id.empty() ? s.folder : s.id, s.version, s.state});
+    std::vector<std::pair<uintptr_t, std::string>> modules;
+    for (const auto& [id, rt] : runtime_) {
+        if (rt->module) modules.emplace_back(reinterpret_cast<uintptr_t>(rt->module), id);
+    }
+    crash_handler::set_mods(std::move(lines), std::move(modules));
 
     // Unpacked packages nothing uses any more: not installed now, and not
     // what a loaded mod (a locked one, say) was loaded from.
