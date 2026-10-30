@@ -5,6 +5,7 @@
 
 #include <cstdarg>
 #include <cstdio>
+#include <cstring>
 #include <string>
 
 namespace tome::log {
@@ -55,6 +56,11 @@ bool find_kept(size_t& from, std::string_view text) {
     return true;
 }
 
+size_t kept_size() {
+    SharedLock hold(g_lock);
+    return g_kept.size();
+}
+
 void write(Level level, const char* fmt, ...) {
     char message[2048];
     va_list args;
@@ -82,7 +88,7 @@ void write(Level level, const char* fmt, ...) {
     OutputDebugStringA(line);
 
     ExclusiveLock hold(g_lock);
-    if (g_keep) g_kept.append(line, static_cast<size_t>(len));
+    if (g_keep && std::strncmp(message, "Debug ", 6) != 0) g_kept.append(line, static_cast<size_t>(len));
     if (g_file != INVALID_HANDLE_VALUE) {
         // Unbuffered on our side: if the game crashes, everything up to the
         // crash is already in the OS file cache.

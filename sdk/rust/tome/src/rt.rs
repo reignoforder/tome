@@ -87,8 +87,13 @@ fn install_panic_hook() {
 }
 
 // Closures registered with Tome, owned here and passed to Tome as `user`.
-// Only lifecycle and main-thread callbacks register them (Tome is !Send),
-// so they live in the main thread's storage. One dies when Tome won't call
+// Only lifecycle and main-thread callbacks register them (Tome is !Send).
+// They live in the process, not in a thread's storage: Tome runs a mod's
+// first load and enable on its bootstrap thread, which ends once the game
+// runs, and a thread's storage is dropped with it (freeing callbacks Tome
+// still calls). Tome never runs a mod's code on two threads at once (the
+// first load finishes before the main thread may call the mod; after it,
+// the main thread or the mod manager's lock), so plain cells do. One dies when Tome won't call
 // it again: refused (the registration failed), replaced (on_click and
 // on_keybind replace a button's or key's callback) or finished (a popup's
 // runs once); it's freed once none of the mod's code runs on the thread.
@@ -100,12 +105,21 @@ struct Entry {
     key: Option<String>,
 }
 
-thread_local! {
-    static LIVE: RefCell<Vec<Entry>> = const { RefCell::new(Vec::new()) };
-    static DEAD: RefCell<Vec<Box<dyn Any>>> = const { RefCell::new(Vec::new()) };
-    static RETIRED: RefCell<Vec<Box<dyn Any>>> = const { RefCell::new(Vec::new()) };
-    static DEPTH: Cell<u32> = const { Cell::new(0) };
+// A process-wide cell, used like a thread_local (`.with`): see above for
+// why one thread at a time is all it needs.
+struct Global<T>(T);
+// SAFETY: Tome calls a mod from one thread at a time (above).
+unsafe impl<T> Sync for Global<T> {}
+impl<T> Global<T> {
+    fn with<R>(&'static self, f: impl FnOnce(&T) -> R) -> R {
+        f(&self.0)
+    }
 }
+
+static LIVE: Global<RefCell<Vec<Entry>>> = Global(RefCell::new(Vec::new()));
+static DEAD: Global<RefCell<Vec<Box<dyn Any>>>> = Global(RefCell::new(Vec::new()));
+static RETIRED: Global<RefCell<Vec<Box<dyn Any>>>> = Global(RefCell::new(Vec::new()));
+static DEPTH: Global<Cell<u32>> = Global(Cell::new(0));
 
 /// Keeps `value` until the mod is disabled; the pointer is its address.
 pub(crate) fn keep<T: 'static>(value: T) -> *mut c_void {

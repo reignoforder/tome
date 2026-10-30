@@ -72,9 +72,10 @@ struct Panel {
     menu::State state;
     // Icon frames made on this screen, as (definition, context); new screens start empty.
     std::vector<std::pair<std::string, int>> icons;
+    std::string shown;  // the page last logged ("list", "settings hello", ...)
 };
-Panel g_glue{MenuStyle::Glue, false, {}, {}};
-Panel g_esc{MenuStyle::Esc, false, {}, {}};
+Panel g_glue{MenuStyle::Glue, false, {}, {}, {}};
+Panel g_esc{MenuStyle::Esc, false, {}, {}, {}};
 
 void* g_esc_menu = nullptr;  // the CEscMenuMainPanel from the last Setup
 bool g_esc_opening = false;  // Tome's own SetPanel(help) call is running
@@ -216,6 +217,31 @@ void save_edits(Panel& p) {
     }
 }
 
+const char* page_name(menu::Page page) {
+    switch (page) {
+    case menu::Page::List: return "list";
+    case menu::Page::Details: return "details";
+    case menu::Page::Settings: return "settings";
+    case menu::Page::Tome: return "Tome";
+    case menu::Page::TomeSettings: return "Tome settings";
+    case menu::Page::Keybinds: return "keybinds";
+    }
+    return "?";
+}
+
+// "Mod menu page: settings hello", once per change: what a click or a key
+// did, for the log (and the e2e test, which waits for it before the next).
+void log_page(Panel& p) {
+    std::string shown = page_name(p.state.page);
+    if (!p.state.mod.empty() && (p.state.page == menu::Page::Details || p.state.page == menu::Page::Settings)) {
+        shown += " " + p.state.mod;
+    }
+    if (p.state.capture >= 0) shown += " (waiting for a key for " + p.state.capture_mod + "/" + p.state.capture_id + ")";
+    if (shown == p.shown) return;
+    p.shown = shown;
+    TOME_INFO("Mod menu page: %s", shown.c_str());
+}
+
 // Fills the panel's frames from the current page.
 void render(Panel& p) {
     const MenuStyle style = p.style;
@@ -223,6 +249,7 @@ void render(Panel& p) {
     const int rows = ui::menu_rows(style);
     menu::Data data = gather();
     menu::clamp(p.state, data, rows);
+    log_page(p);  // after clamp: the page it shows (a mod without settings shows its details)
     menu::View view = menu::build(p.state, data, rows);
 
     set_text(ui::menu_frame(style, "Title"), view.title);
@@ -356,6 +383,7 @@ void bind_panel(Panel& p) {
 void reset_page(Panel& p) {
     int list_first = p.state.list_first;
     p.state = {};
+    p.shown.clear();
     p.state.list_first = list_first;
 }
 
@@ -599,7 +627,7 @@ void add_mod_menu(void* menu) {
     // Developer aid for screenshots and tests: open the panel right away.
     char debug[8];
     // Waits until the menu has finished appearing, which overrides visibility set during setup.
-    if (GetEnvironmentVariableA("TOME_DEBUG_OPEN_MOD_MENU", debug, sizeof(debug)) && debug[0] == '1') {
+    if (TOME_DEV && GetEnvironmentVariableA("TOME_DEBUG_OPEN_MOD_MENU", debug, sizeof(debug)) && debug[0] == '1') {
         HANDLE t = CreateThread(nullptr, 0, debug_open_later, nullptr, 0, nullptr);
         if (t) CloseHandle(t);
     }

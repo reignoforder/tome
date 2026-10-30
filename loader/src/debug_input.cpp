@@ -2,8 +2,14 @@
 
 #include "core/debug_script.h"
 #include "core/keys.h"
+#include "events.h"
+#include "frames.h"
+#include "main_thread.h"
 #include "log.h"
 
+#include <atomic>
+#include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -13,9 +19,12 @@ namespace {
 using debug_script::Kind;
 using debug_script::Step;
 
-// How long a wait step waits for its line: a map's loading screen under
-// software rendering takes well over a minute.
+// A watchdog, not a pace: how long a step may wait for the game before the
+// script gives up (a map's loading screen under software rendering takes
+// well over a minute).
 constexpr DWORD kWaitMs = 300000;
+// An until step's tries before it gives up.
+constexpr unsigned kUntilTries = 20;
 
 struct Script {
     HWND window;
@@ -26,11 +35,20 @@ struct Script {
 std::vector<Step> g_steps;
 bool g_waits = false;  // the script has wait steps: the log keeps its lines
 
+// Lets the game handle what was posted: n frames, so input is paced by the
+// game and not a clock. If it presents none (nothing has hooked PresentFrame
+// yet), at most 2 s.
+void pause_frames(uint32_t n) {
+    const uint32_t from = events::frames();
+    const DWORD began = GetTickCount();
+    while (events::frames() - from < n && GetTickCount() - began < 2000) Sleep(2);
+}
+
 void press(HWND window, WPARAM key) {
     PostMessageW(window, WM_KEYDOWN, key, 1);
-    Sleep(30);
+    pause_frames(1);
     PostMessageW(window, WM_KEYUP, key, 1 | (1u << 30) | (1u << 31));
-    Sleep(30);
+    pause_frames(1);
 }
 
 // Real key presses (keybd_event), so the game and Tome see the modifiers in
@@ -46,24 +64,22 @@ void press_key(const std::string& name) {
     for (int i = 0; i < 3; ++i) {
         if (key.mods & flags[i]) keybd_event(modifiers[i], 0, 0, 0);
     }
-    Sleep(30);
+    pause_frames(1);
     keybd_event(key.vk, 0, 0, 0);
-    Sleep(30);
+    pause_frames(1);
     keybd_event(key.vk, 0, KEYEVENTF_KEYUP, 0);
     for (int i = 2; i >= 0; --i) {
         if (key.mods & flags[i]) keybd_event(modifiers[i], 0, KEYEVENTF_KEYUP, 0);
     }
+    pause_frames(1);
 }
 
 // Enter opens the chat box, the characters go in as WM_CHAR, Enter sends.
 void type_line(HWND window, const std::string& text) {
     press(window, VK_RETURN);
-    Sleep(300);
-    for (unsigned char c : text) {
-        PostMessageW(window, WM_CHAR, c, 1);
-        Sleep(20);
-    }
-    Sleep(200);
+    pause_frames(3);  // the chat box opens
+    for (unsigned char c : text) PostMessageW(window, WM_CHAR, c, 1);
+    pause_frames(2);
     press(window, VK_RETURN);
 }
 
@@ -95,18 +111,104 @@ void click(HWND window, double fx, double fy) {
     ClientToScreen(window, &screen);
     SetCursorPos(screen.x, screen.y);
     PostMessageW(window, WM_MOUSEMOVE, 0, pos);
-    Sleep(150);
+    pause_frames(2);  // the button under the cursor sees it
     PostMessageW(window, WM_LBUTTONDOWN, MK_LBUTTON, pos);
-    Sleep(80);
+    pause_frames(1);
     PostMessageW(window, WM_LBUTTONUP, 0, pos);
+    pause_frames(1);
     TOME_INFO("Debug click at %.3f,%.3f (client %d,%d)", fx, fy, x, y);
+}
+
+// Runs fn on the game's main thread and waits for it (at most 10 s: a game
+// that stopped presenting frames).
+void on_main(std::function<void()> fn) {
+    auto done = std::make_shared<std::atomic<bool>>(false);
+    main_thread::post([fn = std::move(fn), done] {
+        fn();
+        done->store(true);
+    });
+    const DWORD began = GetTickCount();
+    while (!done->load() && GetTickCount() - began < 10000) Sleep(2);
+}
+
+// Clicks (or focuses) the named frame on the main thread. The name is copied:
+// on_main may give up waiting, and the call may then run after this step
+// (or the whole script) is gone.
+void frame_action(const std::string& name, int context, bool focus) {
+    on_main([name, context, focus] {
+        const char* what = focus ? "focus" : "click";
+        void* frame = frames::get(name.c_str(), context);
+        if (!frame) {
+            TOME_WARN("Debug %s on %s (context %d): no such frame", what, name.c_str(), context);
+            return;
+        }
+        if (!focus) {
+            TOME_INFO("Debug click on %s (context %d)", name.c_str(), context);
+            if (!frames::click(frame)) TOME_WARN("Debug click on %s: not a control", name.c_str());
+        } else if (frames::set_focus(frame)) {
+            TOME_INFO("Debug focus on %s (context %d)", name.c_str(), context);
+        } else {
+            TOME_WARN("Debug focus on %s: it didn't take the focus", name.c_str());
+        }
+    });
+    pause_frames(1);
+}
+
+void act(HWND window, const Step& step) {
+    switch (step.kind) {
+    case Kind::ClickFrame: frame_action(step.text, step.context, false); break;
+    case Kind::Focus: frame_action(step.text, step.context, true); break;
+    case Kind::Close:
+        TOME_INFO("Debug close");
+        PostMessageW(window, WM_CLOSE, 0, 0);
+        break;
+    case Kind::Minimize:
+    case Kind::Restore:
+        TOME_INFO("Debug %s", step.kind == Kind::Minimize ? "minimize" : "restore");
+        ShowWindowAsync(window, step.kind == Kind::Minimize ? SW_MINIMIZE : SW_RESTORE);
+        if (step.kind == Kind::Restore) SetForegroundWindow(window);
+        break;
+    case Kind::Text:
+        TOME_INFO("Debug text \"%s\"", step.text.c_str());
+        for (unsigned char c : step.text) PostMessageW(window, WM_CHAR, c, 1);
+        pause_frames(1);
+        break;
+    case Kind::Key:
+        TOME_INFO("Debug key %s", step.text.c_str());
+        press_key(step.text);
+        break;
+    case Kind::Type:
+        TOME_INFO("Debug typing \"%s\"", step.text.c_str());
+        type_line(window, step.text);
+        break;
+    case Kind::Click: click(window, step.x, step.y); break;
+    case Kind::Move: move(window, step.x, step.y); break;
+    case Kind::Wait:
+    case Kind::Frames:
+    case Kind::Until:
+    case Kind::Settle: break;
+    }
 }
 
 DWORD WINAPI run(LPVOID param) {
     auto script = static_cast<Script*>(param);
     DWORD start = GetTickCount();  // of the script, then of the last wait's end
     size_t log_pos = 0;            // in the kept log: after the last wait's line
+    const Step* last_action = nullptr;
+    size_t action_pos = 0;  // the kept log's end just before the last action
+    uint32_t action_clicks = 0;  // events::control_clicks() then
+    // Lines that repeat a step's text start with "Debug " (log doesn't keep
+    // them, the e2e checks skip them); the others name steps by number, so
+    // a wait or until never finds its own text in them.
+    size_t number = 0;
+    auto stop = [&](const char* why) {
+        TOME_WARN("TOME_DEBUG_CLICKS: step %zu: %s; the script stops", number, why);
+        log::keep_lines(false);
+        delete script;
+        return DWORD(0);
+    };
     for (const Step& step : script->steps) {
+        ++number;
         DWORD elapsed = GetTickCount() - start;
         if (step.at_ms > elapsed) Sleep(step.at_ms - elapsed);
         switch (step.kind) {
@@ -114,57 +216,84 @@ DWORD WINAPI run(LPVOID param) {
             // The text isn't logged here: a later wait for it would match this line.
             DWORD began = GetTickCount();
             while (!log::find_kept(log_pos, step.text)) {
-                if (GetTickCount() - began > kWaitMs) {
-                    TOME_WARN("TOME_DEBUG_CLICKS: no log line with \"%s\" in %lu s; the script stops",
-                              step.text.c_str(), kWaitMs / 1000);
-                    log::keep_lines(false);
-                    delete script;
-                    return 0;
-                }
-                Sleep(50);
+                if (GetTickCount() - began > kWaitMs) return stop("its log line didn't come in time");
+                Sleep(20);
             }
             start = GetTickCount();
             break;
         }
-        case Kind::Close:
-            TOME_INFO("Debug close");
-            PostMessageW(script->window, WM_CLOSE, 0, 0);
-            break;
-        case Kind::Minimize:
-        case Kind::Restore:
-            TOME_INFO("Debug %s", step.kind == Kind::Minimize ? "minimize" : "restore");
-            ShowWindowAsync(script->window, step.kind == Kind::Minimize ? SW_MINIMIZE : SW_RESTORE);
-            if (step.kind == Kind::Restore) SetForegroundWindow(script->window);
-            break;
-        case Kind::Text:
-            TOME_INFO("Debug text \"%s\"", step.text.c_str());
-            for (unsigned char c : step.text) {
-                PostMessageW(script->window, WM_CHAR, c, 1);
-                Sleep(20);
+        case Kind::Frames: {
+            const uint32_t from = events::frames();
+            DWORD began = GetTickCount();
+            while (events::frames() - from < step.frames) {
+                if (GetTickCount() - began > kWaitMs) return stop("the game stopped presenting frames");
+                Sleep(5);
             }
+            start = GetTickCount();
             break;
-        case Kind::Key:
-            TOME_INFO("Debug key %s", step.text.c_str());
-            press_key(step.text);
+        }
+        case Kind::Settle: {
+            // A few frames first, so an action just posted has started its animation.
+            pause_frames(2);
+            DWORD began = GetTickCount();
+            while (events::frames_since_ui_tick() < debug_script::kSettleFrames) {
+                if (GetTickCount() - began > kWaitMs) return stop("the UI never settled");
+                Sleep(5);
+            }
+            start = GetTickCount();
             break;
-        case Kind::Type:
-            TOME_INFO("Debug typing \"%s\"", step.text.c_str());
-            type_line(script->window, step.text);
+        }
+        case Kind::Until: {
+            if (!last_action) return stop("no action before it to repeat");
+            size_t from = action_pos;
+            uint32_t frame = events::frames();
+            unsigned tries = 1;
+            bool taken_logged = false;
+            DWORD began = GetTickCount();
+            while (!log::find_kept(from, step.text)) {
+                if (GetTickCount() - began > kWaitMs) return stop("its log line didn't come in time");
+                if (events::frames() - frame >= debug_script::kUntilFrames) {
+                    // A control took it: the effect is on its way (or never
+                    // comes, which the watchdog reports); doing it again could
+                    // do it twice. Only an action nothing took is repeated.
+                    if (events::control_clicks() != action_clicks) {
+                        if (!taken_logged) {
+                            TOME_INFO("Debug: step %zu: a control took the action; waiting for its effect", number);
+                            taken_logged = true;
+                        }
+                        frame = events::frames();
+                        Sleep(5);
+                        continue;
+                    }
+                    if (++tries > kUntilTries) return stop("the action had no effect after repeated tries");
+                    TOME_INFO("Debug: step %zu saw no effect in %u frames; the action again (try %u)", number,
+                              debug_script::kUntilFrames, tries);
+                    action_clicks = events::control_clicks();
+                    act(script->window, *last_action);
+                    frame = events::frames();
+                }
+                Sleep(5);
+            }
+            log_pos = from;
+            start = GetTickCount();
             break;
-        case Kind::Click:
-            click(script->window, step.x, step.y);
-            break;
-        case Kind::Move:
-            move(script->window, step.x, step.y);
+        }
+        default:
+            action_pos = log::kept_size();
+            action_clicks = events::control_clicks();
+            last_action = &step;
+            act(script->window, step);
             break;
         }
     }
+    TOME_INFO("Debug script finished");
     if (g_waits) log::keep_lines(false);
     delete script;
     return 0;
 }
 
 std::string script_spec() {
+    if (!TOME_DEV) return {};
     std::string spec(8192, '\0');
     DWORD len = GetEnvironmentVariableA("TOME_DEBUG_CLICKS", spec.data(), static_cast<DWORD>(spec.size()));
     if (len >= spec.size()) {
@@ -183,7 +312,7 @@ void prepare() {
     std::vector<std::string> bad;
     g_steps = debug_script::parse(spec, bad);
     for (const std::string& item : bad) TOME_WARN("TOME_DEBUG_CLICKS: can't parse \"%s\"", item.c_str());
-    for (const Step& step : g_steps) g_waits = g_waits || step.kind == Kind::Wait;
+    for (const Step& step : g_steps) g_waits = g_waits || step.kind == Kind::Wait || step.kind == Kind::Until;
     if (g_waits) log::keep_lines(true);
 }
 

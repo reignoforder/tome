@@ -474,6 +474,7 @@ bool mount_assets(const std::vector<ModSource>& mods, std::string& summary) {
 }
 
 void log_probe() {
+    if (!TOME_DEV) return;
     char name[MAX_PATH];
     DWORD len = GetEnvironmentVariableA("TOME_DEBUG_ASSET", name, sizeof(name));
     if (len == 0 || len >= sizeof(name)) return;

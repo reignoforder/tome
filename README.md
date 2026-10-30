@@ -5,7 +5,8 @@ Minecraft. Mods are built against Tome's stable API instead of each one
 reverse-engineering the game.
 
 Status: early development. Target build: **1.27b** (game.dll 1.27.1.7085).
-See [`docs/research.md`](docs/research.md) for the design and roadmap.
+See [`docs/ROADMAP.md`](docs/ROADMAP.md) for what's next and
+[`docs/research.md`](docs/research.md) for the design.
 
 What works today:
 
@@ -58,6 +59,9 @@ cmake -S . -B build -G Ninja \
     -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
+
+That's a release build. The tests need a developer build: add `-DTOME_DEV=ON`
+(see "Environment variables").
 
 Outputs:
 
@@ -152,21 +156,34 @@ this one. It replaces the earlier `fps-unlock`.
 
 ## Environment variables
 
+The `TOME_DEBUG_*` variables are read only by developer builds: configure
+with `-DTOME_DEV=ON` (`make` does; `make DEV=OFF` doesn't). Release builds
+ignore them, since `TOME_DEBUG_APPROVE` would let anything that sets the
+game's environment allow a mod's code. The tests need a developer build;
+the log's `Tome <version> starting` line says when it's one.
+
 | Variable | Effect |
 |----------|--------|
 | `TOME_HOME` | Use this folder (a Windows path) for `tome/` (and so `tome/mods/`) instead of the game folder. |
 | `TOME_DEBUG_APPROVE` | Allow these mods' code without turning them on in the menu: ids, comma-separated, or `*` for all. For tests. |
 | `TOME_DEBUG_OPEN_MOD_MENU=1` | Open the mod menu automatically once the main menu is up (screenshots). |
-| `TOME_DEBUG_CLICKS` | Post left clicks to the game window: `x,y@ms;...`, with x/y as fractions of the window; `type:text@ms` types a chat line, `text:abc@ms` types characters (no Enter), `key:Ctrl+J@ms` presses a key, `wait:text@ms` waits for a `tome.log` line containing the text (later times count from then). Used by the e2e test. |
+| `TOME_DEBUG_CLICKS` | Simulated input for tests, paced by the game rather than a clock: `click:FrameName` clicks a named button, `x,y;...` clicks at a position (fractions of the window), `type:text` types a chat line, `text:abc` types characters (no Enter), `key:Ctrl+J` presses a key, `wait:text` waits for a `tome.log` line containing the text, `until:text` repeats the last action until such a line, `frames:n` waits n frames, `settle` waits until no UI animation runs. See `loader/src/core/debug_script.h`. Used by the e2e test. |
 
 ## Testing
 
 ```sh
-make test                          # unit tests (cd build && ctest; run under Wine)
+make test                          # unit tests, the loader without the game, and against game.dll (ctest, Wine)
 make e2e                           # end-to-end in the real game (tools/e2e-test.sh)
 HEADLESS=0 make e2e                # the same, on your screen
 make game                          # the build in the game, to try things (tools/game.sh)
 ```
+
+`make test` includes two deterministic suites that drive the real loader
+in a test process, each test in a process of its own: `tome_host_tests`
+against a fake game image (no game files), and `tome_game_tests` against the
+real `game.dll` loaded but never run (skipped without `GAME_DIR`). They take
+seconds and give the same result every run; see `docs/architecture.md`,
+"Testing".
 
 The end-to-end test needs a Warcraft III 1.27b folder: `./WarCraft III`, or
 `GAME_DIR=/path/to/it`. It only reads it. Each launch runs from a temporary
@@ -178,13 +195,25 @@ a profile called Tome), so it looks the same on every machine whatever your
 own prefix's settings are.
 
 By default the game runs in its own X server (Xvfb) with Mesa's software
-OpenGL: no window appears, no GPU is needed, the game keeps the keyboard
-focus whatever you do, and its simulated clicks don't move your mouse. The
-simulated input (`TOME_DEBUG_CLICKS`) waits for log lines such as
-`Screen: custom game` or `Game started:` before each part instead of
-counting from the launch, so a slow machine only makes the test slower. The
-test launches the game six times, about five minutes in all.
+OpenGL and with its sound going to ALSA's null device: no window appears,
+nothing plays, no GPU or sound server is needed, the game keeps the
+keyboard focus whatever you do, and its simulated clicks don't move your
+mouse (`HEADLESS=0` and `SOUND=1` change that). Nothing in the test is
+timed: the simulated input (`TOME_DEBUG_CLICKS`) waits for log lines (a
+screen being ready, a page of the mod menu, a mod's reply), counts the
+game's frames and waits for the UI to stop moving, and the checks wait for
+their log lines, so a slow machine only makes the test slower. The test
+launches the game six times.
 
 `make game` (`tools/game.sh start`) runs the build the same way, on your
 screen, from `build/test-env/game/`; put mods to try in its `tome/mods/`.
 `tools/game.sh shot file.png` takes a screenshot of the game's display.
+
+## License
+
+Tome itself is under the GNU GPL v3 (`LICENSE`). The SDK in `sdk/` (the mod
+API headers, CMake helpers, templates, examples and Rust crates) is under the
+MIT license (`sdk/LICENSE`), so mods built against it may use any license.
+
+Tome is not affiliated with or endorsed by Blizzard Entertainment. It
+includes no game files; you need your own copy of Warcraft III.

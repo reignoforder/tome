@@ -257,7 +257,14 @@ private:
     // as each mod's reload mode allows at `moment`. Returns the archive's new
     // summary, or "" if it didn't change.
     std::string apply_assets(const std::vector<const Installed*>& running, assets::Moment moment);
-    uint64_t disk_fingerprint() const;
+    // What the watcher compares: the mods' files (hashed), and state.json
+    // apart from them, which counts only when someone else wrote it.
+    struct DiskPrint {
+        uint64_t files = 0;
+        uint64_t state = 0;       // state.json's stamp, hashed
+        bool state_ours = false;  // ...as Tome itself last wrote it
+    };
+    DiskPrint disk_fingerprint() const;
     // A "sync": "required" mod's identity in the multiplayer handshake
     // (core/handshake.h): tome.mod.json, the DLL and every asset file, hashed;
     // cached until one of them changes.
@@ -297,7 +304,7 @@ private:
         std::string error;
     };
     mutable std::map<std::string, UnpackedPackage> package_cache_;
-    uint64_t last_polled_ = 0;  // set in init(), then only touched by the watcher thread
+    DiskPrint last_polled_;  // set in init(), then only touched by the watcher thread
     // tome/state.json as Tome last wrote it. Its own lock: written under
     // lock_ on the main thread, read by the watcher thread without lock_.
     mutable SRWLOCK state_stamp_lock_ = SRWLOCK_INIT;

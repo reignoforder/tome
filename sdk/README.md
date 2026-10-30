@@ -116,6 +116,8 @@ For your own test setups:
 - `TOME_HOME=<a Windows path>` keeps `tome/` (and so the mods) outside the
   game folder.
 - `TOME_DEBUG_APPROVE=<ids>` (or `*`) allows mods' code without the menu.
+  Only a developer build of Tome reads it (`-DTOME_DEV=ON`, the default of
+  `make` in Tome's repository); released builds ignore it.
 - `-tomesafe` on the command line, or Shift held at launch, starts with
   every mod off.
 
@@ -131,6 +133,11 @@ For your own test setups:
   (Miles' `AIL_open_digital_driver`): Tome holds the game until then (at
   most 10 s). Code that must run before that, such as choosing the device,
   goes in `tome_mod_load`.
+- **Your first `enable` may run on another thread.** At startup Tome loads
+  and enables mods on a thread of its own that ends once the game runs;
+  after that, everything runs on the game's main thread, one call at a
+  time. Don't keep callbacks or their state in thread-local storage (it's
+  freed when that thread ends); the C++ and Rust helpers don't.
 - **Crashes stay contained.** A fault in a mod's code, or a C++ exception or
   Rust panic the helpers catch, stops that call, logs where it happened, and
   disables the mod. The game keeps running. Threads a mod starts itself
@@ -144,3 +151,9 @@ For your own test setups:
 - **Versioned structs.** Structs Tome fills start with `size`. Check it
   before reading a field added in a later API version (`tome::has_field` in
   C++); the Rust API does this for you.
+
+## License
+
+The SDK (everything in this folder) is under the MIT license (`LICENSE`).
+Your mod may use any license, open or closed. Tome itself, the loader that
+runs mods, is under the GNU GPL v3.

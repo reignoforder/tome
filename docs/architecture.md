@@ -1333,6 +1333,46 @@ API version 10: `popup`, `popup_close`, `restart_game`.
   breakpoints, C++ exceptions, stack overflows (twice on one thread), nested
   guards, inner SEH frames unwound, callee-saved registers and FPU state
   restored, and crashing BEFORE/REPLACE handlers and a crash below a nested chain.
+- `tome_host_tests` (`tests/host/`): the loader itself without the game,
+  deterministic (nothing waits on a clock or a window). It links
+  `tome_runtime`, the object library `tome.mix` is linked from (everything
+  but `dllmain.cpp`), so it tests the code that ships. Each test runs in a
+  process of its own (the program starts itself with `--run <name>`; a
+  crash or a hang past 60 s is a failure): the loader keeps its state in
+  globals. The harness (`harness.h`) gives a temporary `TOME_HOME` with the
+  built fixture mods, the log kept in memory for checks, and a fake game
+  image: committed memory at the real 1.27b RVAs from `mappings/1.27b.json`,
+  zeroed, with `RCString::GetText` copied from its mapped bytes (the whole
+  function), `InitNatives` and `BindNative` as jumps to recorders, and the
+  three InitNatives call sites as real `call` instructions, so calling one
+  is a map load and the bound thunks can be called like the JASS VM calls
+  natives. Without a game window `main_thread::post` runs everything at
+  once on the test's thread. It covers approval, loading, natives (integer
+  and real ABI, C, C++ and Rust), disabled natives returning 0, crashes in
+  load, enable, a native and a REPLACE hook (the original runs), two mods'
+  hooks in priority order with revoking and the patch installed once,
+  metadata errors, a 64-bit DLL, state.json edits, hot reload, removed
+  mods, packages (unpacked, a folder winning, an update reloading, removal),
+  safe mode at startup and from the menu, shutdown, and chat commands: the
+  fake image carries every mapped function's bytes, so `events::install`
+  hooks them all, and `CGameUI::HandleSlashCommand` is a runnable function
+  that handles nothing (its mapped prologue, a cookie it can read and an
+  epilogue of the test's), so `/tome` commands, a mod's command and the
+  lines that go on to the game all run through Tome's real hook.
+- `tome_game_tests` (`tests/game/`): the same harness against the real
+  `game.dll` from `TOME_GAME_DIR`, loaded into the test process (where
+  Windows puts it, so the RVAs are exercised) but never run; each test is
+  skipped without it. `Mss32.dll` doesn't load `.mix` files until the game
+  opens its sound, so a `tome.mix` deployed in the install stays out (the
+  test checks). It checks the build's identity and signatures on the loaded
+  image, applies everything `start_bootstrap` patches from DllMain (natives,
+  every built-in patch, the sound wait, the mod menu, events, the
+  handshake, the Esc menu) except loading Tome's frame definitions (that
+  runs game code), hooks every mapped function's real prologue (181 of
+  181), and runs the hook-a/hook-b and crash fixtures' handlers around the
+  game's own `RCString::GetText`. Not yet: the memhack guard on the real
+  JASS compiler (`docs/reverse-engineering.md`, "Running the compiler
+  outside a game").
 - `tools/fuzz.sh [seconds] [target...]`: libFuzzer targets in `fuzz/`, one
   per untrusted input: lobby handshake lines and game-cache keys
   (`handshake`), chat commands (`chat`), packages (`zip`: directory,
@@ -1354,23 +1394,68 @@ API version 10: `popup`, `popup_close`, `restart_game`.
   neither the user's prefix nor their settings matter; and, with
   `HEADLESS=1` (the default), an Xvfb server of its own with Mesa's
   software OpenGL, so the window always has the focus, `SetCursorPos`
-  moves only that server's pointer and no GPU is needed. Where no sound
-  server runs (containers, CI) it starts a silent PulseAudio one (a null
-  sink): without a sound device the game shows a modal "Unable to
-  initialize base sound services" dialog over the main menu that takes
-  every click. The prefix is remade when Wine changes (its version and DLL
-  list are recorded), since Wine copies its DLLs into a prefix only when
-  it makes it. Stopping uses
-  `wineserver -k` on the test prefix, and "is it running" looks for
-  `war3.exe` processes with that `WINEPREFIX`, so the user's own game is
-  never touched. `TOME_DEBUG_CLICKS` items can also be `type:<text>@ms`:
-  Enter, the text as WM_CHAR messages, Enter (a line in the in-game chat),
-  and `wait:<text>@ms`: the script waits for a `tome.log` line containing
-  the text (each wait searches after the line the last one matched; the
-  log keeps its lines in memory for this when the variable is set), and
-  later times count from the wait's end. Every part of every launch starts
-  with one (`Main menu set up`, `Screen: <name>`, `Game started: `,
-  `Mod menu opened`), so only short in-screen delays are fixed times.
+  moves only that server's pointer and no GPU is needed. With `SOUND=0`
+  (the default when headless) the game's sound goes to ALSA's null device
+  through Wine's ALSA driver (`winepulse.drv` disabled with
+  `WINEDLLOVERRIDES`, `ALSA_CONFIG_PATH` pointing at a config holding only
+  a `null` default PCM; with the system's `alsa.conf` Wine also lists
+  PipeWire's devices and plays through them): no sound server, nothing audible, and the game's
+  sound start-up still succeeds. Without any device it shows a modal
+  "Unable to initialize base sound services" dialog over the main menu
+  that takes every click (sounds turned off in its settings don't avoid
+  it). The prefix is remade when Wine changes (its version and DLL list
+  are recorded), since Wine copies its DLLs into a prefix only when it
+  makes it. Stopping uses `wineserver -k` on the test prefix, and "is it
+  running" looks for `war3.exe` processes with that `WINEPREFIX`, so the
+  user's own game is never touched.
+
+  **Nothing is timed.** The input (`TOME_DEBUG_CLICKS`,
+  `core/debug_script.h`, played by `debug_input.cpp` in developer builds)
+  is paced by the game: `wait:<text>` for a `tome.log` line (each wait
+  searches after the line the last one matched; the log keeps its lines in
+  memory for this), `frames:<n>` for presented frames (`events::frames`),
+  `settle` until no UI timer has ticked for 10 frames, and `until:<text>`,
+  which repeats the last action every 30 frames until the text is logged
+  after it, but only while no control has taken it: developer builds count
+  `CControl::Click` calls (mouse, shortcut keys and Tome's clicks all pass
+  there), so an action a button took is waited on, never done twice.
+  Buttons are clicked by name (`click:<frame>[,<context>]`, through
+  `frames::click` on the main thread), not at positions; the lobby's slot
+  dropdown and the sixth launch's two clicks stay
+  positional (the dropdown's items have no names; the others keep the
+  mouse path to Tome's buttons tested). A text box gets the keyboard focus
+  by name (`focus:<frame>`, `CFrame::SetFocus`): a click on it is dropped
+  while Tome's panel is still lowering, which `settle` can't see (the
+  panel's own animation doesn't run on UI timers). The in-game Menu button is a
+  `SIMPLEBUTTON` (not a control), so the menu opens with F10. Clicks, keys and chat lines are spaced by frames too. Game
+  screens and panels drop clicks while they slide in; their animations run
+  on UI timers (`UITimer::Fire`, hooked only in developer builds), so
+  Tome logs `Screen ready: <name>` once a screen's own timers have ticked
+  and stopped for 10 frames (a screen that doesn't slide in, the score
+  screen, never logs it: the test waits for `Screen: score screen` and
+  `settle`; a screen with no ticks for a while isn't ready either, since
+  the main menu waits about a second of clock time before it animates),
+  and `settle` waits for all of them. `until`
+  is only for effects logged in the same frame as the input (Tome's menu,
+  which logs every page, `Mod menu page: ...`; mods' buttons and
+  commands); `Screen: <name>` comes about a second after its click (the old
+  screen slides out first), so those clicks wait for readiness and then
+  click once. The test map logs what the input waits for (`e2e: dialog
+  shown`), starts its save and load once hello answers again, and its
+  victory check on the chat line `-e2e-done` and 20 s of game time (the
+  game's clock, deterministic like the map's own events). The checks wait
+  for their log lines; `E2E_WATCHDOG` (120 s) only bounds a hang. They
+  never see the input driver's `Debug ...` lines, and a check of what the
+  script just did (`set_enabled`, a file swapped) uses `check_new`, which
+  looks only after the script's `mark`. `launch` refuses a script step with
+  a fixed time (`@ms`).
+
+  **The same registry every launch.** The game keeps the last map, the
+  profile and its options in the registry, and `tools/game.sh` shares the
+  prefix. A new prefix keeps a snapshot of its fresh user registry
+  (`user.reg.pristine`); the e2e test saves yours, starts every launch from
+  the snapshot plus its own values (the LAN game on port `E2E_PORT`, 6119,
+  so a game holding 6112 doesn't matter), and puts yours back at the end.
   It covers:
   - build recognition and the signature check;
   - startup errors per mod;

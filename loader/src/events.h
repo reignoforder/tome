@@ -42,6 +42,21 @@ bool install(uintptr_t game_base, const BuildMappings& build, std::string& repor
 // Fills the version 5 part of the API table (unavailable stubs if install didn't run).
 void fill_api(tome_api& api);
 
+// Frames presented so far (PresentFrame calls); any thread. Developer
+// builds' input scripts (debug_input) count time in frames with it.
+uint32_t frames();
+
+// Developer builds: frames presented since the last UI timer tick (every UI
+// animation runs on them), so a few in a row without one mean the UI has
+// stopped moving. Other builds don't hook the UI timers: there it's every
+// frame presented so far.
+uint32_t frames_since_ui_tick();
+
+// Developer builds: how many clicks controls have taken (CControl::Click:
+// mouse, shortcut keys and Tome's own clicks all go through it). Always 0
+// in other builds.
+uint32_t control_clicks();
+
 // Shows a message in the game's message area. False outside a game.
 bool display_text(const std::string& text, float seconds);
 

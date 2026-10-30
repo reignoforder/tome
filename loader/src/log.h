@@ -14,12 +14,17 @@ bool open(const std::wstring& path);
 
 // From now on every line is also kept in memory, for find_kept
 // (TOME_DEBUG_CLICKS's wait steps), or no longer (and the kept lines
-// dropped). Off unless asked for.
+// dropped). Off unless asked for. The input driver's own lines (messages
+// starting "Debug ", which repeat what the script sent) aren't kept, as
+// the e2e test's checks skip them.
 void keep_lines(bool keep);
 
 // Whether a line kept since offset `from` contains `text`. If so, `from`
 // moves past the end of that line.
 bool find_kept(size_t& from, std::string_view text);
+
+// The end of the kept lines: a find_kept from here sees only later lines.
+size_t kept_size();
 
 void write(Level level, const char* fmt, ...) __attribute__((format(gnu_printf, 2, 3)));
 

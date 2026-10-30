@@ -118,6 +118,8 @@ struct BuildMappings {
         uint32_t focused_frame;           // FocusedFrame
         uint32_t layout_set_width;        // CLayoutFrame::SetWidth
         uint32_t control_click;           // CControl::Click
+        uint32_t observer_has_event;      // CObserver::HasEvent
+        uint32_t control_click_event;     // ControlEvent.click
         uint32_t esc_menu_setup;          // CEscMenuMainPanel::Setup (hooked by name)
         uint32_t esc_menu_set_panel;      // CEscMenuMainPanel::SetPanel
         uint32_t esc_panel_main, esc_panel_help;  // EscMenuPanel.*
@@ -138,7 +140,7 @@ struct BuildMappings {
         uint32_t glue_screen_offset;      // CGlueMgr.screen
         // GlueScreen.*
         uint32_t screen_loading, screen_main_menu, screen_options, screen_single_player, screen_custom_game,
-            screen_custom_campaign, screen_campaign, screen_lan, screen_score_screen, screen_view_replay,
+            screen_custom_campaign, screen_campaign, screen_lan, screen_lan_create, screen_score_screen, screen_view_replay,
             screen_load_saved_game, screen_battle_net, screen_none;
         uint32_t game_reset;              // CGameWar3::Reset
         uint32_t game_instance;           // CGameWar3.instance

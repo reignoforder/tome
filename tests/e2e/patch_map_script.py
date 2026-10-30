@@ -43,6 +43,9 @@ GLOBALS = """\
     unit tome_e2e_paladin = null
     dialog tome_e2e_dialog = null
     trigger tome_e2e_dialog_trigger = null
+    trigger tome_e2e_done_trigger = null
+    boolean tome_e2e_map_done = false
+    boolean tome_e2e_input_done = false
     trigger tome_e2e_arrow_trigger = null
     trigger tome_e2e_menu_trigger = null
     unit tome_e2e_shadow = null
@@ -112,11 +115,24 @@ CALLS = """\
     call TimerStart(CreateTimer(), 3.0, false, function TomeE2EMore)
     call TimerStart(CreateTimer(), 4.0, false, function TomeE2EUpgrade)
     call TimerStart(CreateTimer(), 9.0, false, function TomeE2ERevive)
-    call TimerStart(CreateTimer(), 6.0, false, function TomeE2ESave)
-    call TimerStart(CreateTimer(), 8.0, false, function TomeE2ELoad)
-    // Late enough for the chat lines tools/e2e-test.sh types in the first
-    // launch: the victory dialog takes the keyboard.
-    call TimerStart(CreateTimer(), 20.0, false, function MeleeInitVictoryDefeat)
+    // With hello off, the save and load wait until the test has turned it
+    // back on (its natives answer again), so it sees them however long that
+    // took; with hello on, they run at 6 and 8 s.
+    if tome_e2e_load then
+        call TimerStart(CreateTimer(), 0.5, true, function TomeE2EWaitForHello)
+    else
+        call TimerStart(CreateTimer(), 6.0, false, function TomeE2ESave)
+        call TimerStart(CreateTimer(), 8.0, false, function TomeE2ELoad)
+    endif
+    // The victory check (its dialog pauses the game and takes the keyboard)
+    // starts once both are done: the map's own events above, which run on
+    // the game's clock (deterministic, unlike the test's wall clock: 20 s of
+    // game time covers them, revival and decay included), and the test's
+    // input, which types "-e2e-done" last.
+    call TimerStart(CreateTimer(), 20.0, false, function TomeE2EMapDone)
+    set tome_e2e_done_trigger = CreateTrigger()
+    call TriggerRegisterPlayerChatEvent(tome_e2e_done_trigger, Player(0), "-e2e-done", true)
+    call TriggerAddAction(tome_e2e_done_trigger, function TomeE2EInputDone)
     // A dialog with a hotkey (T) on the chat line "-dialog", for runs with
     // simulated keys: a dialog pauses a single player game until it's clicked.
     set tome_e2e_dialog_trigger = CreateTrigger()
@@ -362,6 +378,12 @@ function TomeE2EMenuUnit takes nothing returns nothing
     endif
     call ClearSelection()
     call SelectUnit(u, true)
+    // What the e2e test's input waits for before the menu's hotkey.
+    if GetEventPlayerChatString() == "-build" then
+        call TomeLogString("e2e: selected the worker")
+    else
+        call TomeLogString("e2e: selected the hero")
+    endif
 endfunction
 
 function TomeE2EDialog takes nothing returns nothing
@@ -369,6 +391,7 @@ function TomeE2EDialog takes nothing returns nothing
     call DialogSetMessage(tome_e2e_dialog, "Tome")
     call DialogAddButton(tome_e2e_dialog, "Test", 'T')
     call DialogDisplay(Player(0), tome_e2e_dialog, true)
+    call TomeLogString("e2e: dialog shown")
 endfunction
 
 // The Paladin killed at 3 s (revivable once its death animation ends),
@@ -404,8 +427,8 @@ function TomeE2ESave takes nothing returns nothing
     call TomeLogInteger(8602)
 endfunction
 
-// Loads the game saved at 6 s: a saved game load inside the session. The
-// timers come back with it, so the victory check still starts at 20 s.
+// Loads the game saved 2 s earlier: a saved game load inside the session.
+// The timers come back with it.
 function TomeE2ELoad takes nothing returns nothing
     if not tome_e2e_load then
         return
@@ -416,6 +439,33 @@ function TomeE2ELoad takes nothing returns nothing
     endif
     call TomeLogInteger(8603)
     call LoadGame("TomeE2E.w3z", false)
+endfunction
+
+function TomeE2EMaybeVictory takes nothing returns nothing
+    if tome_e2e_map_done and tome_e2e_input_done then
+        call MeleeInitVictoryDefeat()
+    endif
+endfunction
+
+function TomeE2EMapDone takes nothing returns nothing
+    set tome_e2e_map_done = true
+    call TomeE2EMaybeVictory()
+endfunction
+
+function TomeE2EInputDone takes nothing returns nothing
+    set tome_e2e_input_done = true
+    call TomeE2EMaybeVictory()
+endfunction
+
+// Defined after TomeE2ESave and TomeE2ELoad: JASS needs a function before its use.
+function TomeE2EWaitForHello takes nothing returns nothing
+    if HelloDouble(1.0) == 0.0 then
+        return
+    endif
+    call PauseTimer(GetExpiredTimer())
+    call TomeLogString("e2e: hello is back; saving and loading")
+    call TimerStart(CreateTimer(), 1.0, false, function TomeE2ESave)
+    call TimerStart(CreateTimer(), 3.0, false, function TomeE2ELoad)
 endfunction
 
 function TomeE2EGameStart takes nothing returns boolean

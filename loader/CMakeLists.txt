@@ -43,14 +43,18 @@ add_library(tome_core STATIC
 )
 target_include_directories(tome_core PUBLIC src)
 target_link_libraries(tome_core PUBLIC tome_sdk)  # core/hooks uses the hook types from tome.h
-target_compile_options(tome_core PRIVATE -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti)
+# The loader's own code (not the tests: they set their own).
+set(TOME_CXX_OPTIONS -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti)
+target_compile_options(tome_core PRIVATE ${TOME_CXX_OPTIONS})
 
-add_library(tome_loader SHARED
+# Everything in tome.mix but DllMain, compiled once: tome.mix links these
+# objects, and so do the tests that drive the loader in their own process
+# (tests/host, tests/game), so they test the same code that ships.
+add_library(tome_runtime OBJECT
     src/api.cpp
     src/bootstrap.cpp
     src/debug_input.cpp
     src/events.cpp
-    src/dllmain.cpp
     src/frames.cpp
     src/game_build.cpp
     src/guard.cpp
@@ -88,6 +92,10 @@ add_library(tome_loader SHARED
     src/unwind.cpp
     src/watcher.cpp
 )
+target_link_libraries(tome_runtime PUBLIC tome_core tome_sdk)
+target_include_directories(tome_runtime PUBLIC src)
+
+add_library(tome_loader SHARED src/dllmain.cpp)
 
 # Miles Sound System (Mss32.dll) LoadLibrary's every *.mix in the game folder,
 # which is how Tome gets into the process without patching anything.
@@ -97,18 +105,17 @@ set_target_properties(tome_loader PROPERTIES
     SUFFIX ".mix"
 )
 
-target_compile_definitions(tome_loader PRIVATE
+target_compile_definitions(tome_runtime PUBLIC
     TOME_VERSION="${PROJECT_VERSION}"
     TOME_VERSION_W=L"${PROJECT_VERSION}"
+    TOME_DEV=$<BOOL:${TOME_DEV}>
     UNICODE _UNICODE
     WIN32_LEAN_AND_MEAN NOMINMAX
     _WIN32_WINNT=0x0601
 )
 
-target_compile_options(tome_loader PRIVATE
-    -Wall -Wextra -Wpedantic
-    -fno-exceptions -fno-rtti
-)
+target_compile_options(tome_runtime PRIVATE ${TOME_CXX_OPTIONS})
+target_compile_options(tome_loader PRIVATE ${TOME_CXX_OPTIONS})
 
 # The game ships no MinGW runtime DLLs, so link libgcc/libstdc++/winpthreads
 # statically. tome.mix must only depend on DLLs that Windows itself provides.
@@ -119,7 +126,9 @@ target_link_options(tome_loader PRIVATE
     $<$<CONFIG:Release>:-s>
 )
 
-target_link_libraries(tome_loader PRIVATE tome_core tome_sdk bcrypt version ole32)
+target_link_libraries(tome_runtime PUBLIC bcrypt version ole32)
+# Linking an object library adds its objects (and its definitions) to tome.mix.
+target_link_libraries(tome_loader PRIVATE tome_runtime)
 
 add_custom_target(deploy
     COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:tome_loader> "${TOME_GAME_DIR}/tome.mix"

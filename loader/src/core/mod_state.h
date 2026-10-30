@@ -80,7 +80,7 @@ bool is_code_file(std::string_view path, std::string_view assets);
 // by hand.
 std::string manifest(std::vector<CodeFile> files);
 
-// TOME_DEBUG_APPROVE, for tests: a comma-separated list of mod ids whose
+// TOME_DEBUG_APPROVE, for tests (read only by developer builds, TOME_DEV): a comma-separated list of mod ids whose
 // code counts as allowed, or "*" for every mod.
 bool debug_approves(std::string_view list, std::string_view id);
 

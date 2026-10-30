@@ -425,8 +425,10 @@ mod_state::Need ModManager::approval_need(const mod_state::State& state, const I
 
 void ModManager::implicit_approvals(mod_state::State& state, const std::vector<Installed>& installed, bool legacy,
                                     bool log) {
+    // Release builds ignore TOME_DEBUG_APPROVE: anything that sets the game's
+    // environment could otherwise allow a mod's code.
     char env[1024] = {};
-    GetEnvironmentVariableA("TOME_DEBUG_APPROVE", env, sizeof(env));
+    if (TOME_DEV) GetEnvironmentVariableA("TOME_DEBUG_APPROVE", env, sizeof(env));
     for (const Installed& mod : installed) {
         if (!mod.valid) continue;
         auto saved = state.find(mod.meta.id);
@@ -434,7 +436,8 @@ void ModManager::implicit_approvals(mod_state::State& state, const std::vector<I
         if (legacy && saved != state.end() && saved->second.approved.hash.empty()) {
             approve(state, mod, log ? "installed before approvals" : nullptr);
         }
-        if (approval_need(state, mod) != mod_state::Need::None && mod_state::debug_approves(env, mod.meta.id)) {
+        if (TOME_DEV && approval_need(state, mod) != mod_state::Need::None &&
+            mod_state::debug_approves(env, mod.meta.id)) {
             approve(state, mod, log ? "TOME_DEBUG_APPROVE" : nullptr);
         }
     }
@@ -986,10 +989,14 @@ bool ModManager::game_locked() const {
 }
 
 bool ModManager::poll_changed() {
-    uint64_t fingerprint = disk_fingerprint();
-    if (fingerprint == last_polled_) return false;
-    last_polled_ = fingerprint;
-    return true;
+    DiskPrint now = disk_fingerprint();
+    // state.json as Tome itself wrote it is no change, whatever it was
+    // before: the refresh that wrote it already ran. (Taking only its stamp
+    // as the baseline missed that: the first refresh's write of a state.json
+    // someone else had written looked like an edit, and ran another.)
+    const bool changed = now.files != last_polled_.files || (!now.state_ours && now.state != last_polled_.state);
+    last_polled_ = now;
+    return changed;
 }
 
 std::string ModManager::sync_hash(const Installed& mod) {
@@ -1088,7 +1095,8 @@ std::string ModManager::code_hash(const Installed& mod) const {
 // state.json, every file in the mod folders (DLLs, tome.mod.json, assets)
 // and every package.
 // Not tome/mods/config (settings files have poll_settings_changed).
-uint64_t ModManager::disk_fingerprint() const {
+ModManager::DiskPrint ModManager::disk_fingerprint() const {
+    DiskPrint out;
     Fnv1a64 hash;
     auto mix = [&](const void* data, size_t len) { hash.mix(data, len); };
     auto mix_file = [&](const std::wstring& path) {
@@ -1121,22 +1129,18 @@ uint64_t ModManager::disk_fingerprint() const {
     };
 
     {
-        // state.json as Tome itself wrote it counts as unchanged: the refresh
-        // that wrote it already ran, so the watcher needn't run another.
+        // Apart from the files (poll_changed): Tome's own write isn't a change.
         const std::wstring path = paths_.tome_dir + L"\\state.json";
         FileStamp stamp;
         bool exists = file_stamp(path, stamp);
-        bool ours;
         {
             SharedLock hold(state_stamp_lock_);
-            ours = exists && stamp == written_state_stamp_;
+            out.state_ours = exists && stamp == written_state_stamp_;
         }
-        if (ours) {
-            static const char kWrittenByTome[] = "state.json written by Tome";
-            mix(kWrittenByTome, sizeof(kWrittenByTome));
-        } else {
-            mix_file(path);
-        }
+        Fnv1a64 state;
+        state.mix(&exists, sizeof(exists));
+        state.mix(&stamp, sizeof(stamp));
+        out.state = state.value;
     }
     WIN32_FIND_DATAW fd;
     HANDLE find = FindFirstFileW((paths_.mods_dir + L"\\*").c_str(), &fd);
@@ -1154,7 +1158,8 @@ uint64_t ModManager::disk_fingerprint() const {
         } while (FindNextFileW(find, &fd));
         FindClose(find);
     }
-    return hash.value;
+    out.files = hash.value;
+    return out;
 }
 
 std::vector<ModStatus> ModManager::status() const {

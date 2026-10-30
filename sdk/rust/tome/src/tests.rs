@@ -355,3 +355,42 @@ fn dead_callbacks_are_freed() {
     unsafe { rt::unload(raw, None) };
     assert_eq!(drops.get(), 8); // the other button's and the key's
 }
+
+// Tome runs a mod's first load and enable on its bootstrap thread, which
+// ends once the game is running; the callbacks registered there must outlive
+// it (thread-local storage is dropped when its thread ends).
+#[test]
+fn callbacks_outlive_the_thread_that_registered_them() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+    struct Dropped(Arc<AtomicUsize>);
+    impl Drop for Dropped {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, SeqCst);
+        }
+    }
+    struct Sendable(Tome, *mut sys::tome_mod);
+    unsafe impl Send for Sendable {}
+
+    let _serial = SERIAL.lock().unwrap();
+    let tome = loaded(13, size_of::<sys::tome_api>());
+    let drops = Arc::new(AtomicUsize::new(0));
+    let on_thread = Sendable(tome, rt::mod_ptr());
+    let counted = drops.clone();
+    std::thread::spawn(move || {
+        let on_thread = on_thread;
+        unsafe { rt::enable(on_thread.1, None) };
+        let dropped = Dropped(counted);
+        on_thread.0.register_command("hello", move |_| {
+            let _ = &dropped;
+        })
+        .unwrap();
+    })
+    .join()
+    .unwrap();
+    assert_eq!(drops.load(SeqCst), 0, "the bootstrap thread's end freed a callback Tome still holds");
+    // Freed at the next enable, as callbacks registered on the main thread are.
+    unsafe { rt::disable(rt::mod_ptr(), None) };
+    unsafe { rt::enable(rt::mod_ptr(), None) };
+    assert_eq!(drops.load(SeqCst), 1);
+}

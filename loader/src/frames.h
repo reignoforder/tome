@@ -51,6 +51,13 @@ bool on_click(void* button, const char* name, int context, std::function<void()>
 // Clicks a control as the player would (its listeners hear about it). False
 // unless it's a control.
 bool click(void* control);
+// True if CControl::Click on the control would reach its listeners (it has
+// a click registration, CObserver::HasEvent); a disabled one has none.
+// Main thread.
+bool takes_clicks(void* control);
+// Gives the frame the keyboard focus (CFrame::SetFocus); true if it took it.
+// Main thread.
+bool set_focus(void* frame);
 
 // True while a game's UI is up (main thread).
 bool game_showing();

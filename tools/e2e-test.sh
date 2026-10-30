@@ -17,8 +17,10 @@
 # (Xvfb), off screen: it keeps the keyboard focus, and its clicks don't move
 # your mouse, so you can go on working. HEADLESS=0 shows it on your screen
 # instead (then leave it the focus: a single player game pauses without it).
-# The simulated input waits for log lines (TOME_DEBUG_CLICKS wait: steps),
-# not for fixed times, so a slow machine only makes the test slower.
+# Nothing in it is timed: the simulated input (TOME_DEBUG_CLICKS) waits for
+# log lines, counts the game's frames and waits for the UI to stop moving,
+# and every check waits for its log line (E2E_WATCHDOG only bounds a hang),
+# so a slow machine only makes the test slower.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -32,13 +34,13 @@ MPQ_TOOL="$BUILD/tools/mpq/tome-mpq.exe"
 die() { echo "e2e: $*" >&2; exit 2; }
 env_check
 [[ -f "$BUILD/loader/tome.mix" ]] || die "build first: cmake --build $BUILD"
+grep -qiE '^TOME_DEV:BOOL=(ON|1|TRUE|YES|Y)$' "$BUILD/CMakeCache.txt" 2>/dev/null \
+    || die "$BUILD isn't a developer build (the test needs TOME_DEBUG_*): cmake -S . -B $BUILD -DTOME_DEV=ON"
 [[ -f "$BUILD/mods/hello/hello.dll" ]] || die "hello example mod not built"
 [[ -f "$BUILD/mods/hello-cpp/hello-cpp.dll" ]] || die "hello-cpp example mod not built"
 [[ -f "$BUILD/mods/hook-a/hook-a.dll" && -f "$BUILD/mods/hook-b/hook-b.dll" ]] || die "hook test mods not built"
 [[ -f "$BUILD/mods/crash/crash.dll" ]] || die "crash test mod not built"
 env_running && die "the test's Warcraft III is still running (tools/game.sh stop)"
-# Another copy of the game (yours, or tools/game.sh) would take the LAN port.
-pgrep -x war3.exe >/dev/null && echo "e2e: another Warcraft III is running; the LAN game (fifth launch) may fail"
 env_prefix
 
 WORK="$(mktemp -d)"          # scratch files; deleted at the end
@@ -66,8 +68,8 @@ LAUNCHES=0
 
 cleanup() {
     stop_game
+    [[ -f "$WORK/user.reg.yours" ]] && env_registry_load "$WORK/user.reg.yours"
     env_display_stop
-    env_audio_stop
     if [[ "${E2E_KEEP:-0}" == 1 ]]; then
         echo "e2e: kept test files in $WORK"
     else
@@ -77,11 +79,19 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 1' INT TERM HUP
 
+# Every launch starts from the same registry (test-env.sh, "registry"): the
+# prefix's fresh one, with the LAN game on a port of its own (your game, or
+# tools/game.sh, keeps 6112). Yours is put back at the end.
+E2E_PORT="${E2E_PORT:-6119}"
+env_registry_save "$WORK/user.reg.yours"
+env_registry_pristine "$WORK/user.reg.e2e" \
+    "HKCU\\Software\\Blizzard Entertainment\\Warcraft III\\Gameplay|netgameport|REG_DWORD|$E2E_PORT"
+
 # --- setup -------------------------------------------------------------------
 
 env_game "$GAME" "$BUILD/loader/tome.mix"
 env_display_start
-env_audio_start
+env_sound
 cp -r "$BUILD/mods/hello" "$BUILD/mods/hello-cpp" "$MODS/"
 RUST=0
 if [[ -f "$BUILD/mods/hello-rs/hello_rs.dll" ]]; then
@@ -154,7 +164,11 @@ fi
 APPROVED="hello,hello-cpp,hello-rs,hook-a,hook-b,crash,wrong-arch,sync-test,asset-demo"
 
 launch() {
+    # Paced by the game only: no step may wait a fixed time (core/debug_script.h).
+    [[ "${TOME_DEBUG_CLICKS:-}" =~ @[0-9]+(;|$) ]] && die "a TOME_DEBUG_CLICKS step has a fixed time (@ms); wait for what it needs instead"
     rm -f "$LOG"
+    MARK=0
+    env_registry_load "$WORK/user.reg.e2e"
     (cd "$GAME" && DISPLAY="$(env_display)" TOME_HOME="$TOME_HOME_WIN" TOME_DEBUG_CLICKS="${TOME_DEBUG_CLICKS:-}" \
         TOME_DEBUG_ASSET="$PROBE" TOME_DEBUG_APPROVE="$APPROVED" \
         WINEDEBUG=err+module exec wine war3.exe -window -opengl "${MAP_ARG[@]}" >"$WORK/wine.log" 2>&1) &
@@ -173,6 +187,7 @@ launch() {
 }
 
 set_enabled() {
+    mark
     python3 -I - "$STATE" "$1" "$2" <<'PY'
 import json, sys
 path, mod, enabled = sys.argv[1], sys.argv[2], sys.argv[3] == "true"
@@ -183,23 +198,48 @@ PY
 }
 
 FAILED=0
+# The checks wait for log lines; this only bounds how long a failing one
+# waits (a hung game), it doesn't pace anything: a passing check returns as
+# soon as its line is there.
+WATCHDOG="${E2E_WATCHDOG:-120}"
+deadline() { echo $((SECONDS + WATCHDOG)); }
 pass() { echo "  ok    $1"; }
 fail() { echo "  FAIL  $1"; FAILED=1; }
-count() { grep -cE "$1" "$LOG" 2>/dev/null || true; }
+# The log as checks see it: never the input driver's own lines ("Debug
+# click ...", "Debug typing ..."), which repeat what the test sent; from
+# line n+1 with an argument.
+# grep -a throughout: one stray byte must not make the log a "binary file".
+log_from() { tail -n +$(( ${1:-0} + 1 )) "$LOG" 2>/dev/null | grep -av '\] Debug '; }
+count() { log_from | grep -acE "$1" || true; }
+# mark: what the script does itself (state.json, files) is checked with
+# check_new, which only looks at lines logged after it, so an earlier line
+# of the same kind can't pass for it.
+MARK=0
+mark() { MARK=$(wc -l <"$LOG" 2>/dev/null || echo 0); }
 
-# check <regex> <description> [timeout-seconds]: waits for a matching log line.
+# check <regex> <description> [ignored]: waits for a matching log line.
 check() {
-    local deadline=$((SECONDS + ${3:-5}))
+    local deadline; deadline=$(deadline)
     while ((SECONDS < deadline)); do
-        grep -qE "$1" "$LOG" 2>/dev/null && { pass "$2"; return; }
+        log_from | grep -aqE "$1" && { pass "$2"; return; }
         sleep 0.2
     done
     fail "$2 (expected log line matching: $1)"
 }
 
-# check_more <regex> <n> <description> [timeout]: waits for more than n matching lines.
+# check_new <regex> <description>: the same, after the last mark.
+check_new() {
+    local deadline; deadline=$(deadline)
+    while ((SECONDS < deadline)); do
+        log_from "$MARK" | grep -aqE "$1" && { pass "$2"; return; }
+        sleep 0.2
+    done
+    fail "$2 (expected a new log line matching: $1)"
+}
+
+# check_more <regex> <n> <description>: waits for more than n matching lines.
 check_more() {
-    local deadline=$((SECONDS + ${4:-5}))
+    local deadline; deadline=$(deadline)
     while ((SECONDS < deadline)); do
         (($(count "$1") > $2)) && { pass "$3"; return; }
         sleep 0.2
@@ -216,12 +256,12 @@ crash_in() {
     set_enabled crash false
     check_more "crash +1\.0\.0 +disabled" "$before" "crash fixture off (a crashed mod can be turned off)" 10
     set_enabled crash true
-    check "\[crash\] mode \"$1\"" "crash fixture loaded again, crashing in: $1" 10
+    check_new "\[crash\] mode \"$1\"" "crash fixture loaded again, crashing in: $1"
 }
 
-# check_count <regex> <n> <description> [timeout]: waits for exactly n matching lines.
+# check_count <regex> <n> <description>: waits for exactly n matching lines.
 check_count() {
-    local deadline=$((SECONDS + ${4:-5}))
+    local deadline; deadline=$(deadline)
     while ((SECONDS < deadline)); do
         [[ "$(count "$1")" == "$2" ]] && { pass "$3"; return; }
         sleep 0.2
@@ -242,7 +282,7 @@ probe_sequence() {
 
 # check_probe <n> <expected sequence> <description>
 check_probe() {
-    local deadline=$((SECONDS + 10))
+    local deadline; deadline=$(deadline)
     while ((SECONDS < deadline)); do
         [[ "$(probe_sequence "$1")" == "$2" ]] && { pass "$3"; return; }
         sleep 0.2
@@ -251,23 +291,31 @@ check_probe() {
 }
 
 check_absent() {
-    if grep -qE "$1" "$LOG" 2>/dev/null; then fail "$2 (unexpected log line matching: $1)"; else pass "$2"; fi
+    if log_from | grep -aqE "$1"; then fail "$2 (unexpected log line matching: $1)"; else pass "$2"; fi
 }
 
 # --- run 1: everything enabled -----------------------------------------------
 
-# In the test map's game, timed from its start (the map saves at 6 s of game
-# time, which holds the game up): the map's dialog, shown on "-dialog", pauses
-# the game until its hotkey T (pressed twice in case the dialog was late; T
-# does nothing for the selected units), then an arrow key; then B and O on a
-# worker and a hero the map selects on "-build" and "-skill" (menu events;
-# Esc closes the build menu first, or O isn't a hotkey there). Then the C++
-# and Rust examples' chat commands, and the same commands making them throw
-# and panic.
+# In the test map's game, paced by the game (TOME_DEBUG_CLICKS waits for log
+# lines and counts frames; core/debug_script.h): the map's dialog, shown on
+# "-dialog", pauses the game until its hotkey T (T does nothing for the
+# selected units, so it can be pressed again); then an arrow key; then B and
+# O on a worker and a hero the map selects on "-build" and "-skill" (menu
+# events; Esc closes the build menu first, or O isn't a hotkey there), once
+# the map's own Peasant is trained (the two new units would use up the food
+# it needs). Then
+# the Rust and C++ examples' chat commands, and the same commands making
+# them panic and throw. "-e2e-done" last starts the map's victory check
+# (its dialog takes the keyboard).
 if ((${#MAP_ARG[@]})); then
-    TOME_DEBUG_CLICKS="wait:Game started: @0;type:-dialog@2500;key:T@4500;key:T@5500;key:Left@6500;\
-type:-build@7000;key:B@8000;key:Esc@8500;type:-skill@9000;key:O@10500;key:Esc@11000;type:/hellors e2e@12000;\
-type:/hellors panic@13500;type:/hellocpp e2e@15000;type:/hellocpp throw@16500" launch
+    RUST_INPUT=""
+    ((RUST)) && RUST_INPUT="type:/hellors e2e;wait:/hellors command:;type:/hellors panic;wait:panicked at;"
+    TOME_DEBUG_CLICKS="wait:Game started: ;settle;type:-dialog;wait:e2e: dialog shown;settle;\
+key:T;until:clicked dialog;key:Left;until:pressed Left;\
+wait:Peasant (hpea) of player 1 trained in Town Hall;type:-build;wait:e2e: selected the worker;frames:5;key:B;wait:opened the build menu;key:Esc;frames:5;\
+type:-skill;wait:e2e: selected the hero;frames:5;key:O;wait:opened the skill menu;key:Esc;frames:5;\
+${RUST_INPUT}type:/hellocpp e2e;wait:/hellocpp command:;type:/hellocpp throw;wait:uncaught exception: /hellocpp throw;\
+type:-e2e-done" launch
 else
     launch
 fi
@@ -487,7 +535,7 @@ fi
 
 echo "asset overlay"
 set_enabled asset-demo false
-check "Assets: 2 files from 2 mods" "assets of a disabled live mod removed"
+check_new "Assets: 2 files from 2 mods" "assets of a disabled live mod removed"
 check_count "Asset probe" 2 "probe ran after the change"
 if grep -E "Asset probe" "$LOG" | tail -n 1 | grep -q "fnv1a $PROBE_HASH"; then
     fail "the game still reads the disabled mod's texture"
@@ -499,7 +547,7 @@ check_count "Asset probe .*fnv1a $PROBE_HASH" 2 "re-enabling brings the texture 
 if ((${#MAP_ARG[@]})); then
     # A map is running, so a "reload": "map" mod's assets stay until the main menu.
     set_enabled asset-map false
-    check "Assets of asset-map: changes wait for the next map load or the main menu" "reload: map waits while a map runs"
+    check_new "Assets of asset-map: changes wait for the next map load or the main menu" "reload: map waits while a map runs"
     check_count "Assets: " 2 "the archive wasn't rebuilt for it"
 fi
 
@@ -510,9 +558,9 @@ check "Hooked RCString::GetText at 0x[0-9a-f]{8} \(5 bytes moved, 1 arguments\)"
 check "\[hook-a\] hooked RCString::GetText" "hook-a registered its handlers"
 check_probe 1 "$BOTH" "both mods' handlers ran in priority order, around the original"
 set_enabled hook-a false
-check "Disabled hook-a" "hook-a disabled"
+check_new "Disabled hook-a" "hook-a disabled"
 set_enabled hook-b false
-check "Disabled hook-b" "hook-b disabled"
+check_new "Disabled hook-b" "hook-b disabled"
 set_enabled hook-b true
 check_probe 2 "$B_ONLY" "hook-a's handlers were revoked; hook-b's still run"
 set_enabled hook-a true
@@ -525,35 +573,36 @@ check_count "Hooked RCString::GetText" 1 "the patch was installed only once"
 
 echo "crash isolation: events, hooks, lifecycle"
 crash_in tick
-check "crash crashed in event handler \(tick\): access violation writing 0x00000000" "a crash in an event handler is caught" 10
+check_new "crash crashed in event handler \(tick\): access violation writing 0x00000000" "a crash in an event handler is caught" 10
 check_count "Unloaded crash \(its DLL stays loaded" $(( ${#MAP_ARG[@]} ? 2 : 1 )) "the mod was stopped" 10
 crash_in hook
-check "crash crashed in replace hook RCString::GetText: access violation" "a crash in a REPLACE hook handler is caught"
-check '\[crash\] probe returned "TomeCrashProbe"' "the original ran in place of the crashed handler"
+check_new "crash crashed in replace hook RCString::GetText: access violation" "a crash in a REPLACE hook handler is caught"
+check_new '\[crash\] probe returned "TomeCrashProbe"' "the original ran in place of the crashed handler"
 crash_in enable
-check "crash crashed in tome_mod_enable: access violation" "a crash in tome_mod_enable is caught"
+check_new "crash crashed in tome_mod_enable: access violation" "a crash in tome_mod_enable is caught"
 check_count "Unloaded crash \(its DLL stays loaded" $(( ${#MAP_ARG[@]} ? 4 : 3 )) "the mod was stopped again" 10
 crash_in load
-check "Failed to load crash: crashed in tome_mod_load: access violation" "a crash in tome_mod_load is a load failure"
+check_new "Failed to load crash: crashed in tome_mod_load: access violation" "a crash in tome_mod_load is a load failure"
 check "crash +1\.0\.0 +error: crashed in tome_mod_load" "and shows in its status"
 if env_running; then pass "the game survived every crash"; else fail "the game survived every crash"; fi
 
 echo "live toggling"
 set_enabled hello false
-check "\[hello\] disabled" "disable via state.json"
+check_new "\[hello\] disabled" "disable via state.json"
 if [[ -n "$MAIN_TID" ]] && grep -E "\] \[ *$MAIN_TID\] .*Disabled hello" "$LOG" >/dev/null; then
     pass "disable ran on the game's main thread"
 else
     fail "disable didn't run on the main thread (main thread: ${MAIN_TID:-unknown})"
 fi
 set_enabled hello true
-check "\[hello\] enabled \(2 times" "re-enable via state.json"
+check_new "\[hello\] enabled \(2 times" "re-enable via state.json"
 
 echo "hot reload"
 cp "$BUILD/mods/hello/hello.dll" "$MODS/hello/hello.dll.new"
 touch "$MODS/hello/hello.dll.new"
+mark
 mv -f "$MODS/hello/hello.dll.new" "$MODS/hello/hello.dll"
-check "Unloaded hello" "old DLL unloaded"
+check_new "Unloaded hello" "old DLL unloaded"
 check_count "\[hello\] loaded \(Tome" 2 "new DLL loaded"
 if grep -E "\[hello\] enabled" "$LOG" | tail -n 1 | grep -q "(1 time"; then
     pass "new DLL starts with fresh state"
@@ -602,7 +651,7 @@ PY
     before=$(count "Unloaded hello")
     rm -f "$MODS/hello-pkg.tome"
     check_more "Unloaded hello" "$before" "a removed package's mod is unloaded" 10
-    deadline=$((SECONDS + 10))
+    deadline=$(deadline)
     while ((SECONDS < deadline)) && [[ -n "$(find "$PACKAGES" -mindepth 1 -maxdepth 1 -name 'hello-pkg.*')" ]]; do sleep 0.2; done
     if [[ -z "$(find "$PACKAGES" -mindepth 1 -maxdepth 1 -name 'hello-pkg.*')" ]]; then
         pass "no unpacked copy left"
@@ -632,7 +681,7 @@ if ((${#MAP_ARG[@]})); then
     # 6 s, loads at 8 s); hello comes back on to see it.
     echo "loading a saved game (second launch)"
     set_enabled hello true
-    check "\[hello\] enabled" "hello enabled mid-game" 15
+    check_new "\[hello\] enabled" "hello enabled mid-game" 15
     check "Saving the game: Save\\\\.+\\\\TomeE2E\.w3z" "the map saved the game" 20
     check "\[hello\] the level ends" "level end event (LoadGame from the script)" 30
     check "\[hello\] loaded a saved game: Save\\\\.+\\\\TomeE2E\.w3z" "loaded event with the saved game's path" 30
@@ -664,24 +713,34 @@ struct.pack_into("<I", h, 0x5C, 0x7fffffff) # mipSizes[0]: runs far past EOF
 struct.pack_into("<I", h, 0x9C, 0)          # jpegHeaderSize
 open(sys.argv[1], "wb").write(h)
 PY
-# Click positions are fractions of the window: Mods button, row 0's toggle
-# (twice, once the panel has lowered), Done, then the hello mod's own button
-# (which was hidden and recreated by the toggling), timed from the main
-# menu's setup and then from the panel's opening. Then the panel again:
-# hello's Details, Settings, the Shout toggle (row 2: a setting takes two), the Greeting text box
-# (row 0: "Hello" replaced by "Howdy", Enter), Esc, Esc (back to the list);
-# Tome, Settings, Keybinds, row 1's key (Greet; row 0 is Tome's own), Ctrl+J for it,
-# Ctrl+J again (runs it), Esc four times (closes the panel), then Ctrl+F10
-# (Tome's key for the menu). They follow the layout in
-# loader/src/core/main_menu_fdf.cpp and sdk/examples/hello/hello.c.
+# Buttons are clicked by name (click:<frame>; Tome's are named in
+# loader/src/core/main_menu_fdf.cpp, hello's in sdk/examples/hello), so a
+# layout change can't send a click elsewhere, and the Greeting text box
+# gets the focus by name (focus:). Each step waits for what the
+# last one did (Tome logs every page of its menu, "Mod menu page: ..."):
+# Mods, row 0's toggle twice (hello off and on), Done, then the hello mod's own
+# button (hidden and recreated by the toggling). Then the panel again:
+# hello's Details, Settings, the Shout toggle (row 2: a setting takes two),
+# the Greeting text box (row 0: "Hello" replaced by "Howdy", Enter), Esc, Esc
+# (back to the list); Tome, Settings, Keybinds, row 1's key (Greet; row 0 is
+# Tome's own), Ctrl+J for it, Ctrl+J again (runs it), Esc four times (closes
+# the panel), then Ctrl+F10 (Tome's key for the menu).
 SAVED_MAP_ARG=("${MAP_ARG[@]}")
 MAP_ARG=()
-TOME_DEBUG_CLICKS="wait:Main menu set up@0;0.874,0.84@4000;wait:Mod menu opened@0;0.447,0.227@2500;\
-0.447,0.227@4500;0.447,0.81@6500;0.5,0.892@8000;0.874,0.84@9500;wait:Mod menu opened@9500;0.347,0.227@2500;\
-0.209,0.81@3500;0.447,0.367@4500;0.403,0.227@5300;key:End@5700;key:Backspace@5800;key:Backspace@5900;\
-key:Backspace@6000;key:Backspace@6100;key:Backspace@6200;text:Howdy@6400;key:Enter@7000;key:Esc@8000;\
-key:Esc@9000;0.322,0.81@10500;0.209,0.81@11000;0.322,0.81@11500;0.447,0.297@12500;key:Ctrl+J@13500;key:Ctrl+J@15500;\
-key:Esc@16500;key:Esc@17250;key:Esc@18000;key:Esc@18750;key:Ctrl+F10@20500" launch
+TOME_DEBUG_CLICKS="wait:Screen ready: main menu;click:TomeModsButton;until:Mod menu opened;settle;\
+click:TomeModsRow0Button;until:Mod menu: disabling hello;wait:[hello] disabled;\
+click:TomeModsRow0Button;until:Mod menu: enabling hello;wait:[hello] enabled (2 times;\
+click:TomeModsFooter3;until:Mod menu closed;settle;click:HelloButton;until:[hello] Hello button clicked (1);\
+click:TomeModsButton;until:Mod menu opened;settle;click:TomeModsRow0Small;until:Mod menu page: details hello;\
+click:TomeModsFooter1;until:Mod menu page: settings hello;click:TomeModsRow2Button;until:hello: setting shout = On;\
+focus:TomeModsRow0Edit;key:End;key:Backspace;key:Backspace;key:Backspace;key:Backspace;key:Backspace;\
+text:Howdy;key:Enter;wait:hello: setting greeting = Howdy;\
+key:Esc;until:Mod menu page: details hello;key:Esc;until:Mod menu page: list;\
+click:TomeModsFooter2;until:Mod menu page: Tome;click:TomeModsFooter1;until:Mod menu page: Tome settings;\
+click:TomeModsFooter2;until:Mod menu page: keybinds;click:TomeModsRow1Button;until:waiting for a key for hello/greet;\
+key:Ctrl+J;until:Keybind hello/greet: Ctrl+J;key:Ctrl+J;until:[hello] Greet key: Howdy, world!;\
+key:Esc;until:Mod menu page: Tome settings;key:Esc;until:Mod menu page: Tome;key:Esc;until:Mod menu page: list;\
+key:Esc;until:Mod menu closed;settle;key:Ctrl+F10;until:Mod menu opened" launch
 MAP_ARG=("${SAVED_MAP_ARG[@]}")
 check "Main menu set up; Mods button added" "Mods button added to the main menu" 30
 check "Quit moved to the lower slot" "Quit shares the bottom box with Mods"
@@ -704,7 +763,6 @@ else
 fi
 check "hello: icon icon\.blp loaded" "the list shows the mod's icon" 15
 check "blp-guard: refused a malformed texture .*mip runs past the file" "the BLP guard refused a malformed icon" 15
-rm -rf "$MODS/zz-bad-icon"
 check "hello: setting shout = On" "the settings page changes a setting" 15
 check "hello: setting greeting = Howdy" "a text setting typed into its box, saved with Enter" 10
 check "\[hello\] setting changed: shout" "the mod hears about it"
@@ -737,6 +795,9 @@ else
 fi
 check_count "Mod menu closed" 2 "Esc goes back page by page and closes the panel" 10
 check_count "Mod menu opened" 3 "Ctrl+F10 opens it" 10
+# Only now, with the input done: removing a mod refreshes the list, which
+# mid-script would land between the settings changes checked above.
+rm -rf "$MODS/zz-bad-icon"
 stop_game
 
 # --- run 4: main menu -> game -> main menu, with waiting asset changes -----------
@@ -755,16 +816,26 @@ PY
 # Mission; on the score screen OK; then Cancel twice back to the main menu.
 SAVED_MAP_ARG=("${MAP_ARG[@]}")
 MAP_ARG=()
-# On the single player screen also the hello mod's button. In the game (timed
-# from its start), chat commands, Esc, then the hello mod's in-game button;
-# in the Menu, Mods, Esc (back to the menu), Esc (closes it), Ctrl+F10 (the
-# menu with Mods open), Done.
-TOME_DEBUG_CLICKS="wait:Main menu set up@0;0.86,0.245@5000;wait:Screen: single player@0;0.5,0.892@1500;\
-0.867,0.657@3000;wait:Screen: custom game@0;0.875,0.80@4000;wait:Game started: @0;type:/hello e2e@4000;\
-type:/tome disable hello@6500;type:/hello ignored@9000;type:/tome enable hello@11000;type:/tome nonsense@13000;\
-key:Esc@14200;0.5,0.475@15000;0.163,0.018@16000;0.574,0.418@17000;key:Esc@17700;key:Esc@18200;\
-key:Ctrl+F10@18700;0.676,0.653@19400;0.5,0.541@20200;0.5,0.29@22000;wait:Screen: score screen@0;\
-0.788,0.942@4000;wait:Screen: custom game@0;0.859,0.925@3000;wait:Screen: single player@0;0.859,0.878@3000" launch
+# On the single player screen also the hello mod's button. In the game,
+# chat commands, Esc, then the hello mod's in-game button; in the Menu,
+# Mods, Esc (back to the menu), Esc (closes it), Ctrl+F10 (the menu with
+# Mods open), Done. The game's own screens and panels slide in and drop
+# clicks until they're done, so those clicks wait for "Screen ready" or
+# settle (no UI animation running); Tome's buttons and chat commands log
+# what they did, which the next step waits for. No fixed times.
+TOME_DEBUG_CLICKS="wait:Screen ready: main menu;click:SinglePlayerButton;wait:Screen: single player;\
+wait:Screen ready: single player;click:HelloButton,2;until:[hello] Hello button clicked (1);\
+click:SkirmishButton;wait:Screen: custom game;wait:Screen ready: custom game;click:PlayGameButton;wait:Screen: loading;\
+wait:Game started: ;settle;type:/hello e2e;wait:/hello command: Howdy, e2e!;\
+type:/tome disable hello;wait:[hello] disabled;type:/hello ignored;frames:5;\
+type:/tome enable hello;wait:[hello] game start: ;settle;type:/tome nonsense;wait:Chat command: /tome nonsense;\
+key:Esc;wait:pressed Esc;click:HelloButton,13;until:[hello] Hello button clicked (2);\
+key:F10;wait:game paused by;settle;click:TomeEscModsButton;until:Mod menu opened in game;\
+key:Esc;until:Mod menu closed in game;settle;key:Esc;wait:game resumed by;settle;\
+key:Ctrl+F10;wait:Mod menu opened in game;settle;click:TomeEscModsFooter3;until:Mod menu closed in game;settle;\
+click:EndGameButton;settle;click:QuitButton;wait:Screen: score screen;settle;\
+click:ScoreScreenOkButton;wait:Screen: custom game;wait:Screen ready: custom game;\
+click:CancelButton;wait:Screen: single player;wait:Screen ready: single player;click:CancelButton" launch
 MAP_ARG=("${SAVED_MAP_ARG[@]}")
 check "Assets at startup: 2 files from 2 mods" "both mods' assets mounted" 30
 check "Engine initialized natives" "a game started from the main menu" 40
@@ -806,16 +877,20 @@ stop_game
 
 echo "LAN game (fifth launch)"
 # Local Area Network, Create Game, Create Game; Cancel the lobby; Create Game
-# again, the second slot to Computer (Easy), Start Game. In the game, the
-# hello button, then a chat line (the button mustn't keep the keyboard
-# focus), then Menu, End Game, Exit Program, Exit: the program ends from
-# inside the game.
+# again, the second slot to Computer (Easy: the dropdown's items have no
+# names, so those two are clicked at positions), Start Game. In the game,
+# the hello button, then a chat line (the button mustn't keep the keyboard
+# focus), then the menu (F10), End Game, Exit Program, Exit: the program
+# ends from inside the game.
 SAVED_MAP_ARG=("${MAP_ARG[@]}")
 MAP_ARG=()
-TOME_DEBUG_CLICKS="wait:Main menu set up@0;0.855,0.434@5000;wait:Screen: LAN@0;0.394,0.925@3000;\
-0.862,0.845@6000;0.861,0.918@9000;0.394,0.925@12000;0.862,0.845@15000;0.161,0.119@18000;0.101,0.214@19500;\
-0.861,0.823@21500;wait:Game started: @0;0.5,0.475@4000;type:/hello focus@6000;type:hi lan@8000;\
-0.163,0.018@10000;0.5,0.541@13000;0.5,0.347@16000;0.414,0.484@18500" launch
+TOME_DEBUG_CLICKS="wait:Screen ready: main menu;click:LocalAreaNetworkButton;wait:Screen: LAN;wait:Screen ready: LAN;\
+click:CreateButton;wait:Screen ready: create LAN game;click:PlayButton;wait:Screen ready: lobby;\
+click:CancelButton;wait:Screen: LAN;wait:Screen ready: LAN;\
+click:CreateButton;wait:Screen ready: create LAN game;click:PlayButton;wait:Screen ready: lobby;\
+0.161,0.119;settle;0.101,0.214;settle;click:StartGameButton;wait:Game started: ;settle;\
+click:HelloButton,13;until:[hello] Hello button clicked (1);type:/hello focus;wait:/hello command: Howdy, focus!;\
+type:hi lan;wait:): hi lan;key:F10;settle;click:EndGameButton;settle;click:ExitButton;settle;click:ConfirmQuitQuitButton" launch
 MAP_ARG=("${SAVED_MAP_ARG[@]}")
 check "\[hello\] map load: " "map load for a LAN game" 45
 check_count "Map loading: " 1 "creating and cancelling a lobby is no map load"
@@ -826,7 +901,8 @@ check "\[hello\] /hello command: Howdy, focus!" "Enter opens the chat box again 
 check "\[hello\] chat from .+ \(player 1, to [0-3]\): hi lan" "chat event in a LAN game, with the sender" 10
 check "\[hello\] game end: " "game end when the program exits from a LAN game" 20
 check_count "\[hello\] game end: " 1 "the game ended once"
-for _ in $(seq 1 40); do env_running || break; sleep 0.5; done
+deadline=$(deadline)
+while ((SECONDS < deadline)) && env_running; do sleep 0.5; done
 if env_running; then fail "the game exited"; else pass "the game exited"; fi
 check "Exiting: disabled and unloaded [0-9]+ mods?" "mods shut down at exit"
 if awk '/\[hello\] game end/ { e = NR } /\[hello\] disabled/ && e { d = NR } /\[hello\] unloading/ && d { u = NR } END { exit !(e && d && u) }' "$LOG"; then
@@ -841,10 +917,14 @@ stop_game
 echo "safe mode (sixth launch)"
 rm -rf "$MODS/asset-map" "$MODS/asset-restart"
 touch "$HOME_DIR/tome/safe"
-# The Mods button, then row 0's toggle (hello) once the panel has lowered.
+# The Mods button, then row 0's toggle (hello), clicked at their positions
+# through the mouse on purpose: the other launches click by name, so this
+# keeps the mouse path to Tome's buttons tested. until: clicks the toggle
+# again while the panel is still lowering (it drops clicks then).
 SAVED_MAP_ARG=("${MAP_ARG[@]}")
 MAP_ARG=(-tomesafe)
-TOME_DEBUG_CLICKS="wait:Main menu set up@0;0.874,0.84@4000;0.447,0.227@6500" launch
+TOME_DEBUG_CLICKS="wait:Screen ready: main menu;0.874,0.84;until:Mod menu opened;settle;\
+0.447,0.227;until:Mod menu: enabling hello" launch
 MAP_ARG=("${SAVED_MAP_ARG[@]}")
 check "Safe mode \(-tomesafe, tome/safe\): no mod starts this session" "-tomesafe and tome/safe turn safe mode on" 30
 check "Assets at startup: no mod assets" "no mod assets mounted"

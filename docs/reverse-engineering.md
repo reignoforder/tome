@@ -318,6 +318,7 @@ BattleNetMainFrame 15, BattleNetChatroom 16; 17 means none. Later entries
 | CGlueMgr::SetScreen | `0x303C90` | `void __fastcall(int screen, int force)`, plain `ret`, 20 callers. Destroys the old screen (`+0xD8(1)`), sets `[mgr+0x180]` = id, creates the screen with CreateFrame(name, mgr) (which runs its Setup) and stores it at `[mgr+0x184]`. |
 | CGlueMgr::EnterGame | `0x30BE20` | `void __fastcall(int)`. Loading has finished: destroys the glue screen (id 17) and switches to the game. CGameUI exists by then. 6 callers. |
 | `[mgr+0x180]` / `[mgr+0x184]` | | current screen id / its frame (CMainMenu, CSinglePlayerMenu `0xAB19E8`, the custom game screen `0xAB1F70`, CLoading `0xAB12E0`, CScoreScreen `0xAB2648`, ...). |
+| UITimer::Fire | `0x8B5D40` | `int __fastcall(const float* elapsed, void* timer)`, plain `ret`, returns 1. Mapped. A UI timer's callback (scheduled by `0x8B5C60`, `__thiscall(timer, float seconds, int event, CObserver* target, int repeat)`, `ret 0x10`): sets the shared event at `.data 0xCEF108` (id at `+8` from `timer+0x18`, the time at `+0x10`) and calls `target->OnEvent` (vtable `+0xC`); the target is at `timer+0x8`. Glue screens animate on these (one at `+0x234`, others) and schedule event `0x1A` once they have appeared. Developer builds hook it for "Screen ready" and the input scripts' `settle` (events.cpp). |
 
 There is no common glue menu class in RTTI: every screen derives from
 CFrame directly.
@@ -606,7 +607,8 @@ slot 3, `int __thiscall OnEvent(CEvent*)`. Slot 0 drops the last reference
 | What | RVA | Notes |
 |------|-----|-------|
 | CControl::SetListener | `0x112D80` | `void __thiscall(int command, CObserver* listener, int enable)`, `ret 0xC`. Calls the control's vtable `+0x08`(event `0x40090064`, command, listener): a registration node holding a reference to the listener. |
-| CControl::Click | `0x112100` | `void __thiscall(int button)`, `ret 4`. Mapped. Returns at once unless the control is enabled (`0x072190` with `0x40090064`); fills the event at `0xCE3BA8` (id `0x40090064` at `+8`, the button at `+0x10`, the control at `+0x14`) and dispatches it through the control's vtable `+0x10`. The listener's OnEvent sees its registration's command at `event+8`. Mouse paths pass the mouse event's button, a shortcut path (`0x0FEA8F`) passes 1. Tome clicks the Esc menu's `ConfirmQuitQuitButton` with it to restart from a game (closing the window there asks Confirm Exit first). |
+| CControl::Click | `0x112100` | `void __thiscall(int button)`, `ret 4`. Mapped. Returns at once unless the control is enabled (CObserver::HasEvent with `0x40090064`, mapped as `ControlEvent.click`); fills the event at `0xCE3BA8` (id `0x40090064` at `+8`, the button at `+0x10`, the control at `+0x14`) and dispatches it through the control's vtable `+0x10`. The listener's OnEvent sees its registration's command at `event+8`. Mouse paths pass the mouse event's button, a shortcut path (`0x0FEA8F`) passes 1. Tome clicks the Esc menu's `ConfirmQuitQuitButton` with it to restart from a game (closing the window there asks Confirm Exit first). |
+| CObserver::HasEvent | `0x072190` | `int __thiscall(uint32_t event)`, `ret 4`. Mapped. Nonzero if the object's registration list (`+8`) has the event id (lookup `0x0721D0`; no list: 0). The check in CControl::Click; Tome's developer builds call it from their Click hook so `until:` only counts clicks that reached a listener. CPlayerWar3's `On*` functions ask it the same about trigger events. |
 
 Glue BindControl is GetFrameByName + SetListener(menu) + enable + the
 menu's control list at `+0x210`, so it only suits glue menus. Tome
@@ -1189,6 +1191,28 @@ flags lack `0x8`, or `0x400` for a sound of category `0x8`); the release
 measured, the ambience plays (stream RMS ~170 with music off, 0 without the
 patch) and the Ambient sounds option still silences it.
 
+### Running the compiler outside a game (not working yet)
+
+For a deterministic test of the memhack guard on the real compiler, from a
+`game.dll` loaded in a test process but never run (2026-10-29):
+
+| What | RVA | Notes |
+|------|-----|-------|
+| Script syntax check | `0x7199D0` | `__fastcall(script, name)` plus one stack argument (`ret 4`; 0 picks `Blizzard.j`, otherwise `common.ai`). Calls `0x713450`, loads `common.j` and the second file by name through `0x713390` (Storm), then `Jass::compile` with the list below and the callback `0x727760`. Looks like the World Editor's check. |
+| Compile file list | (stack) | `Jass::compile`'s `context`: (name, text) pairs ending in two nulls, e.g. `{"common.j", text, "blizzard.j", text, name, script, 0, 0}`; `a0` 0, `a1` 1 here. |
+| Error callback | `0x727760` | `__fastcall(message, line)` plus three stack arguments (`ret 0xC`): an int stored at `+4` and a text copied to `+0x10C` of a `0x210`-byte record appended to the array at `.data 0xD720D0` (count `0xD720D4`, zeroed before each check). |
+| Checker natives | `0x713450` | Once (flag `.data 0xD71A00`): binds every common.j native through `BindNative` to a stub returning 0 (`0x727800`), so declarations resolve. This is the "second native table" from the roadmap's open questions. |
+| Per-thread instances | get `0x06C180`, set `0x06C1E0` | `__fastcall(index[, value])` on the calling thread's table (`.data 0xD3CB98`, made by `0x06C1B0`, set for a thread by `0x06C1D0`). Index 5 is the JASS engine, 0xD the net client (see the network section), 0xE another. |
+
+Calling `0x713450` in a fresh process crashes in `BindNative`'s insert
+(`0x90C730` → `0x90F176` with `ecx` null): `0x06C180(5)` returns 0, since
+no thread table or JASS engine exists before the game starts. The only
+store into slot 5 found is the clear at `0x90C850`; whatever creates the
+engine sets it some other way (not a direct `mov [eax+0x14]` after the
+table lookup). Next step: find the engine's constructor (its vtable's
+deleting destructor is called from `0x90C850`) and make a thread table
+with it in slot 5 before compiling.
+
 ## Methods and tools
 
 - **Disassembly:** `objdump -d -M intel --start-address=0x6f… --stop-address=0x6f… "WarCraft III/game.dll"`.
@@ -1214,6 +1238,11 @@ patch) and the Ambient sounds option still silences it.
   launch with `TOME_DEBUG_CLICKS` (including `type:` lines for the chat)
   then shows which functions run, how often and in what order. That's how
   the event hooks were chosen.
+- **game.dll in a test process:** `LoadLibrary` of the install's `game.dll`
+  (with `SetDllDirectory` on its folder) works under Wine in about 0.1 s;
+  its imports load and nothing runs, so Tome's patches can be applied to
+  the real code and pure functions called (`tests/game/`). `Mss32.dll`
+  only loads `.mix` files once the game opens its sound.
 - **Crash reports:** the game writes them under the Wine prefix in
   `AppData/Local/Temp/BlizzardError/<date>/Crash.txt`.
 - Useful tricks that worked:

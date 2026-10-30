@@ -75,3 +75,46 @@ target_compile_definitions(tome_hook_runtime_tests PRIVATE UNICODE _UNICODE WIN3
 target_compile_options(tome_hook_runtime_tests PRIVATE -Wall -Wextra -fno-exceptions -fno-rtti)
 target_link_options(tome_hook_runtime_tests PRIVATE -static)
 add_test(NAME tome_hook_runtime_tests COMMAND tome_hook_runtime_tests)
+
+# The loader itself (tome_runtime: everything in tome.mix but DllMain) driven
+# in this process against a fake game image, with the fixture mods in a
+# temporary TOME_HOME: deterministic, no game files (tests/host/harness.h).
+# Each test runs in a process of its own.
+add_executable(tome_host_tests
+    host/host_main.cpp
+    host/harness.cpp
+    host/test_chat.cpp
+    host/test_lifecycle.cpp
+    host/test_mods.cpp
+)
+target_link_libraries(tome_host_tests PRIVATE tome_runtime)
+target_include_directories(tome_host_tests PRIVATE .)
+target_compile_definitions(tome_host_tests PRIVATE
+    TOME_TEST_BUILD_DIR="${CMAKE_BINARY_DIR}"
+    TOME_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+target_compile_options(tome_host_tests PRIVATE -Wall -Wextra -fno-exceptions -fno-rtti)
+target_link_options(tome_host_tests PRIVATE -static)
+add_dependencies(tome_host_tests hook_a hook_b crash hello hello_cpp)
+add_test(NAME tome_host_tests COMMAND tome_host_tests)
+
+# The same, against the real game.dll from TOME_GAME_DIR, loaded into the test
+# process but never run: Tome's startup patching, the hook engine on every
+# mapped function, and mods' hooks around real game code. Each test is
+# skipped without the install (tests/game/test_game.cpp).
+add_executable(tome_game_tests
+    host/host_main.cpp
+    host/harness.cpp
+    game/test_game.cpp
+)
+target_link_libraries(tome_game_tests PRIVATE tome_runtime)
+target_include_directories(tome_game_tests PRIVATE . host)
+target_compile_definitions(tome_game_tests PRIVATE
+    TOME_TEST_BUILD_DIR="${CMAKE_BINARY_DIR}"
+    TOME_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    TOME_TEST_GAME_DIR="${TOME_GAME_DIR}"
+)
+target_compile_options(tome_game_tests PRIVATE -Wall -Wextra -fno-exceptions -fno-rtti)
+target_link_options(tome_game_tests PRIVATE -static)
+add_dependencies(tome_game_tests hook_a hook_b crash)
+add_test(NAME tome_game_tests COMMAND tome_game_tests)

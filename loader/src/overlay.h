@@ -67,7 +67,7 @@ struct ModSource {
 // archive stays) on failure.
 bool mount_assets(const std::vector<ModSource>& mods, std::string& summary);
 
-// TOME_DEBUG_ASSET=<archive path>: logs the size and FNV-1a hash of that file
+// TOME_DEBUG_ASSET=<archive path> (developer builds, TOME_DEV): logs the size and FNV-1a hash of that file
 // as the game sees it now (tests). Call after logging has started.
 void log_probe();
 

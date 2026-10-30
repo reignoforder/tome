@@ -4,6 +4,8 @@
 #   BUILD       build folder (build)
 #   BUILD_TYPE  CMake build type (Release)
 #   DEV_TOOLS   build tome-mpq, which the e2e test's map needs (ON)
+#   DEV         developer build: tome.mix reads the TOME_DEBUG_* variables the
+#               tests need (ON); release builds are configured with OFF
 #   GAME_DIR    your Warcraft III 1.27b folder, only ever read by the tests
 #               (./WarCraft III); `make deploy` copies tome.mix into it
 #   HEADLESS    e2e and game: 1 runs the game in its own X server (Xvfb),
@@ -13,6 +15,7 @@
 BUILD      ?= build
 BUILD_TYPE ?= Release
 DEV_TOOLS  ?= ON
+DEV        ?= ON
 GAME_DIR   ?= $(CURDIR)/WarCraft III
 GENERATOR  ?= $(if $(shell command -v ninja),Ninja,Unix Makefiles)
 ENGINE     ?= $(firstword $(foreach e,podman docker,$(if $(shell command -v $(e)),$(e))))
@@ -21,7 +24,7 @@ E2E_KEEP   ?= 0
 export GAME_DIR
 
 CMAKE_FLAGS = -G "$(GENERATOR)" -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-i686-mingw.cmake \
-              -DCMAKE_BUILD_TYPE=$(BUILD_TYPE) -DTOME_BUILD_DEV_TOOLS=$(DEV_TOOLS) \
+              -DCMAKE_BUILD_TYPE=$(BUILD_TYPE) -DTOME_BUILD_DEV_TOOLS=$(DEV_TOOLS) -DTOME_DEV=$(DEV) \
               -DTOME_GAME_DIR="$(GAME_DIR)"
 
 .PHONY: all configure build test e2e game game-stop fuzz sdk bindings deploy clean \
@@ -48,7 +51,9 @@ $(BUILD)/CMakeCache.txt:
 configure:
 	cmake -S . -B $(BUILD) $(CMAKE_FLAGS)
 
+# A build folder configured before TOME_DEV existed gets DEV once.
 build: $(BUILD)/CMakeCache.txt
+	@grep -q '^TOME_DEV:' $(BUILD)/CMakeCache.txt || cmake -S . -B $(BUILD) -DTOME_DEV=$(DEV)
 	cmake --build $(BUILD)
 
 test: build

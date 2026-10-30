@@ -44,6 +44,7 @@ using SetListenerFn = void(__thiscall*)(void* control, int command, void* listen
 using SetFocusFn = void(__thiscall*)(void* frame, int focus, int, void* other);
 using SetWidthFn = void(__thiscall*)(void* layout, float width);
 using ControlClickFn = void(__thiscall*)(void* control, int button);
+using HasEventFn = int(__thiscall*)(void* object, uint32_t event);
 using EditGetTextFn = const char*(__thiscall*)(void* edit_box);
 using EditSetTextFn = void(__thiscall*)(void* edit_box, const char* text, int notify);
 using GlueGetFn = void*(*)();
@@ -69,6 +70,8 @@ SetListenerFn g_set_listener = nullptr;
 SetFocusFn g_set_focus = nullptr;
 SetWidthFn g_set_width = nullptr;
 ControlClickFn g_control_click = nullptr;
+HasEventFn g_has_event = nullptr;
+uint32_t g_click_event = 0;
 EditGetTextFn g_edit_get_text = nullptr;
 EditSetTextFn g_edit_set_text = nullptr;
 void** g_focused_frame = nullptr;
@@ -610,6 +613,8 @@ void init(uintptr_t game_base, const BuildMappings& build, uint32_t main_thread_
     g_focused_frame = reinterpret_cast<void**>(game_base + ui.focused_frame);
     g_set_width = reinterpret_cast<SetWidthFn>(game_base + ui.layout_set_width);
     g_control_click = reinterpret_cast<ControlClickFn>(game_base + ui.control_click);
+    g_has_event = reinterpret_cast<HasEventFn>(game_base + ui.observer_has_event);
+    g_click_event = ui.control_click_event;
     g_edit_get_text = reinterpret_cast<EditGetTextFn>(game_base + ui.edit_get_text);
     g_edit_set_text = reinterpret_cast<EditSetTextFn>(game_base + ui.edit_set_text);
     g_glue_get = reinterpret_cast<GlueGetFn>(game_base + build.game.glue_get);
@@ -694,10 +699,20 @@ void clear_focus() {
     if (void* f = focused()) g_set_focus(f, 0, 0, nullptr);
 }
 
+bool set_focus(void* frame) {
+    if (!g_ready || !frame) return false;
+    g_set_focus(frame, 1, 0, nullptr);
+    return focused() == frame;
+}
+
 bool click(void* control) {
     if (!g_ready || !is_a(control, "CControl")) return false;
     g_control_click(control, 1);  // the left button, as the game's shortcut path passes
     return true;
+}
+
+bool takes_clicks(void* control) {
+    return g_ready && control && g_has_event(control, g_click_event) != 0;
 }
 
 bool game_showing() {

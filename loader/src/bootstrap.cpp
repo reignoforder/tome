@@ -127,7 +127,7 @@ DWORD bootstrap() {
     }
     debug_input::prepare();
 
-    TOME_INFO("Tome %s starting", TOME_VERSION);
+    TOME_INFO("Tome %s starting%s", TOME_VERSION, TOME_DEV ? " (developer build: TOME_DEBUG_* variables are read)" : "");
     TOME_INFO("Host process: %s (pid %lu)", narrow(g_paths.host_exe).c_str(), GetCurrentProcessId());
     TOME_INFO("Game directory: %s", narrow(g_paths.game_dir).c_str());
     TOME_INFO("Mods directory: %s", narrow(g_paths.mods_dir).c_str());

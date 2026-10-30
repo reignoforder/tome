@@ -88,7 +88,7 @@ units::ResourceWatch g_resources;  // players' resources as of the last game tic
 double g_time_of_day = -1;         // as of the last game tick; -1 for none
 int g_reset_depth = 0;             // inside CGameWar3::Reset (its BEFORE ran, its AFTER not yet)
 LARGE_INTEGER g_frequency, g_last_tick;
-uint32_t g_frames = 0;
+std::atomic<uint32_t> g_frames{0};  // PresentFrame calls; read by debug_input's thread
 // The current map script's locals that shadow a global of another type (the
 // memhack pattern), found at map load; main thread only.
 std::vector<tome::jass::ShadowFinding> g_script_shadows;
@@ -103,7 +103,7 @@ tome_event_info make_info(int32_t event, double delta) {
     info.map_description = has_map ? g_map_description.c_str() : "";
     info.script_shadows = has_map ? static_cast<uint32_t>(g_script_shadows.size()) : 0;
     info.delta = delta;
-    info.frame = event == TOME_EVENT_TICK ? g_frames : 0;
+    info.frame = event == TOME_EVENT_TICK ? g_frames.load(std::memory_order_relaxed) : 0;
     info.game_time = event == TOME_EVENT_GAME_TICK || event == TOME_EVENT_GAME_END ? g_game_time : 0;
     info.units = nullptr;
     info.leader = -1;
@@ -464,7 +464,119 @@ void map_load() {
     fire(TOME_EVENT_MAP_LOAD);
 }
 
+// --- "Screen ready" (developer builds, for the e2e test) ---------------------------
+//
+// A glue screen ignores clicks while it slides in. Its animation runs on UI
+// timers (UITimer::Fire) aimed at objects inside the screen, one tick per
+// frame; once they have started and then stopped for kReadyFrames frames,
+// the screen takes input, and "Screen ready: <name>" is logged. A screen
+// that doesn't slide in (the score screen) never logs it: wait for its
+// "Screen: <name>" and then for a settled UI (debug_script's settle). Counted in
+// frames, not time, so it holds on any machine. Only developer builds hook
+// UITimer::Fire.
+
+constexpr uint32_t kReadyFrames = 10;
+constexpr uintptr_t kScreenSpan = 0x400;  // the animated parts sit at +0x168..+0x274
+
+// SetScreen calls that made a new screen. SetScreen frees the old screen
+// before it creates the new one, which may get the same address: a screen
+// is its pointer and this count.
+uint32_t g_screen_generation = 0;
+bool g_screen_recreating = false;  // inside a SetScreen that makes a new screen
+
+struct ScreenWatch {
+    void* screen = nullptr;
+    uint32_t generation = 0;
+    // After SetScreen the old screen stays current while it slides out
+    // (with the new screen's id): it's never the one that becomes ready.
+    void* leaving = nullptr;
+    uint32_t leaving_generation = 0;
+    bool ticked = false;   // its animation has started
+    uint32_t last_tick = 0;  // g_frames at its last tick
+    bool ready = false;
+};
+ScreenWatch g_watch;
+
+void* current_screen() {
+    auto glue = static_cast<char*>(g_glue_get());
+    return glue ? *reinterpret_cast<void**>(glue + g_build->game.glue_screen_offset) : nullptr;
+}
+
+std::string current_screen_name() {
+    auto glue = static_cast<char*>(g_glue_get());
+    if (!glue) return "?";
+    uint32_t id = *reinterpret_cast<uint32_t*>(glue + g_build->game.glue_screen_id_offset);
+    if (id == g_build->game.screen_main_menu) return "main menu";
+    if (id == g_build->net.screen_game_chatroom) return "lobby";
+    if (id == g_build->game.screen_lan_create) return "create LAN game";
+    if (int32_t event = ui_event_for_screen(id)) return screen_name(event);
+    return "screen " + std::to_string(id);
+}
+
+std::atomic<uint32_t> g_last_ui_tick{0};  // g_frames at the last UI timer of any kind
+std::atomic<uint32_t> g_control_clicks{0};  // CControl::Click calls that reached a listener
+
+// CControl::Click(this = the control, the button) returns at once for a
+// control without a click registration (disabled, or one still sliding in):
+// that click was dropped, and debug_script's until: has to repeat it.
+void TOME_CALL before_control_click(tome_mod*, tome_hook_call* call, void*) {
+    auto control = reinterpret_cast<void*>(static_cast<uintptr_t>(call->args[0]));
+    if (frames::takes_clicks(control)) g_control_clicks.fetch_add(1, std::memory_order_relaxed);
+}
+
+void TOME_CALL before_ui_timer(tome_mod*, tome_hook_call* call, void*) {
+    g_last_ui_tick.store(g_frames.load(std::memory_order_relaxed), std::memory_order_relaxed);
+    auto timer = reinterpret_cast<const char*>(call->args[1]);
+    auto target = reinterpret_cast<uintptr_t>(*reinterpret_cast<void* const*>(timer + 0x8));
+    if (!g_watch.screen) return;
+    auto screen = reinterpret_cast<uintptr_t>(g_watch.screen);
+    if (target >= screen && target < screen + kScreenSpan) {
+        g_watch.ticked = true;
+        g_watch.last_tick = g_frames;
+    }
+}
+
+// Each frame (PresentFrame), on the main thread.
+void watch_screen() {
+    void* screen = current_screen();
+    bool leaving = screen && screen == g_watch.leaving && g_screen_generation == g_watch.leaving_generation;
+    if (screen != g_watch.screen || g_screen_generation != g_watch.generation) {
+        ScreenWatch next;
+        next.screen = screen;
+        next.generation = g_screen_generation;
+        if (leaving) {
+            next.leaving = screen;
+            next.leaving_generation = g_screen_generation;
+        }
+        g_watch = next;
+        return;
+    }
+    if (screen && !leaving && g_watch.ticked && !g_watch.ready &&
+        g_frames - g_watch.last_tick >= kReadyFrames) {
+        g_watch.ready = true;
+        TOME_INFO("Screen ready: %s", current_screen_name().c_str());
+    }
+}
+
+// The screen current before the change: when SetScreen returns, it may still
+// be (sliding out), or the new one may be current already (the first main menu).
+// SetScreen(screen, force) makes a new screen unless force is 0 and the
+// current id is screen already; then the current screen stays (and stays
+// "leaving"). A new screen bumps g_screen_generation, so it isn't taken for
+// the leaving one even at the same address.
+void TOME_CALL before_set_screen(tome_mod*, tome_hook_call* call, void*) {
+    auto glue = static_cast<char*>(g_glue_get());
+    uint32_t id = glue ? *reinterpret_cast<uint32_t*>(glue + g_build->game.glue_screen_id_offset) : 0;
+    g_screen_recreating = !glue || call->args[1] != 0 || call->args[0] != id;
+    g_watch.leaving = current_screen();
+    g_watch.leaving_generation = g_screen_generation;
+}
+
 void TOME_CALL after_set_screen(tome_mod*, tome_hook_call* call, void*) {
+    if (g_screen_recreating) {
+        g_screen_recreating = false;
+        ++g_screen_generation;
+    }
     int32_t event = ui_event_for_screen(call->args[0]);
     if (event) TOME_INFO("Screen: %s", screen_name(event));
     if (event == TOME_UI_SCORE_SCREEN) end_game();  // the game is over once its score screen shows
@@ -539,7 +651,8 @@ void TOME_CALL before_present(tome_mod*, tome_hook_call*, void*) {
     QueryPerformanceCounter(&now);
     double delta = g_frames ? double(now.QuadPart - g_last_tick.QuadPart) / double(g_frequency.QuadPart) : 0.0;
     g_last_tick = now;
-    ++g_frames;
+    g_frames.fetch_add(1, std::memory_order_relaxed);
+    if (TOME_DEV && g_glue_get) watch_screen();
     if (g_tick_handlers.load(std::memory_order_relaxed) > 0) fire(TOME_EVENT_TICK, delta);
     if (g_game_started) check_selection();
     popups::on_frame();
@@ -1205,6 +1318,11 @@ bool install(uintptr_t game_base, const BuildMappings& build, std::string& repor
         {"CAbilityHero::AddXP", TOME_HOOK_BEFORE, before_add_xp},
         {"CAbilityHero::AddXP", TOME_HOOK_AFTER, after_add_xp},
     };
+    if (TOME_DEV) {
+        specs.push_back({"UITimer::Fire", TOME_HOOK_BEFORE, before_ui_timer});
+        specs.push_back({"CGlueMgr::SetScreen", TOME_HOOK_BEFORE, before_set_screen});
+        specs.push_back({"CControl::Click", TOME_HOOK_BEFORE, before_control_click});
+    }
     for (const UnitHook& h : kUnitHooks) {
         specs.push_back({h.name, TOME_HOOK_BEFORE, before_unit_event, const_cast<UnitEventSpec*>(&h.spec)});
     }
@@ -1231,6 +1349,18 @@ bool install(uintptr_t game_base, const BuildMappings& build, std::string& repor
     report = "hooked screens, map load, game start and end, frames, game ticks, shutdown, chat, pause, units, "
              "spells, damage, experience, players, resources, keys, menus, dialogs, levels and saved games";
     return true;
+}
+
+uint32_t frames() {
+    return g_frames.load(std::memory_order_relaxed);
+}
+
+uint32_t control_clicks() {
+    return g_control_clicks.load(std::memory_order_relaxed);
+}
+
+uint32_t frames_since_ui_tick() {
+    return frames() - g_last_ui_tick.load(std::memory_order_relaxed);
 }
 
 void fill_api(tome_api& api) {

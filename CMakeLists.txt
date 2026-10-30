@@ -18,6 +18,11 @@ add_compile_definitions(__USE_MINGW_ANSI_STDIO=1)
 # Where `cmake --build build --target deploy` copies tome.mix.
 set(TOME_GAME_DIR "${CMAKE_SOURCE_DIR}/WarCraft III" CACHE PATH "Warcraft III install directory")
 
+# Developer builds read the TOME_DEBUG_* environment variables (README,
+# "Environment variables"), which the tests need. TOME_DEBUG_APPROVE allows
+# mods' code without the menu, so release builds leave this off.
+option(TOME_DEV "Developer build: read the TOME_DEBUG_* environment variables" OFF)
+
 # Development tools (tools/mpq). Downloads StormLib at configure time.
 option(TOME_BUILD_DEV_TOOLS "Build development tools such as tome-mpq" OFF)
 

@@ -394,6 +394,8 @@ bool bind_build(const mappings::Build& build, BuildMappings& out, std::vector<st
     bind("FocusedFrame", Kind::Data, ui.focused_frame);
     bind("CLayoutFrame::SetWidth", Kind::Function, ui.layout_set_width);
     bind("CControl::Click", Kind::Function, ui.control_click);
+    bind("CObserver::HasEvent", Kind::Function, ui.observer_has_event);
+    bind("ControlEvent.click", Kind::Constant, ui.control_click_event);
     bind("CEscMenuMainPanel::Setup", Kind::Function, ui.esc_menu_setup);
     bind("CEscMenuMainPanel::SetPanel", Kind::Function, ui.esc_menu_set_panel);
     bind("EscMenuPanel.main", Kind::Constant, ui.esc_panel_main);
@@ -420,6 +422,7 @@ bool bind_build(const mappings::Build& build, BuildMappings& out, std::vector<st
     bind("GlueScreen.custom_campaign", Kind::Constant, game.screen_custom_campaign);
     bind("GlueScreen.campaign", Kind::Constant, game.screen_campaign);
     bind("GlueScreen.lan", Kind::Constant, game.screen_lan);
+    bind("GlueScreen.lan_create", Kind::Constant, game.screen_lan_create);
     bind("GlueScreen.score_screen", Kind::Constant, game.screen_score_screen);
     bind("GlueScreen.view_replay", Kind::Constant, game.screen_view_replay);
     bind("GlueScreen.load_saved_game", Kind::Constant, game.screen_load_saved_game);

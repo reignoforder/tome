@@ -2,6 +2,8 @@
 #include "core/mappings.h"
 #include "test.h"
 
+#include <algorithm>
+
 using namespace tome;
 using mappings::Kind;
 
@@ -212,6 +214,29 @@ TEST(mappings_embedded_files_are_complete) {
         }
     }
     CHECK(found_127b);
+}
+
+// A function's checked bytes stay inside it: a pattern that runs into the
+// next mapped function stops matching once that one is hooked (its first
+// bytes become a jmp), and the first function can't be hooked any more.
+TEST(mappings_byte_patterns_end_before_the_next_function) {
+    for (size_t i = 0; i < mappings::kEmbeddedFileCount; ++i) {
+        mappings::Build b;
+        parse_text(mappings::kEmbeddedFiles[i].text, b);
+        std::vector<const mappings::Symbol*> functions;
+        for (const mappings::Symbol& sym : b.symbols) {
+            if (sym.kind == mappings::Kind::Function) functions.push_back(&sym);
+        }
+        std::sort(functions.begin(), functions.end(),
+                  [](const mappings::Symbol* x, const mappings::Symbol* y) { return x->value < y->value; });
+        for (size_t f = 0; f + 1 < functions.size(); ++f) {
+            const mappings::Symbol& sym = *functions[f];
+            const mappings::Symbol& next = *functions[f + 1];
+            if (sym.value + sym.bytes.size() > next.value) {
+                test::fail(__FILE__, __LINE__, b.name + ": " + sym.name + "'s bytes run into " + next.name);
+            }
+        }
+    }
 }
 
 // blp-guard's symbols are optional: a build without them still binds (the

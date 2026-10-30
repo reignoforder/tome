@@ -1,6 +1,6 @@
 # Tome roadmap
 
-Status as of 2026-10-28. Design rationale: `research.md`. How it works:
+Status as of 2026-10-29. Design rationale: `research.md`. How it works:
 `architecture.md`. Game internals: `reverse-engineering.md`.
 
 ## Done
@@ -41,13 +41,82 @@ Status as of 2026-10-28. Design rationale: `research.md`. How it works:
 | SDK cleanup | `sdk/README.md` (what a mod is and can do, starting, trying it in the game, the rules), `sdk/docs/tome-mod-json.md` (every field, ranges, key names, settings), JSON Schemas for `tome.mod.json` and `config.schema.json` (`$schema` accepted), templates in C, C++ and Rust (built here, and checked building out of the tree), the toolchain in `sdk/cmake/`, `TomeMod.cmake` checks for a 32-bit build and links the runtime per compiler, the `sdk-dist` zip (builds on its own: all examples and templates), `tests/test_abi.cpp` (every released field's offset, so `tome.h` stays append-only), `tome_has_services` |
 | Tooling | Unit tests, e2e test in the real game (off screen in Xvfb, own Wine prefix, a linked game folder: nothing written to the install; input waits for log lines), `Makefile`, a container with the whole toolchain, `tome-mpq`, `tools/re/*`, `tools/game.sh` |
 
-## Next, in order
+## Next: public release (0.1.0), in order
 
-1. **The handshake in `tools/e2e-test.sh`:** a two-instance run (own Wine
+Licensing is settled: GPL v3 for Tome (`LICENSE`), MIT for `sdk/`
+(`sdk/LICENSE`) so mods may use any license.
+
+Stability comes first: no compiler or link setting changes (LTO would cut
+`tome.mix` from 2.3 MB to 1.4 MB, but `-O3` without it is what the tests
+cover, and the hooks, SEH frames and asm depend on code layout).
+`tome.mix` and C/C++ mods need Windows 7 or later (system DLLs only);
+Rust mods need Windows 10 (`WaitOnAddress`; Rust's own minimum).
+
+1. ~~**Debug switches out of release builds**~~ Done: the `TOME_DEV` CMake
+   option (off by default, on in the Makefile's `DEV`) gates every
+   `TOME_DEBUG_*` read; `tools/e2e-test.sh` refuses a build without it.
+2. **SPDX headers:** `GPL-3.0-or-later` (or `-only`, decide) on every source
+   file outside `sdk/`, `MIT` in `sdk/`; none have one yet.
+3. **A player download:** a `dist` target making `tome-<version>.zip` with
+   `tome.mix`, a short install/uninstall readme, the licenses and an empty
+   `tome/mods/` (maybe `hello.tome`), next to the SDK zip.
+4. **CI:** GitHub Actions running `make container-test`, a short
+   `tools/fuzz.sh` run and the Rust bindings check on every push; on a
+   `v*` tag, build both zips and attach them to a release with their
+   SHA-256s. The e2e test needs game files and stays local (say so in
+   `CONTRIBUTING.md`).
+5. **Real Windows:** everything so far ran under Wine with Mesa. One manual
+   pass on Windows 10/11 with Direct3D and Defender on: install, Mods menu,
+   approving a DLL mod, settings, keybinds, a LAN game, safe mode, uninstall.
+6. **Crash loops** (§9): count startups that never reach the main menu and
+   offer safe mode after a few in a row, so a bad mod never means deleting
+   `tome.mix` by hand. A crash report (minidump and the log's tail in
+   `tome/`) for faults outside mod calls. Later: guard threads mods start
+   through the API.
+7. **The handshake in `tools/e2e-test.sh`:** a two-instance run (own Wine
    prefix and network namespace for the second, `architecture.md`, "Testing
    with two instances") with matching and mismatching `sync-test` mods, a
    refused Start, the game report and the replay, and the game lock (a
    toggle that waits, applied when the game ends). Find the host's net id.
+   Joining another host's game and private servers need a manual test.
+8. **Deterministic tests instead of e2e checks** (started): `tome_host_tests`
+   (the loader against a fake game image, no game files) and
+   `tome_game_tests` (against the real `game.dll`, loaded but never run)
+   cover lifecycle, approval, natives, crash isolation, hooks, packages,
+   safe mode and every startup patch, in seconds and the same every run.
+   They already found two mapped byte patterns running into the next
+   function (`TextTags::SetFadepoint`, `SetLifespan`; fixed, and a unit
+   test keeps it so). Next: chat commands and events dispatch (needs the
+   event hooks on the fake image, or the dispatch split from the hooks),
+   settings and keybinds, the memhack guard on the real compiler
+   (`reverse-engineering.md`, "Running the compiler outside a game"), and
+   then trimming `tools/e2e-test.sh` to what needs the game running.
+9. **Known flaky spots** fixed or listed under "Known issues" in the README:
+   the popup that stayed hidden (1 in 13), the Options screen's left panel
+   after the Mods panel was used. The e2e test is no longer timed
+   (2026-10-30: event-driven input, headless and silent by default, about
+   2 minutes); watch whether its occasional flaky check is gone.
+10. **Docs and repository files:**
+   - README: player install first (download, copy, uninstall), building
+     later; a screenshot of the Mods menu; "1.27b only, idle on other
+     builds" up front; status pointing at this file, not `research.md`;
+   - `CHANGELOG.md`, and how the API version relates to the release version
+     (`tests/test_abi.cpp` pins released fields);
+   - `CONTRIBUTING.md` (the rules in `CLAUDE.md`, the local-only e2e test),
+     `SECURITY.md` (where to report an approval or sandbox bypass, e.g.
+     the memhack guard), issue templates asking for `tome/tome.log` and the
+     game build;
+   - `sdk/README.md`: check the C, C++ and Rust examples it promises all
+     exist; a "first mod in ten minutes" walkthrough.
+11. **Antivirus and anti-cheat:** a DLL loaded by the sound library that
+    patches code looks like malware to heuristics. Code signing if
+    affordable, otherwise published hashes and submitting the release to
+    Microsoft/VirusTotal before announcing. Find out whether the private
+    servers still playing 1.27 flag `tome.mix`, and say in the README
+    which servers Tome is meant for.
+12. **Mods at launch:** `enhanced-options` and one or two more, and a place
+    to list mods (a curated list in its own repository is enough).
+13. Tag `v0.1.0`.
 
 ## Later
 
@@ -60,9 +129,6 @@ Status as of 2026-10-28. Design rationale: `research.md`. How it works:
   Visual Studio build.
 - **Porting major existing mods** (§10): UjAPI, WFE, RenderEdge, w3l,
   YDWE natives, DzAPI natives. Deferred by decision.
-- **Crash loops** (§9): count startups that never reach the main menu and
-  offer safe mode after a few in a row; guard threads mods start through
-  the API; a crash report for faults outside mod calls.
 - **1.31 feature parity** (§11, last phase).
 
 ## Open questions

@@ -238,6 +238,14 @@
     "Gateway.zone": { "kind": "offset", "value": "0x0", "doc": "int: the gateway's time zone (hours west of UTC: 8 for U.S. West)." },
     "Gateway.host": { "kind": "offset", "value": "0x4", "doc": "char[0x100]: the server's host name." },
     "Gateway.name": { "kind": "offset", "value": "0x104", "doc": "char[0x100]: the name the Gateway Selection panel shows." },
+    "UITimer::Fire": {
+      "kind": "function",
+      "rva": "0x008b5d40",
+      "conv": "fastcall",
+      "sig": "int(const float* elapsed, void* timer)",
+      "bytes": "8b 42 18 a3 ?? ?? ?? ?? f3 0f 10 01 8b ca f3 0f",
+      "doc": "A UI timer's callback (scheduled by 0x8B5C60, __thiscall(timer, float seconds, int event, CObserver* target, int repeat), ret 0x10; glue screens keep one at +0x234 and others). Sets the shared event at .data 0xCEF108 (id at +8 from timer+0x18, the time at +0x10) and calls target->OnEvent (vtable +0xC) with it; target at timer+0x8. Returns 1, plain ret. Glue screens schedule event 0x1A when they have finished appearing: Tome hooks it for 'Screen ready' (events.cpp), which the e2e test waits for before clicking."
+    },
     "CGlueMgr::SetScreen": {
       "kind": "function", "rva": "0x00303c90", "conv": "fastcall", "sig": "void(int screen, int force)",
       "bytes": "55 8b ec 81 ec 8c 02 00 00 a1 ?? ?? ?? ?? 33 c5 89 45 fc 53 56",
@@ -258,6 +266,7 @@
     "GlueScreen.custom_campaign": { "kind": "constant", "value": 6 },
     "GlueScreen.campaign": { "kind": "constant", "value": 7 },
     "GlueScreen.lan": { "kind": "constant", "value": 8, "doc": "LocalMultiplayerJoin." },
+    "GlueScreen.lan_create": { "kind": "constant", "value": 9, "doc": "LocalMultiplayerCreate: picking the map for a LAN game." },
     "GlueScreen.score_screen": { "kind": "constant", "value": 12 },
     "GlueScreen.view_replay": { "kind": "constant", "value": 13 },
     "GlueScreen.load_saved_game": { "kind": "constant", "value": 14 },
@@ -818,8 +827,14 @@
     "CControl::Click": {
       "kind": "function", "rva": "0x00112100", "conv": "thiscall", "sig": "void(CControl* this, int button)",
       "bytes": "55 8b ec 56 68 64 00 09 40 8b f1 e8 80 00 f6 ff",
-      "doc": "Clicks the control as the player would: if it's enabled (0x072190 with 0x40090064), fills the event at 0xCE3BA8 (button at +0x10, the control at +0x14) and dispatches it through its vtable +0x10, which notifies its listeners. ret 4. Mouse paths pass the mouse event's button; a shortcut path (0x0FEA8F) passes 1."
+      "doc": "Clicks the control as the player would: if it's enabled (CObserver::HasEvent with ControlEvent.click), fills the event at 0xCE3BA8 (button at +0x10, the control at +0x14) and dispatches it through its vtable +0x10, which notifies its listeners. ret 4. Mouse paths pass the mouse event's button; a shortcut path (0x0FEA8F) passes 1."
     },
+    "CObserver::HasEvent": {
+      "kind": "function", "rva": "0x00072190", "conv": "thiscall", "sig": "int(void* this, uint32_t event)",
+      "bytes": "55 8b ec 8b 49 08 85 c9 74 0e 6a 00 ff 75 08 e8",
+      "doc": "Nonzero if the object has a registration for the event id: looks it up in its event table at +8 (0x0721D0, null table: 0). CControl::Click calls it with ControlEvent.click and does nothing on 0; CPlayerWar3's On* functions call it with a trigger event id before building the event data. ret 4."
+    },
+    "ControlEvent.click": { "kind": "constant", "value": "0x40090064", "doc": "The event id of a control's click (CControl::Click, CControl::SetListener, the glue's BindControl)." },
     "CLayoutFrame::ClearAllPoints": {
       "kind": "function", "rva": "0x00110a00", "conv": "thiscall", "sig": "void(CLayoutFrame* this)",
       "bytes": "53 8b d9 56 57 8b 7b 04 8d 73 08 85 ff 74 2d 90",
@@ -1036,12 +1051,12 @@
     },
     "TextTags::SetLifespan": {
       "kind": "function", "rva": "0x0028b940", "conv": "thiscall", "sig": "void(HandleManager* this, int id, float seconds)",
-      "bytes": "55 8b ec f3 0f 10 45 0c 51 f3 0f 11 04 24 81 c1 c8 02 00 00 ff 75 08 e8 94 5d 71 00 5d c2 08 00 55 8b ec 81",
+      "bytes": "55 8b ec f3 0f 10 45 0c 51 f3 0f 11 04 24 81 c1 c8 02 00 00 ff 75 08 e8 94 5d 71 00 5d c2 08 00",
       "doc": "SetTextTagLifespan (0x214A50). A tag that isn't permanent goes away at the end of it. ret 8."
     },
     "TextTags::SetFadepoint": {
       "kind": "function", "rva": "0x0028b920", "conv": "thiscall", "sig": "void(HandleManager* this, int id, float seconds)",
-      "bytes": "55 8b ec f3 0f 10 45 0c 51 f3 0f 11 04 24 81 c1 c8 02 00 00 ff 75 08 e8 94 5d 71 00 5d c2 08 00 55 8b ec f3",
+      "bytes": "55 8b ec f3 0f 10 45 0c 51 f3 0f 11 04 24 81 c1 c8 02 00 00 ff 75 08 e8 94 5d 71 00 5d c2 08 00",
       "doc": "SetTextTagFadepoint (0x214A10): when it starts fading out. ret 8."
     },
     "TextTags::SetVisible": {
