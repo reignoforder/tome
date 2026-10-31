@@ -1,10 +1,11 @@
 """Adds the e2e test's native declarations and calls to a map's war3map.j.
 
-usage: python3 patch_map_script.py <war3map.j in> <war3map.j out> [--cpp] [--rust]
+usage: python3 patch_map_script.py <war3map.j in> <war3map.j out> [--cpp] [--rust] [--wasm]
 
 --cpp and --rust also declare and call the natives of the hello-cpp and
 hello-rs examples (sdk/examples/hello-cpp, sdk/rust/examples/hello-rs), for
-a test with those mods installed.
+a test with those mods installed; --wasm those of hello-wasm
+(sdk/examples/hello-wasm), whose results it logs as 8042-8046 and a greeting.
 
 Natives are declared before the globals block, and the calls go at the
 start of main() right after InitBlizzard(), which every melee map calls.
@@ -476,10 +477,47 @@ endfunction
 """
 
 
+# The WebAssembly example's natives (sdk/examples/hello-wasm): integers, a
+# real, a string both ways (UTF-8), and a handle result.
+WASM_DECLARATIONS = """\
+native HelloWasmAdd takes integer a, integer b returns integer
+native HelloWasmHalf takes real value returns real
+native HelloWasmGreet takes string name returns string
+native HelloWasmSame takes unit u returns unit
+native HelloWasmCall takes code callback returns boolean
+"""
+
+# A map function a Wasm native runs (jass_code_call), which calls a native of
+# the same mod: a nested call into the module.
+WASM_FUNCTIONS = """\
+function TomeE2EWasmInner takes nothing returns boolean
+    call TomeLogInteger(HelloWasmAdd(8045, 0))
+    return true
+endfunction
+
+"""
+
+WASM_CALLS = """\
+    call TomeLogInteger(HelloWasmAdd(8000, 42))
+    call TomeLogInteger(R2I(HelloWasmHalf(16086.0)))
+    call TomeLogString(HelloWasmGreet("ZEUS_GREEK"))
+    if HelloWasmSame(null) == null then
+        call TomeLogInteger(8044)
+    endif
+    if HelloWasmCall(function TomeE2EWasmInner) then
+        call TomeLogInteger(8046)
+    endif
+"""
+
+
 def main() -> int:
     src, dst = sys.argv[1], sys.argv[2]
-    prefixes = [EXAMPLES[flag] for flag in sys.argv[3:]]
+    flags = sys.argv[3:]
+    wasm = "--wasm" in flags
+    prefixes = [EXAMPLES[flag] for flag in flags if flag in EXAMPLES]
     declarations = DECLARATIONS + "".join(EXAMPLE_DECLARATIONS.format(p=p) for p in prefixes)
+    if wasm:
+        declarations += WASM_DECLARATIONS
     text = open(src, encoding="latin-1", newline="").read()
     newline = "\r\n" if "\r\n" in text else "\n"
 
@@ -502,7 +540,8 @@ def main() -> int:
     if not main_at:
         print("no main function found", file=sys.stderr)
         return 1
-    text = text[: main_at.start()] + FUNCTIONS.replace("\n", newline) + text[main_at.start():]
+    functions = FUNCTIONS + (WASM_FUNCTIONS if wasm else "")
+    text = text[: main_at.start()] + functions.replace("\n", newline) + text[main_at.start():]
 
     init_call = re.search(r"^function main takes nothing returns nothing.*?^(\s*call InitBlizzard\(\s*\)[^\n]*\n)",
                           text, re.M | re.S)
@@ -510,7 +549,7 @@ def main() -> int:
         print("no call InitBlizzard() in main found", file=sys.stderr)
         return 1
     # The script is read as latin-1, so UTF-8 goes in as its bytes.
-    calls = CALLS + "".join(EXAMPLE_CALLS.format(p=p) for p in prefixes)
+    calls = CALLS + "".join(EXAMPLE_CALLS.format(p=p) for p in prefixes) + (WASM_CALLS if wasm else "")
     calls = calls.replace("ZEUS_GREEK", ZEUS.encode("utf-8").decode("latin-1"))
     text = text[: init_call.end(1)] + calls.replace("\n", newline) + text[init_call.end(1):]
 

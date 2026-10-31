@@ -13,6 +13,7 @@ add_executable(tome_tests
     test_game_lock.cpp
     test_handshake.cpp
     test_hash.cpp
+    test_hash_cache.cpp
     test_hooks.cpp
     test_intermod.cpp
     test_jass.cpp
@@ -30,11 +31,15 @@ add_executable(tome_tests
     test_resolver.cpp
     test_rtti.cpp
     test_settings.cpp
+    test_signature.cpp
     test_text.cpp
     test_tome_hpp.cpp
     test_units.cpp
     test_utf8.cpp
     test_verify.cpp
+    test_wasm_abi.cpp
+    test_wasm_alloc.cpp
+    test_wasm_layout.cpp
     test_version.cpp
     test_widescreen.cpp
     test_x86.cpp
@@ -88,8 +93,9 @@ add_executable(tome_host_tests
     host/test_crash.cpp
     host/test_lifecycle.cpp
     host/test_mods.cpp
+    host/test_wasm.cpp
 )
-target_link_libraries(tome_host_tests PRIVATE tome_runtime)
+target_link_libraries(tome_host_tests PRIVATE tome_runtime monocypher)  # monocypher: signs mods in tests
 target_include_directories(tome_host_tests PRIVATE .)
 target_compile_definitions(tome_host_tests PRIVATE
     TOME_TEST_BUILD_DIR="${CMAKE_BINARY_DIR}"
@@ -98,6 +104,37 @@ target_compile_definitions(tome_host_tests PRIVATE
 target_compile_options(tome_host_tests PRIVATE -Wall -Wextra -fno-exceptions -fno-rtti)
 target_link_options(tome_host_tests PRIVATE -static)
 add_dependencies(tome_host_tests hook_a hook_b crash hello hello_cpp)
+if(TARGET hello_wasm)
+    add_dependencies(tome_host_tests hello_wasm)
+    target_compile_definitions(tome_host_tests PRIVATE TOME_TEST_WASM_EXAMPLE=1)
+endif()
+if(TARGET hello_wasm_rs)
+    add_dependencies(tome_host_tests hello_wasm_rs)
+    target_compile_definitions(tome_host_tests PRIVATE TOME_TEST_WASM_RUST_EXAMPLE=1)
+endif()
+# Signed by sdk/support/tome_sign.py with a test key (host/test-signing.key),
+# so host tests check Tome and the signer agree on what's signed:
+# crash-signed, a folder with files in subfolders and non-ASCII names, and
+# packages/crash.tome from tome_package(SIGN_KEY).
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_FOUND)
+    set(signed "${CMAKE_BINARY_DIR}/mods/crash-signed")
+    set(test_key "${CMAKE_CURRENT_SOURCE_DIR}/host/test-signing.key")
+    add_custom_command(OUTPUT "${signed}/tome.sig"
+        COMMAND ${Python3_EXECUTABLE} -I "${CMAKE_CURRENT_SOURCE_DIR}/host/make_signed_fixture.py"
+            "${CMAKE_BINARY_DIR}/mods/crash" "${signed}" "${test_key}"
+        DEPENDS crash "${CMAKE_CURRENT_SOURCE_DIR}/host/make_signed_fixture.py" "${test_key}"
+            "${CMAKE_SOURCE_DIR}/sdk/support/tome_sign.py" "${CMAKE_CURRENT_SOURCE_DIR}/e2e/mods/crash/tome.mod.json"
+        COMMENT "Signing crash-signed"
+        VERBATIM
+    )
+    add_custom_target(crash_signed ALL DEPENDS "${signed}/tome.sig")
+    tome_package(crash SIGN_KEY host/test-signing.key)
+    add_dependencies(tome_host_tests crash_signed crash_package)
+    target_compile_definitions(tome_host_tests PRIVATE TOME_TEST_SIGNED=1)
+    add_test(NAME tome_sign_selftest
+        COMMAND ${Python3_EXECUTABLE} -I "${CMAKE_SOURCE_DIR}/sdk/support/tome_sign.py" selftest)
+endif()
 add_test(NAME tome_host_tests COMMAND tome_host_tests)
 
 # The same, against the real game.dll from TOME_GAME_DIR, loaded into the test

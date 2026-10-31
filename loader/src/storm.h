@@ -3,6 +3,8 @@
 // The game's Storm.dll file API. Storm exports by ordinal only; these are the
 // ordinals game.dll itself uses (checked against its call sites).
 
+#include <cstddef>
+#include <cstdint>
 #include <string>
 
 namespace tome::storm {
@@ -10,7 +12,9 @@ namespace tome::storm {
 bool init();
 
 // Reads a file through the game's open archives (highest priority first).
-bool read_file(const char* name, std::string& out);
+// A file larger than `max` bytes isn't read: false, and *too_large (if
+// given) is set.
+bool read_file(const char* name, std::string& out, size_t max = SIZE_MAX, bool* too_large = nullptr);
 
 // Opens an MPQ for the game. Higher priority wins: the game uses 0-3 for its
 // base archives, 8 for War3Patch.mpq and 13, 14 and 16 for campaigns and maps.

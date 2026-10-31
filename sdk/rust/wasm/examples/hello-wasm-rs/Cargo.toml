@@ -1,0 +1,13 @@
+[package]
+name = "hello-wasm-rs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib"]   # hello_wasm_rs.wasm: tome.mod.json "wasm"
+
+[dependencies]
+tome-wasm = { path = "../../tome-wasm" }

@@ -9,12 +9,13 @@ helpers, examples and starting templates in C, C++ and Rust.
 | [`include/tome/tome.hpp`](include/tome/tome.hpp) | C++17 helpers: lambdas for callbacks, exceptions reported as crashes ([guide](examples/hello-cpp/README.md)). |
 | [`include/tome/utf8.h`](include/tome/utf8.h) | UTF-8 helpers (JASS strings are UTF-8). |
 | [`rust/`](rust/README.md) | Rust: raw bindings (`tome-sys`) and a safe API (`tome`). |
-| [`templates/`](templates) | The smallest useful mod in [C](templates/c), [C++](templates/cpp) and [Rust](templates/rust): copy one to start. |
-| [`examples/`](examples) | The same full example in [C](examples/hello), [C++](examples/hello-cpp) and [Rust](rust/examples/hello-rs). |
+| [`include/tome/tome_wasm.h`](include/tome/tome_wasm.h) | **Experimental:** sandboxed WebAssembly mods in C ([below](#webassembly-mods)). |
+| [`templates/`](templates) | The smallest useful mod in [C](templates/c), [C++](templates/cpp), [Rust](templates/rust) and WebAssembly ([C](templates/wasm), [Rust](templates/rust-wasm)): copy one to start. |
+| [`examples/`](examples) | The same full example in [C](examples/hello), [C++](examples/hello-cpp) and [Rust](rust/examples/hello-rs); a WebAssembly one in [C](examples/hello-wasm) and [Rust](rust/wasm/examples/hello-wasm-rs). |
 | [`docs/tome-mod-json.md`](docs/tome-mod-json.md) | `tome.mod.json` and settings, field by field. |
 | [`schemas/`](schemas) | JSON Schemas for both files, for your editor. |
 | [`TomeMod.cmake`](TomeMod.cmake), [`cmake/`](cmake) | `tome_add_mod()`, `tome_add_rust_mod()`, `tome_package()`; the MinGW toolchain. |
-| [`support/`](support) | Linked into C and C++ mods (`fpreset.c`); `make_blp.py` makes a placeholder icon (`make_blp.py icon.blp 32 3070d0`). |
+| [`support/`](support) | Linked into C and C++ mods (`fpreset.c`); `make_blp.py` makes a placeholder icon (`make_blp.py icon.blp 32 3070d0`); `tome_sign.py` signs mods ([below](#sign-your-releases)). |
 
 ## What a mod is
 
@@ -101,9 +102,10 @@ example and template.
 1. Install Tome (`tome.mix` next to `war3.exe`), and put the mod's folder or
    `.tome` into `tome/mods/`.
 2. Start the game. Open **Mods** on the main menu (or Ctrl+F10) and turn the
-   mod on. A mod with code asks once: it runs with your computer's full
-   access, so Tome records its hash and asks again if a `.tome`'s code
-   changes.
+   mod on. A new mod asks once (a DLL runs with your computer's full access,
+   and the game's loaders trust assets), so Tome records its hash and asks
+   again if a `.tome`'s files change, unless the new version is signed with
+   the same key ([below](#sign-your-releases)).
 3. Watch `tome/tome.log`. Every line the mod logs is tagged with its id, and
    so are crashes, with the module and offset.
 4. Change the code and rebuild into the mod's folder while the game runs.
@@ -120,6 +122,93 @@ For your own test setups:
   `make` in Tome's repository); released builds ignore it.
 - `-tomesafe` on the command line, or Shift held at launch, starts with
   every mod off.
+
+## WebAssembly mods
+
+**Experimental.** A mod can be a WebAssembly module instead of a DLL. It runs
+sandboxed inside Tome: it can only call Tome's functions, reads and writes
+only its own memory, and gets handles instead of pointers. A bug in it
+disables the mod instead of crashing the game. Players still allow it once,
+but they're told it "runs sandboxed code", not that it gets full access to
+their computer.
+
+It can use almost all of the API: settings, chat commands, game events,
+screens, frames and clicks, keybinds, popups, the selection, messages
+between mods, JASS natives and code values, the game's files, and files of
+its own (`tome_config_read`/`tome_config_write` instead of a folder path).
+It can't hook game functions, resolve addresses or reach memory: if a mod
+needs those, it's a DLL mod.
+
+```sh
+cp -r templates/wasm my-mod && cd my-mod
+cmake -S . -B build -DTOME_SDK_DIR=<sdk>    # no MinGW, no toolchain file
+cmake --build build                         # build/mods/my-wasm-mod/, build/packages/my-wasm-mod.tome
+```
+
+It needs clang (any recent version) and a WebAssembly linker: LLVM's
+`wasm-ld`, or the `rust-lld` that comes with every Rust toolchain (found in
+`~/.rustup` by itself). There's no libc: `tome_wasm.h` has what a mod needs
+(`tome_append`, `tome_append_int` for text), and the runtime
+(`support/tome_wasm.c`, compiled in by `tome_add_wasm_mod`) provides
+`memcpy` and `memset`. C++ works without exceptions, RTTI or a standard
+library.
+
+The differences from DLL mods, in short (all in `tome_wasm.h`):
+
+- callbacks are plain functions with a `void* user`, registered with the
+  wrappers (`tome_register_command`, `tome_on_event`, ...); data they get is
+  valid during the call;
+- frames are `tome_frame_t` handles, looked up by name on every use: one for
+  a frame that's gone just fails;
+- natives get one 32-bit word per argument (`tome_real`, `tome_string`) and
+  return one (`tome_real_bits`, `tome_string_result`); a handle result must
+  be one of the call's own arguments;
+- each call into the mod may run about half a second (200M instructions);
+  longer is a trap.
+
+In Rust, the `tome-wasm` crate ([`rust/wasm`](rust/wasm/tome-wasm)) is the
+same with closures, `Result`s and `String`s, and needs nothing but
+`rustup target add wasm32-unknown-unknown`:
+
+```sh
+cp -r templates/rust-wasm my-mod && cd my-mod   # point tome-wasm at the SDK in Cargo.toml
+cargo build --release                            # target/wasm32-unknown-unknown/release/my_rust_wasm_mod.wasm
+```
+
+A panic is a trap (logged first), so it disables the mod like a crash.
+[`rust/README.md`](rust/README.md#webassembly-mods) has more.
+
+## Sign your releases
+
+Players allow each new mod once, and a `.tome` again whenever its files
+change. Signed releases skip the second prompt: when a player allowed a
+version signed with your key, a later one signed with the same key is
+allowed without asking. One signed with another key, or not at all, asks
+with a warning that it may not be from the same author. The mod's details
+page shows the key ("Signed by").
+
+```sh
+python3 support/tome_sign.py keygen ~/my-mods.key   # once; prints the public key
+```
+
+Keep the key file out of your repository and back it up: losing it means
+players are asked again (and warned) for your next release. Publish the
+public key where players get the mod, so they can compare it.
+
+Then sign the package in CMake:
+
+```cmake
+tome_package(my_mod SIGN_KEY $ENV{HOME}/my-mods.key)
+```
+
+or a folder by hand, after the last change to any file in it
+(`tome_sign.py sign <folder> <key>`; `tome_sign.py verify <folder>` checks
+one). The signature covers every file and `tome.mod.json`, so editing
+anything afterwards breaks it, and Tome treats the mod as unsigned. Mod
+folders in `tome/mods/` don't need signing: a folder never asks again once
+allowed, so rebuilding into it keeps hot reloading.
+
+A signature says who made a mod, not that it's safe.
 
 ## Rules worth knowing
 

@@ -100,12 +100,28 @@ if [[ -f "$BUILD/mods/hello-rs/hello_rs.dll" ]]; then
 else
     echo "Rust example: skipped (not built; see sdk/rust/README.md)"
 fi
+WASM=0
+if [[ -f "$BUILD/mods/hello-wasm/hello_wasm.wasm" ]]; then
+    WASM=1
+    cp -r "$BUILD/mods/hello-wasm" "$MODS/hello-wasm"
+else
+    echo "WebAssembly example: skipped (not built: needs clang and wasm-ld or rust-lld)"
+fi
+WASMRS=0
+if [[ -f "$BUILD/mods/hello-wasm-rs/hello_wasm_rs.wasm" ]]; then
+    WASMRS=1
+    cp -r "$BUILD/mods/hello-wasm-rs" "$MODS/hello-wasm-rs"
+else
+    echo "Rust WebAssembly example: skipped (not built: rustup target add wasm32-unknown-unknown)"
+fi
 cp -r "$BUILD/mods/hook-a" "$BUILD/mods/hook-b" "$BUILD/mods/crash" "$MODS/"
 echo native > "$MODS/crash/mode.txt"  # where the crash fixture crashes first; see crash.c
 cp -r "$FIXTURES/broken-json" "$FIXTURES/needs-ghost" "$FIXTURES/needs-unmapped" "$MODS/"
 # A mod with code nobody allowed (not in APPROVED): it must not even be
 # loaded, so its "DLL" is only text.
 cp -r "$FIXTURES/unapproved" "$FIXTURES/unapproved-script" "$MODS/"
+# A WebAssembly mod (docs/wasm-mods.md), assembled by a script.
+python3 -I "$ROOT/tests/e2e/make_wasm_mod.py" "$MODS/wasm-e2e"
 echo "not a DLL" > "$MODS/unapproved/unapproved.dll"
 cp -r "$FIXTURES/asset-demo" "$FIXTURES/asset-map" "$FIXTURES/asset-restart" "$MODS/"
 ASSET_FILES=5  # asset-demo's TOC, FDF and texture, one file each in asset-map and asset-restart
@@ -139,6 +155,7 @@ if [[ -f "$MPQ_TOOL" ]]; then
     mpq extract "$TEST_MAP_DIR/e2e.w3m" war3map.j "$WORK/war3map.j" || die "couldn't extract war3map.j"
     EXAMPLE_ARGS=(--cpp)
     ((RUST)) && EXAMPLE_ARGS+=(--rust)
+    ((WASM)) && EXAMPLE_ARGS+=(--wasm)
     python3 -I "$ROOT/tests/e2e/patch_map_script.py" "$WORK/war3map.j" "$WORK/war3map.patched.j" "${EXAMPLE_ARGS[@]}" ||
         die "patch failed"
     mpq put "$TEST_MAP_DIR/e2e.w3m" war3map.j "$WORK/war3map.patched.j" || die "couldn't write the test map"
@@ -159,9 +176,9 @@ fi
 
 # --- helpers -----------------------------------------------------------------
 
-# The test's mods with code (a DLL, or asset-demo's Blizzard.j), allowed
+# The test's mods with code or game files (a DLL, asset-demo's Blizzard.j, assets, an icon), allowed
 # without a click (core/mod_state.h).
-APPROVED="hello,hello-cpp,hello-rs,hook-a,hook-b,crash,wrong-arch,sync-test,asset-demo"
+APPROVED="hello,hello-cpp,hello-rs,hook-a,hook-b,crash,wrong-arch,sync-test,asset-demo,asset-map,asset-restart,zz-bad-icon,wasm-e2e,hello-wasm,hello-wasm-rs"
 
 launch() {
     # Paced by the game only: no step may wait a fixed time (core/debug_script.h).
@@ -314,10 +331,16 @@ check_absent() {
 if ((${#MAP_ARG[@]})); then
     RUST_INPUT=""
     ((RUST)) && RUST_INPUT="type:/hellors e2e;wait:/hellors command:;type:/hellors panic;wait:panicked at;"
+    # Between wasm-e2e's commands: the first subscribes it to hello-wasm's
+    # message, the second traps (and stops it).
+    WASM_INPUT=""
+    ((WASM)) && WASM_INPUT="type:/hellowasm e2e;wait:published to;"
+    ((WASMRS)) && WASM_INPUT+="type:/hellowasmrs e2e;wait:/hellowasmrs command:;"
     TOME_DEBUG_CLICKS="wait:Game started: ;settle;type:-dialog;wait:e2e: dialog shown;settle;\
 key:T;until:clicked dialog;key:Left;until:pressed Left;\
 wait:Peasant (hpea) of player 1 trained in Town Hall;type:-build;wait:e2e: selected the worker;frames:5;key:B;wait:opened the build menu;key:Esc;frames:5;\
 type:-skill;wait:e2e: selected the hero;frames:5;key:O;wait:opened the skill menu;key:Esc;frames:5;\
+type:/wasme2e e2e;wait:[wasm-e2e] e2e;${WASM_INPUT}type:/wasme2e trap;wait:wasm-e2e crashed in chat command;\
 ${RUST_INPUT}type:/hellocpp e2e;wait:/hellocpp command:;type:/hellocpp throw;wait:uncaught exception: /hellocpp throw;\
 type:-e2e-done" launch
 else
@@ -327,6 +350,7 @@ fi
 echo "startup"
 check "Recognized Warcraft III 1\.27b \([0-9]+ mapped symbols\)" "game build recognized from the mapping database" 30
 check "Signatures match \(functions and call sites\)" "game.dll matches the byte signatures"
+check "DEP: (on|off|unknown)" "DEP state logged at startup"
 check "Crash reports: tome\\\\crashes, in front of the filter [Gg]ame\.dll\+0x3b590" "crash reports go in front of game.dll's filter"
 check "JASS natives: redirected 3 of 3 InitNatives call sites" "InitNatives hooked"
 check "\[hello\] enabled \(1 time" "hello loaded and enabled"
@@ -354,7 +378,23 @@ check "\[hello-cpp\] loaded \(Tome [0-9.]+, Warcraft III 1\.27b, game\.dll at 0x
 check "\[hello-cpp\] CTextFrame::SetText is a thiscall function at 0x[0-9a-f]{8} \(void\(CTextFrame\* this" \
     "a C++ mod resolved a mapped name"
 check "\[hello-cpp\] enabled" "a C++ mod enabled"
+check "WAMR [0-9]+\.[0-9]+\.[0-9]+ started \(fast interpreter\)" "the WebAssembly runtime started"
+check "\[wasm-e2e\] loaded" "a Wasm mod loaded (on the bootstrap thread)"
+check "Loaded wasm-e2e 0\.1\.0 \(WebAssembly\)" "and reported as WebAssembly"
+check "\[wasm-e2e\] enabled" "a Wasm mod enabled"
 check "\[hello-cpp\] 100 ticks" "events reach a C++ lambda"
+if ((WASM)); then
+    check "\[hello-wasm\] loaded, Warcraft III 1\.27b" "the C Wasm example loaded (game info)"
+    check "\[hello-wasm\] enabled" "and enabled"
+    check "\[hello-wasm\] main menu: SinglePlayerButton found" "a Wasm mod got a frame handle on the main menu"
+    check "\[hello-wasm\] 100 ticks" "events reach a Wasm mod"
+fi
+if ((WASMRS)); then
+    check "\[hello-wasm-rs\] loaded, Warcraft III 1\.27b" "the Rust Wasm example loaded (game info)"
+    check "\[hello-wasm-rs\] enabled" "and enabled"
+    check "\[hello-wasm-rs\] main menu: SinglePlayerButton found" "a Rust Wasm closure got a frame handle"
+    check "\[hello-wasm-rs\] 100 ticks" "events reach a Rust Wasm closure"
+fi
 if ((RUST)); then
     check "\[hello-rs\] loaded \(Tome [0-9.]+, Warcraft III 1\.27b, game\.dll at 0x[0-9a-f]{8}\)" "a Rust mod loaded"
     check "\[hello-rs\] CTextFrame::SetText is a thiscall function at 0x[0-9a-f]{8} \(void\(CTextFrame\* this" \
@@ -369,7 +409,7 @@ MAIN_TID=$(grep -oE "main thread [0-9]+" "$LOG" | head -n 1 | grep -oE "[0-9]+$"
 
 if ((${#MAP_ARG[@]})); then
     echo "JASS natives (map script)"
-    check "bound $((21 + RUST * 4)) Tome natives" "natives bound when the map loaded" 45
+    check "bound $((21 + RUST * 4 + WASM * 5 + WASMRS * 4)) Tome natives" "natives bound when the map loaded" 45
     check "\[hello\] HelloLog\(42\) called from JASS" "integer argument" 30
     check "\[hello\] HelloLogReal\(2\.5\) called from JASS" "real argument and real return value"
     check "\[hello\] HelloLog\(1001\) called from JASS" "TomeIsLoaded() returned true"
@@ -505,11 +545,41 @@ if ((${#MAP_ARG[@]})); then
     check "\[hello-cpp\] HelloCppLog\(2002\)" "its boolean reached the script"
     check "\[hello-cpp\] first CTextFrame::SetText after enable: \"" "a C++ hook lambda read the call's string argument"
     check "\[hello-cpp\] game start: " "game start event in C++" 30
+    check "\[wasm-e2e\] e2e" "a Wasm mod's chat command, on the main thread" 30
+    check "\[wasm-e2e\] the module trapped in tome_callback: Exception: out of bounds memory access" \
+        "a Wasm mod's out-of-bounds read traps" 15
+    check "wasm-e2e crashed in chat command /wasme2e: the mod reported a failure" "and disables it" 10
     check "\[hello-cpp\] /hellocpp command: Hello from C\+\+, e2e\." "a C++ chat command, with a string setting" 30
     check "\[hello-cpp\] uncaught exception: /hellocpp throw" "an exception leaving a lambda is logged" 15
     check "hello-cpp crashed in chat command /hellocpp: the mod reported a failure \(logged above\)" \
         "and Tome stops the call like a crash"
     check "Unloaded hello-cpp \(its DLL stays loaded after the crash\)" "the throwing mod was disabled" 10
+    if ((WASM)); then
+        echo "a WebAssembly mod (map script and chat)"
+        check "\[hello-wasm\] map load: Maps\\\\TomeE2E\\\\e2e\.w3m" "map load event in Wasm, with the map's path"
+        check "\[map\] TomeLogInteger\(8042\)" "a Wasm native: integer arguments and result"
+        check "\[map\] TomeLogInteger\(8043\)" "a Wasm native: a real argument and result"
+        check $'\\[map\\] TomeLogString\\("Hello, \u0396\u03b5\u03cd\u03c2"\\)' "UTF-8 strings both ways through a Wasm native"
+        check "\[map\] TomeLogInteger\(8044\)" "a Wasm native's handle result"
+        check "\[hello-wasm\] game start: " "game start event in Wasm" 30
+        check "\[hello-wasm\] /hellowasm command: Hello, e2e\." "a Wasm chat command with a string setting" 30
+        if ((WASMRS)); then
+            check "\[hello-wasm\] published to 2 mods" "a Wasm mod published a message"
+            check "\[hello-wasm-rs\] hello-wasm\.greeted: Hello, e2e\." "a Rust Wasm mod received it, topic and data"
+        else
+            check "\[hello-wasm\] published to 1 mod" "a Wasm mod published a message"
+        fi
+        check "\[wasm-e2e\] got a message" "and another Wasm mod received it"
+        check "\[map\] TomeLogInteger\(8045\)" "a Wasm native ran map code that called the same mod's native (nested)"
+        check "\[hello-wasm\] HelloWasmCall: callback returned 1, its argument intact" "the outer call's data survived it"
+        check "\[map\] TomeLogInteger\(8046\)" "and its result reached the script"
+    fi
+    if ((WASMRS)); then
+        echo "a WebAssembly mod in Rust"
+        check "\[hello-wasm-rs\] map load: Maps\\\\TomeE2E\\\\e2e\.w3m" "map load event, with the map's path"
+        check "\[hello-wasm-rs\] game start: " "game start event" 30
+        check "\[hello-wasm-rs\] /hellowasmrs command: Hello, e2e\." "a chat command with a string setting" 30
+    fi
     if ((RUST)); then
         echo "a mod in Rust (map script and chat)"
         check "\[hello-rs\] MAP_LOAD: .+ \(Maps\\\\TomeE2E\\\\e2e\.w3m\)" "map load event in Rust, with the map's path"
@@ -616,9 +686,13 @@ else
 fi
 
 echo "removing a mod"
+rm -rf "$MODS/wasm-e2e"  # done with (it trapped in the game, or runs without one): out of the counts below
 rm -rf "$MODS/needs-ghost"
 REMAINING=$(find "$MODS" -mindepth 1 -maxdepth 1 -type d ! -name config | wc -l)
-ACTIVE=$(( ${#MAP_ARG[@]} ? 5 : 6 ))  # hello, hook-a, hook-b, asset-demo, asset-restart, and asset-map unless disabled above
+# hello, hook-a, hook-b, asset-demo, asset-restart, and asset-map unless
+# disabled above; hello-wasm if it's built (it stays: the map declares its
+# natives), and hello-wasm-rs.
+ACTIVE=$(( (${#MAP_ARG[@]} ? 5 : 6) + WASM + WASMRS ))
 check "Mods: $REMAINING installed, $ACTIVE active" "mod list refreshed"
 if ! tail -n 5 "$LOG" | grep -q "needs-ghost"; then pass "removed mod gone from the list"; else fail "removed mod still listed"; fi
 

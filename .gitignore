@@ -3,7 +3,14 @@ build/
 build-*/
 sdk/rust/target/
 sdk/templates/rust/target/
+sdk/rust/wasm/target/
+sdk/templates/rust-wasm/target/
+sdk/templates/rust-wasm/Cargo.lock
 sdk/templates/rust/Cargo.lock
+# Downloaded at configure time (FetchContent: WAMR, StormLib) into
+# <build>/_deps, whatever the build folder is called; WAMR's old vendored path
+_deps/
+loader/third_party/wamr/core/
 compile_commands.json
 .cache/
 __pycache__/

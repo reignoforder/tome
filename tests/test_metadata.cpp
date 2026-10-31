@@ -173,3 +173,23 @@ TEST(metadata_rejects_bad_keybinds) {
     CHECK(has_error_containing(r, "listed twice"));
     CHECK(has_error_containing(r, "\"id\" must be"));
 }
+
+TEST(metadata_wasm) {
+    auto with = [](const char* extra) {
+        return std::string(R"({"schema": 1, "id": "wasm-mod", "version": "1.0.0", "game": "*", "tome": "*", "sync": "client", )") +
+               extra + "}";
+    };
+    ModMetadata m;
+    auto r = parse_text(with(R"("wasm": "mod/w.wasm")"), m);
+    for (const std::string& e : r.errors) test::fail(__FILE__, __LINE__, e);
+    CHECK(r.ok);
+    CHECK(r.warnings.empty());
+    CHECK_EQ(m.wasm, std::string("mod/w.wasm"));
+    CHECK(m.entry.empty());
+
+    ModMetadata bad;
+    CHECK(has_error_containing(parse_text(with(R"("wasm": "../w.wasm")"), bad), "inside the mod folder"));
+    CHECK(has_error_containing(parse_text(with(R"("wasm": "w.dll")"), bad), ".wasm file"));
+    CHECK(has_error_containing(parse_text(with(R"("wasm": 3)"), bad), "\"wasm\""));
+    CHECK(has_error_containing(parse_text(with(R"("wasm": "w.wasm", "entry": "w.dll")"), bad), "not both"));
+}

@@ -3,6 +3,7 @@
 #include "api.h"
 #include "core/game_lock.h"
 #include "core/hash.h"
+#include "core/hash_cache.h"
 #include "core/json.h"
 #include "crash_handler.h"
 #include "frames.h"
@@ -15,6 +16,7 @@
 #include "natives.h"
 #include "packages.h"
 #include "core/package.h"
+#include "core/signature.h"
 #include "sha256.h"
 
 #include <algorithm>
@@ -153,6 +155,25 @@ bool hash_file(const std::wstring& path, Fnv1a64& hash, std::vector<char>& buffe
     }
     CloseHandle(in);
     return ok;
+}
+
+// A file's stamp for the hash cache (core/hash_cache.h); false if it can't
+// be opened.
+bool hash_stamp(const std::wstring& path, hash_cache::Stamp& out) {
+    HANDLE in = CreateFileW(path.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (in == INVALID_HANDLE_VALUE) return false;
+    BY_HANDLE_FILE_INFORMATION info;
+    const bool ok = GetFileInformationByHandle(in, &info);
+    CloseHandle(in);
+    if (!ok) return false;
+    auto wide = [](DWORD high, DWORD low) { return (uint64_t(high) << 32) | low; };
+    out.size = wide(info.nFileSizeHigh, info.nFileSizeLow);
+    out.written = wide(info.ftLastWriteTime.dwHighDateTime, info.ftLastWriteTime.dwLowDateTime);
+    out.created = wide(info.ftCreationTime.dwHighDateTime, info.ftCreationTime.dwLowDateTime);
+    out.file_id = wide(info.nFileIndexHigh, info.nFileIndexLow);
+    out.volume = info.dwVolumeSerialNumber;
+    return true;
 }
 
 } // namespace
@@ -314,7 +335,7 @@ std::vector<ModManager::Installed> ModManager::discover() const {
             if (!meta_exists || !read_file(meta_file, text)) {
                 cached.stamp = {};  // read again next time
                 cached.errors.push_back("no readable tome.mod.json");
-            } else if (parsed = json::parse(text, root); !parsed.ok) {
+            } else if (cached.sha256 = sha256_bytes(text), parsed = json::parse(text, root); !parsed.ok) {
                 cached.errors.push_back("tome.mod.json: " + parsed.error);
             } else {
                 MetadataResult meta = parse_metadata(root, cached.meta);
@@ -351,6 +372,14 @@ std::vector<ModManager::Installed> ModManager::discover() const {
             } else if (!mod.meta.entry_by_game.empty()) {
                 mod.warnings.push_back("no \"entry\" DLL for this game version; loading as assets-only");
             }
+            if (!mod.meta.wasm.empty()) {
+                mod.dll = mod.dir + L"\\" + to_windows_path(mod.meta.wasm);
+                mod.wasm = true;
+                if (!file_stamp(mod.dll, mod.dll_stamp)) {
+                    mod.errors.push_back("\"wasm\" module \"" + mod.meta.wasm + "\" not found");
+                    mod.valid = false;
+                }
+            }
             if (!mod.meta.config.empty()) read_settings_schema(mod);
             std::string assets = mod.meta.assets.empty() ? "assets" : mod.meta.assets;
             std::wstring assets_dir = mod.dir + L"\\" + to_windows_path(assets);
@@ -360,10 +389,16 @@ std::vector<ModManager::Installed> ModManager::discover() const {
             } else if (!mod.meta.assets.empty()) {
                 mod.warnings.push_back("\"assets\" folder \"" + mod.meta.assets + "\" not found");
             }
-            mod.has_code = mod.valid && (!mod.dll.empty() || std::any_of(mod.assets.begin(), mod.assets.end(), [](const auto& f) {
-                               return mod_state::is_script(f.name);
-                           }));
+            using mod_state::CodeKind;
+            if (!mod.dll.empty() && !mod.wasm) mod.code_kind = CodeKind::Native;
+            else if (std::any_of(mod.assets.begin(), mod.assets.end(),
+                                 [](const auto& f) { return mod_state::is_script(f.name); }))
+                mod.code_kind = CodeKind::Scripts;
+            else if (mod.wasm) mod.code_kind = CodeKind::Wasm;
+            else if (!mod.assets.empty() || !mod.meta.icon.empty()) mod.code_kind = CodeKind::Assets;
+            mod.has_code = mod.valid && mod.code_kind != CodeKind::None;
             if (mod.has_code) mod.code_hash = code_hash(mod);
+            if (mod.has_code && !mod.code_hash.empty()) check_signature(mod, cached.sha256);
         }
         mods.push_back(std::move(mod));
     } while (FindNextFileW(find, &fd));
@@ -388,13 +423,13 @@ std::vector<ModManager::Installed> ModManager::discover() const {
     std::erase_if(meta_cache_, gone);
     std::erase_if(settings_cache_, gone);
     std::erase_if(package_cache_, gone);
-    std::erase_if(code_hash_cache_, gone);
+    std::erase_if(signature_cache_, gone);
     return mods;
 }
 
-mod_state::State ModManager::read_state(bool* invalid, bool* legacy) const {
+mod_state::State ModManager::read_state(bool* invalid, int* schema) const {
     if (invalid) *invalid = false;
-    if (legacy) *legacy = false;
+    if (schema) *schema = mod_state::kSchema;
     std::string text;
     if (!read_file(paths_.tome_dir + L"\\state.json", text)) return {};
     json::Value root;
@@ -406,9 +441,9 @@ mod_state::State ModManager::read_state(bool* invalid, bool* legacy) const {
         if (invalid) *invalid = true;
         return {};
     }
-    bool old = false;
-    mod_state::State state = mod_state::parse(root, old);
-    if (legacy) *legacy = old;
+    int file_schema = 0;
+    mod_state::State state = mod_state::parse(root, file_schema);
+    if (schema) *schema = file_schema;
     return state;
 }
 
@@ -421,11 +456,11 @@ bool ModManager::wanted_by_user(const mod_state::State& state, const std::string
 mod_state::Need ModManager::approval_need(const mod_state::State& state, const Installed& mod) {
     auto saved = state.find(mod.meta.id);
     return mod_state::need(saved == state.end() ? nullptr : &saved->second, mod.has_code, mod.package, mod.folder,
-                           mod.code_hash);
+                           mod.code_hash, mod.signer);
 }
 
-void ModManager::implicit_approvals(mod_state::State& state, const std::vector<Installed>& installed, bool legacy,
-                                    bool log) {
+void ModManager::implicit_approvals(mod_state::State& state, const std::vector<Installed>& installed,
+                                    bool log) const {
     // Release builds ignore TOME_DEBUG_APPROVE: anything that sets the game's
     // environment could otherwise allow a mod's code.
     char env[1024] = {};
@@ -433,9 +468,12 @@ void ModManager::implicit_approvals(mod_state::State& state, const std::vector<I
     for (const Installed& mod : installed) {
         if (!mod.valid) continue;
         auto saved = state.find(mod.meta.id);
-        // A state.json from before approvals: what it lists ran without one.
-        if (legacy && saved != state.end() && saved->second.approved.hash.empty()) {
-            approve(state, mod, log ? "installed before approvals" : nullptr);
+        // An update signed by the key the user allowed (mod_state::need lets
+        // it run): recorded as what's allowed now.
+        if (saved != state.end() && !mod.signer.empty() && saved->second.approved.key == mod.signer &&
+            !mod.code_hash.empty() && saved->second.approved.hash != mod.code_hash &&
+            approval_need(state, mod) == mod_state::Need::None) {
+            approve(state, mod, log ? "signed by the same key as before" : nullptr);
         }
         if (TOME_DEV && approval_need(state, mod) != mod_state::Need::None &&
             mod_state::debug_approves(env, mod.meta.id)) {
@@ -451,9 +489,12 @@ void ModManager::approve(mod_state::State& state, const Installed& mod, const ch
         return;
     }
     mod_state::Approval& approved = state[mod.meta.id].approved;
-    if (approved.hash == mod.code_hash && approved.folder == mod.folder) return;
-    approved = {mod.code_hash, mod.folder};
-    if (how) TOME_INFO("%s: code allowed (%s), sha256 %s", mod.meta.id.c_str(), how, mod.code_hash.c_str());
+    if (approved.hash == mod.code_hash && approved.folder == mod.folder && approved.key == mod.signer) return;
+    approved = {mod.code_hash, mod.folder, mod.signer};
+    if (how) {
+        TOME_INFO("%s: code allowed (%s), sha256 %s%s%s", mod.meta.id.c_str(), how, mod.code_hash.c_str(),
+                  mod.signer.empty() ? "" : ", signed by ", mod.signer.c_str());
+    }
 }
 
 void ModManager::write_state(const mod_state::State& state) {
@@ -470,7 +511,31 @@ void ModManager::write_state(const mod_state::State& state) {
     }
 }
 
+bool ModManager::load_wasm(Runtime& rt, const Installed& mod, std::string& error) {
+    std::unique_ptr<wasm_mods::Instance> instance = wasm_mods::Instance::load(&rt.handle, mod.dll, error);
+    if (!instance) return false;
+    rt.wasm = std::move(instance);
+    rt.source_dll = mod.dll;
+    rt.stamp = mod.dll_stamp;
+    rt.handle.clear_fault();
+
+    int32_t rc = 0;
+    Starting starting(rt.handle);
+    wasm_mods::Instance* wasm = rt.wasm.get();
+    const bool returned = guard::run(&rt.handle, "tome_mod_load", nullptr, [&] { rc = wasm->call_load(); });
+    if (!returned || rc != 0) {
+        error = !returned ? rt.handle.fault_text() : "tome_mod_load returned " + std::to_string(rc);
+        // Nothing of a module outlives it (no threads, no patches): free it.
+        rt.handle.revoke_all();
+        rt.wasm.reset();
+        return false;
+    }
+    TOME_INFO("Loaded %s %s (WebAssembly)", rt.handle.id.c_str(), rt.handle.version.c_str());
+    return true;
+}
+
 bool ModManager::load(Runtime& rt, const Installed& mod, std::string& error) {
+    if (mod.wasm) return load_wasm(rt, mod, error);
     if (!check_pe_i386_dll(mod.dll, error)) return false;
 
     // Load a copy so the original can be rebuilt while the game runs.
@@ -549,7 +614,13 @@ void ModManager::shutdown() {
         }
         size_t count = 0;
         for (Runtime* rt : loaded) {
-            if (!rt->module) continue;
+            if (!rt->loaded()) continue;
+            // Not after a trap, as in unload(): the module's state is
+            // whatever the trap left, and it has nothing to undo.
+            if (rt->wasm && !rt->handle.faulted && rt->wasm->has("tome_mod_unload")) {
+                wasm_mods::Instance* wasm = rt->wasm.get();
+                guard::run(&rt->handle, "tome_mod_unload", nullptr, [&] { wasm->call("tome_mod_unload"); });
+            }
             if (rt->unload_fn) {
                 guard::run(&rt->handle, "tome_mod_unload", nullptr, [&] { rt->unload_fn(&rt->handle); },
                            guard::kEvenIfFaulted);
@@ -562,6 +633,19 @@ void ModManager::shutdown() {
 }
 
 void ModManager::unload(Runtime& rt) {
+    if (rt.wasm) {
+        // A module's crash leaves nothing behind (no threads or patches of
+        // its own), so it's always freed.
+        wasm_mods::Instance* wasm = rt.wasm.get();
+        if (!rt.handle.faulted && wasm->has("tome_mod_unload")) {
+            guard::run(&rt.handle, "tome_mod_unload", nullptr, [&] { wasm->call("tome_mod_unload"); });
+        }
+        rt.handle.revoke_all();
+        rt.wasm.reset();
+        rt.reload_requested = false;
+        TOME_INFO("Unloaded %s", rt.handle.id.c_str());
+        return;
+    }
     if (!rt.module) return;
     // A crashed mod still gets its tome_mod_disable and tome_mod_unload, to
     // undo what Tome can't (its own threads or patches).
@@ -589,6 +673,10 @@ void ModManager::enable(Runtime& rt) {
     if (rt.enable_fn) {
         Starting starting(rt.handle);
         guard::run(&rt.handle, "tome_mod_enable", nullptr, [&] { rt.enable_fn(&rt.handle); });
+    } else if (rt.wasm) {
+        Starting starting(rt.handle);
+        wasm_mods::Instance* wasm = rt.wasm.get();
+        guard::run(&rt.handle, "tome_mod_enable", nullptr, [&] { wasm->enable(); });
     }
     rt.enabled = true;
     enable_order_.push_back(rt.handle.id);
@@ -600,8 +688,13 @@ void ModManager::disable(Runtime& rt) {
     if (rt.disable_fn) {
         guard::run(&rt.handle, "tome_mod_disable", nullptr, [&] { rt.disable_fn(&rt.handle); },
                    guard::kEvenIfFaulted);
+    } else if (rt.wasm && !rt.handle.faulted && rt.wasm->has("tome_mod_disable")) {
+        // Not after a trap: the module's state is whatever the trap left.
+        wasm_mods::Instance* wasm = rt.wasm.get();
+        guard::run(&rt.handle, "tome_mod_disable", nullptr, [&] { wasm->call("tome_mod_disable"); });
     }
     rt.handle.revoke_all();
+    if (rt.wasm) rt.wasm->revoked();
     rt.enabled = false;
     enable_order_.erase(std::remove(enable_order_.begin(), enable_order_.end(), rt.handle.id), enable_order_.end());
     TOME_INFO("Disabled %s", rt.handle.id.c_str());
@@ -617,9 +710,9 @@ void ModManager::mount_startup_assets(const Paths& paths, const GameBuild& build
     // The same choice refresh() makes, minus the DLLs: a mod whose DLL then
     // fails to load loses its assets again in the first refresh.
     std::vector<Installed> installed = discover();
-    bool legacy = false;
-    mod_state::State state = read_state(nullptr, &legacy);
-    implicit_approvals(state, installed, legacy, false);  // recorded by the first refresh
+    mod_state::State state = read_state();
+    // Both recorded by the first refresh: nothing is written in DllMain.
+    implicit_approvals(state, installed, false);
     std::vector<ResolveInput> inputs;
     std::vector<const Installed*> input_mods;
     for (const Installed& mod : installed) {
@@ -659,7 +752,7 @@ std::vector<std::string> ModManager::reload(const std::string& id) {
 std::vector<std::string> ModManager::reload_locked(const std::string& id) {
     std::vector<std::string> reloaded;
     for (auto& [rt_id, rt] : runtime_) {
-        if (!rt->enabled || !rt->module || (!id.empty() && rt_id != id)) continue;
+        if (!rt->enabled || !rt->loaded() || (!id.empty() && rt_id != id)) continue;
         // refresh_locked sees a changed DLL. Not by zeroing rt->stamp: a locked
         // mod's reload waits for the game's end, and a crash meanwhile must
         // still be recorded against the DLL that crashed.
@@ -1040,10 +1133,53 @@ std::string ModManager::sync_hash(const Installed& mod) {
     return text;
 }
 
+void ModManager::check_signature(Installed& mod, const std::string& metadata_sha256) const {
+    const std::wstring path = mod.dir + L"\\" + widen(std::string(signature::kFile));
+    FileStamp stamp;
+    if (!file_stamp(path, stamp)) {
+        signature_cache_.erase(mod.folder);
+        return;
+    }
+    CheckedSignature checked;
+    if (stamp.size > signature::kMaxFileSize) {
+        checked.warning = "tome.sig is larger than " + std::to_string(signature::kMaxFileSize) +
+                          " bytes; treated as not signed";
+    } else if (!read_file(path, checked.text)) {
+        checked.warning = "tome.sig can't be read; treated as not signed";
+    }
+    if (!checked.warning.empty()) {
+        signature_cache_.erase(mod.folder);
+        mod.warnings.push_back(checked.warning);
+        return;
+    }
+    checked.metadata_sha256 = metadata_sha256;
+    checked.code_hash = mod.code_hash;
+    // Verified again only when tome.sig, tome.mod.json (the bytes that were
+    // parsed) or the code changes.
+    CheckedSignature& cached = signature_cache_[mod.folder];
+    if (!cached.verified || cached.text != checked.text || cached.metadata_sha256 != checked.metadata_sha256 ||
+        cached.code_hash != checked.code_hash) {
+        signature::Signature sig;
+        std::string error;
+        if (!signature::parse(checked.text, sig, error)) {
+            checked.warning = "tome.sig is invalid (" + error + "); treated as not signed";
+        } else if (metadata_sha256.empty() ||
+                   !signature::verify(sig, signature::message(mod.meta.id, mod.code_hash, metadata_sha256))) {
+            checked.warning = "tome.sig doesn't match the mod's files (changed after signing?); treated as not signed";
+        } else {
+            checked.signer = signature::encode_key(sig.key);
+        }
+        checked.verified = true;
+        cached = std::move(checked);
+    }
+    if (!cached.warning.empty()) mod.warnings.push_back(cached.warning);
+    mod.signer = cached.signer;
+}
+
 std::string ModManager::code_hash(const Installed& mod) const {
-    // Every file but tome.mod.json and the assets other than scripts (mod_state::is_code_file), by
-    // its path from the mod folder; the stamps first, to skip hashing them again.
-    const std::string assets = mod.meta.assets.empty() ? "assets" : mod.meta.assets;
+    // The files mod_state::is_code_file picks (every file but the top tome.mod.json and
+    // tome.sig), by their path from the mod folder; the stamps first, to skip hashing them
+    // again.
     std::vector<std::pair<std::string, std::wstring>> files;  // relative path ('/'), full path
     Fnv1a64 stamps;
     constexpr int kMaxDepth = 32;
@@ -1067,11 +1203,12 @@ std::string ModManager::code_hash(const Installed& mod) const {
                     continue;
                 }
                 self(path, relative + "/", depth - 1, self);
-            } else if (mod_state::is_code_file(relative, assets)) {
+            } else if (mod_state::is_code_file(relative)) {
                 stamps.mix(relative.c_str(), relative.size() + 1);
                 stamps.mix(&fd.nFileSizeLow, sizeof(fd.nFileSizeLow));
                 stamps.mix(&fd.nFileSizeHigh, sizeof(fd.nFileSizeHigh));
                 stamps.mix(&fd.ftLastWriteTime, sizeof(fd.ftLastWriteTime));
+                stamps.mix(&fd.ftCreationTime, sizeof(fd.ftCreationTime));
                 files.emplace_back(std::move(relative), std::move(path));
             }
         } while (FindNextFileW(find, &fd));
@@ -1079,18 +1216,51 @@ std::string ModManager::code_hash(const Installed& mod) const {
     };
     walk(mod.dir, "", kMaxDepth, walk);
     if (!complete) return {};
-    auto cached = code_hash_cache_.find(mod.folder);
-    if (cached != code_hash_cache_.end() && cached->second.first == stamps.value) return cached->second.second;
+    load_file_hashes();
+    const std::string dir = narrow(mod.dir);
+    if (const std::string* cached = file_hashes_.find_folder(dir, stamps.value)) return *cached;
 
     std::vector<mod_state::CodeFile> hashed;
     for (const auto& [relative, path] : files) {
-        std::string sha = sha256_file(path);
+        std::string sha = file_sha256(path);
         if (sha.empty()) return {};  // not cached: try again next refresh
         hashed.push_back({relative, std::move(sha)});
     }
     std::string hash = sha256_bytes(mod_state::manifest(std::move(hashed)));
-    if (!hash.empty()) code_hash_cache_[mod.folder] = {stamps.value, hash};
+    if (!hash.empty()) file_hashes_.put_folder(dir, stamps.value, hash);
     return hash;
+}
+
+std::wstring ModManager::file_hashes_path() const {
+    return paths_.tome_dir + L"\\cache\\file-hashes.json";
+}
+
+void ModManager::load_file_hashes() const {
+    if (file_hashes_read_) return;
+    file_hashes_read_ = true;
+    std::string text;
+    if (read_file(file_hashes_path(), text) && !file_hashes_.parse(text)) {
+        TOME_WARN("tome/cache/file-hashes.json isn't valid; every mod's files are hashed again");
+    }
+}
+
+std::string ModManager::file_sha256(const std::wstring& path) const {
+    load_file_hashes();
+    hash_cache::Stamp before, after;
+    if (!hash_stamp(path, before)) return {};
+    const std::string key = narrow(path);
+    if (const std::string* sha = file_hashes_.find(key, before)) return *sha;
+    std::string sha = sha256_file(path);
+    // Only if nothing changed the file while it was read.
+    if (!sha.empty() && hash_stamp(path, after) && after == before) file_hashes_.put(key, before, sha);
+    return sha;
+}
+
+void ModManager::save_file_hashes() const {
+    if (!file_hashes_read_ || !file_hashes_.dirty()) return;
+    CreateDirectoryW((paths_.tome_dir + L"\\cache").c_str(), nullptr);
+    if (write_file_atomic(file_hashes_path(), file_hashes_.serialize())) file_hashes_.mark_saved();
+    else TOME_WARN("Couldn't write tome/cache/file-hashes.json");
 }
 
 // FNV-1a over the names and timestamps of every file refresh() depends on:
@@ -1184,6 +1354,7 @@ void ModManager::refresh_locked(std::vector<Installed> installed, assets::Moment
     if (shut_down_) return;  // the watcher may still notice changes while the game exits
     TOME_DEBUG("Refreshing mods");
     InRefresh in_refresh;
+    save_file_hashes();  // what discover() hashed, here and not in DllMain
 
     // Declare natives for every installed mod that targets this game build,
     // enabled or not: a map that declares them must still load (§5.5).
@@ -1194,10 +1365,12 @@ void ModManager::refresh_locked(std::vector<Installed> installed, assets::Moment
     // are kept, so removing and re-adding a mod remembers its setting.
     // An unparseable state.json is left alone (the user may be fixing it by
     // hand); rewriting it here would drop every disabled mod for good.
-    bool state_invalid = false, state_legacy = false;
-    mod_state::State state = read_state(&state_invalid, &state_legacy);
+    bool state_invalid = false;
+    int state_schema = mod_state::kSchema;
+    mod_state::State state = read_state(&state_invalid, &state_schema);
     const mod_state::State state_before = state;
-    implicit_approvals(state, installed, state_legacy, true);
+    const bool state_old = state_schema < mod_state::kSchema;
+    implicit_approvals(state, installed, true);
     for (const Installed& mod : installed) {
         if (!mod.valid) continue;
         state.try_emplace(mod.meta.id);
@@ -1206,10 +1379,10 @@ void ModManager::refresh_locked(std::vector<Installed> installed, assets::Moment
                 return s.folder == mod.folder && s.state == "approval";
             })) {  // once, not on every refresh
             TOME_WARN("%s: %s (in the mod menu, or /tome enable %s)", mod.meta.id.c_str(),
-                      mod_state::describe(approval_need(state, mod), !mod.dll.empty()), mod.meta.id.c_str());
+                      mod_state::describe(approval_need(state, mod), mod.code_kind), mod.meta.id.c_str());
         }
     }
-    if (!state_invalid && (state_legacy || !(state_before == state))) write_state(state);
+    if (!state_invalid && (state_old || !(state_before == state))) write_state(state);
 
     std::vector<ResolveInput> inputs;
     std::vector<const Installed*> input_mods;
@@ -1232,7 +1405,7 @@ void ModManager::refresh_locked(std::vector<Installed> installed, assets::Moment
         for (const std::string& id : locked_) {
             auto rt = runtime_.find(id);
             // A locked mod that crashed stops in this refresh (below).
-            if (rt == runtime_.end() || !rt->second->enabled || (rt->second->module && rt->second->handle.faulted)) {
+            if (rt == runtime_.end() || !rt->second->enabled || (rt->second->loaded() && rt->second->handle.faulted)) {
                 continue;
             }
             locked_needs.insert(rt->second->depends.begin(), rt->second->depends.end());
@@ -1246,7 +1419,7 @@ void ModManager::refresh_locked(std::vector<Installed> installed, assets::Moment
             if (!inputs[k].user_enabled || locked_.count(m.id) || (rt != runtime_.end() && rt->second->enabled)) continue;
             // A DLL known to fail shows its error instead.
             auto failure = failures_.find(m.id);
-            bool loaded = rt != runtime_.end() && rt->second->module;
+            bool loaded = rt != runtime_.end() && rt->second->loaded();
             if (!mod.dll.empty() && !loaded && failure != failures_.end() && failure->second.stamp == mod.dll_stamp) {
                 continue;
             }
@@ -1293,8 +1466,8 @@ void ModManager::refresh_locked(std::vector<Installed> installed, assets::Moment
         auto it = by_id.find(id);
         bool removed = it == by_id.end();
         bool code_changed = !removed && (rt->source_dll != it->second->dll ||
-                                         (rt->module && (!(rt->stamp == it->second->dll_stamp) || rt->reload_requested)));
-        bool crashed = rt->module && rt->handle.faulted;
+                                         (rt->loaded() && (!(rt->stamp == it->second->dll_stamp) || rt->reload_requested)));
+        bool crashed = rt->loaded() && rt->handle.faulted;
         if (crashed) {
             failures_[id] = {rt->stamp, rt->handle.fault_text(), true, rt->handle.fault_calls_text()};
             TOME_WARN("%s crashed; it stays off until its DLL changes, or until it's disabled and enabled again",
@@ -1465,7 +1638,7 @@ void ModManager::refresh_locked(std::vector<Installed> installed, assets::Moment
         const Installed& mod = *input_mods[i];
         auto rt = runtime_.find(mod.meta.id);
         auto failure = failures_.find(mod.meta.id);
-        bool loaded = rt != runtime_.end() && rt->second->module;
+        bool loaded = rt != runtime_.end() && rt->second->loaded();
         game_lock::Candidate c;
         c.id = mod.meta.id;
         c.required = mod.meta.sync == SyncMode::Required;
@@ -1518,7 +1691,7 @@ void ModManager::refresh_locked(std::vector<Installed> installed, assets::Moment
         // A new version in tome.mod.json alone doesn't reload the DLL, so it
         // shows here once it does; a new folder always means a new DLL path,
         // which unloads the old one first.
-        if (!rt.module) {
+        if (!rt.loaded()) {
             rt.handle.version = mod.meta.version.to_string();
             rt.handle.dir_w = mod.dir;
             rt.handle.dir = narrow(mod.dir);
@@ -1527,7 +1700,7 @@ void ModManager::refresh_locked(std::vector<Installed> installed, assets::Moment
             rt.handle.config_dir = narrow(rt.handle.config_dir_w);
         }
 
-        if (!mod.dll.empty() && !rt.module) {
+        if (!mod.dll.empty() && !rt.loaded()) {
             auto failure = failures_.find(id);
             std::string error;
             bool crashed = false;
@@ -1541,7 +1714,7 @@ void ModManager::refresh_locked(std::vector<Installed> installed, assets::Moment
             } else {
                 failures_.erase(id);
             }
-            if (!rt.module) {
+            if (!rt.loaded()) {
                 resolved.mods[i].state = ModState::DependencyInactive;  // reported as "error" below
                 resolved.mods[i].reason = crashed ? error : "failed to load: " + error;
                 failed_now.insert(id);
@@ -1570,7 +1743,7 @@ void ModManager::refresh_locked(std::vector<Installed> installed, assets::Moment
     // A mod that crashed during this refresh (in tome_mod_enable, or in a
     // callback run meanwhile): another pass stops it and its dependents.
     for (auto& [id, rt] : runtime_) {
-        if (rt->module && rt->handle.faulted) {
+        if (rt->loaded() && rt->handle.faulted) {
             refresh_locked(moment_hint);
             return;
         }
@@ -1584,7 +1757,8 @@ void ModManager::refresh_locked(std::vector<Installed> installed, assets::Moment
         s.dir = narrow(mod.dir);
         s.package = mod.package;
         s.description = mod.meta.description;
-        s.icon = mod.meta.icon;
+        // The game decodes the icon, so only once the mod's files are allowed.
+        if (mod.valid && approval_need(state, mod) == mod_state::Need::None) s.icon = mod.meta.icon;
         s.authors = mod.meta.authors;
         if (!mod.valid) {
             s.id = mod.meta.id;
@@ -1611,7 +1785,8 @@ void ModManager::refresh_locked(std::vector<Installed> installed, assets::Moment
         s.version = mod.meta.version.to_string();
         s.user_enabled = wanted_and_allowed(state, mod);
         s.code_hash = mod.code_hash;
-        s.code_kind = !mod.dll.empty() ? "native" : mod.has_code ? "scripts" : "";
+        s.signer = mod.signer;
+        s.code_kind = mod.has_code ? mod_state::kind_name(mod.code_kind) : "";
         const mod_state::Need need = approval_need(state, mod);
         auto rt = runtime_.find(mod.meta.id);
         s.running = rt != runtime_.end() && rt->second->enabled;
@@ -1648,7 +1823,10 @@ void ModManager::refresh_locked(std::vector<Installed> installed, assets::Moment
         // Off only because its code isn't allowed (yet, or again).
         if (!s.running && !held_off && need != mod_state::Need::None && wanted_by_user(state, mod.meta.id)) {
             s.state = "approval";
-            s.reason = mod_state::describe(need, !mod.dll.empty());
+            s.reason = mod_state::describe(need, mod.code_kind);
+            s.approval = need == mod_state::Need::New       ? "new"
+                         : need == mod_state::Need::Changed ? "changed"
+                                                            : "signer";
         }
         s.warnings = mod.warnings;
         s.warnings.insert(s.warnings.end(), r.warnings.begin(), r.warnings.end());

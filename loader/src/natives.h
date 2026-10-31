@@ -37,6 +37,25 @@ enum class AttachResult { Ok, NotDeclared, NotOwner };
 AttachResult attach(const std::string& owner, const std::string& name, void* fn, tome_mod* mod = nullptr);
 void detach(const std::string& owner, const std::string& name);
 
+// An implementation that isn't a function of the native's own signature
+// (a WebAssembly mod's, wasm_mods.cpp): gets the arguments as the engine
+// passed them, one 32-bit word each, and returns the result word. Called on
+// the main thread under the mod's crash guard. Detach it (detach) before
+// it's destroyed. `signature` is the one it converts by (signature_of when it
+// was made): while the engine has another bound (tome.mod.json changed it),
+// the native returns 0 instead of calling it.
+class Handler {
+public:
+    virtual uint32_t call(const uint32_t* args) = 0;
+
+protected:
+    ~Handler() = default;
+};
+AttachResult attach_handler(const std::string& owner, const std::string& name, Handler* handler, tome_mod* mod,
+                            const std::string& signature);
+// The engine signature of a declared native ("(Hunit;R)V"), or "".
+std::string signature_of(const std::string& name);
+
 struct NativeInfo {
     std::string name;
     std::string signature;

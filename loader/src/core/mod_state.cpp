@@ -1,5 +1,7 @@
 #include "mod_state.h"
 
+#include "signature.h"
+
 #include <algorithm>
 
 namespace tome::mod_state {
@@ -29,10 +31,14 @@ std::string string_member(const json::Value& object, std::string_view key) {
 
 } // namespace
 
-State parse(const json::Value& root, bool& legacy) {
+State parse(const json::Value& root, int& schema) {
     State state;
-    const json::Value* schema = root.find("schema");
-    legacy = !schema || !schema->is_number() || schema->as_number() < kSchema;
+    const json::Value* number = root.find("schema");
+    schema = 0;
+    if (number && number->is_number()) {
+        const double n = number->as_number();
+        schema = n >= kSchema ? kSchema : n >= 1 ? static_cast<int>(n) : 0;
+    }
     const json::Value* mods = root.find("mods");
     if (!mods || !mods->is_object()) return state;
     for (const auto& [id, value] : mods->members()) {
@@ -45,6 +51,10 @@ State parse(const json::Value& root, bool& legacy) {
         if (is_hex_hash(hash)) {
             entry.approved.hash = hash;
             entry.approved.folder = string_member(value, "approved_from");
+            // A malformed or weak key: as if it wasn't signed (updates ask).
+            std::string key = string_member(value, "approved_key");
+            signature::Key decoded;
+            if (signature::decode_key(key, decoded) && !signature::small_order(decoded)) entry.approved.key = key;
         }
         state[id] = std::move(entry);
     }
@@ -61,6 +71,7 @@ json::Value serialize(const State& state) {
         if (!entry.approved.hash.empty()) {
             value.set("approved", json::Value::string(entry.approved.hash));
             value.set("approved_from", json::Value::string(entry.approved.folder));
+            if (!entry.approved.key.empty()) value.set("approved_key", json::Value::string(entry.approved.key));
         }
         mods.set(id, std::move(value));
     }
@@ -68,20 +79,45 @@ json::Value serialize(const State& state) {
     return root;
 }
 
-Need need(const Entry* entry, bool has_code, bool package, const std::string& folder, const std::string& code_hash) {
+Need need(const Entry* entry, bool has_code, bool package, const std::string& folder, const std::string& code_hash,
+          const std::string& signer) {
     if (!has_code) return Need::None;
     if (!entry || entry->approved.hash.empty()) return Need::New;
     if (!package && entry->approved.folder == folder) return Need::None;
-    if (code_hash.empty() || code_hash != entry->approved.hash) return Need::Changed;
-    return Need::None;
+    if (code_hash.empty()) return Need::Changed;  // unreadable: never allowed
+    if (code_hash == entry->approved.hash) return Need::None;
+    if (!entry->approved.key.empty()) return signer == entry->approved.key ? Need::None : Need::SignerChanged;
+    return Need::Changed;
 }
 
-const char* describe(Need need, bool native) {
+const char* describe(Need need, CodeKind kind) {
     switch (need) {
     case Need::None: return "";
     case Need::New:
-        return native ? "runs native code; turn it on to allow it" : "replaces game scripts; turn it on to allow it";
-    case Need::Changed: return "its code changed since you allowed it; turn it on to allow the new code";
+        switch (kind) {
+        case CodeKind::Native: return "runs native code; turn it on to allow it";
+        case CodeKind::Scripts: return "replaces game scripts; turn it on to allow it";
+        case CodeKind::Wasm: return "runs sandboxed code; turn it on to allow it";
+        default: return "adds game files; turn it on to allow them";
+        }
+    case Need::Changed:
+        return kind == CodeKind::Native || kind == CodeKind::Scripts || kind == CodeKind::Wasm
+                   ? "its code changed since you allowed it; turn it on to allow the new code"
+                   : "its files changed since you allowed them; turn it on to allow the new files";
+    case Need::SignerChanged:
+        return "it's no longer signed by the author's key you allowed it with; turn it on only if you trust the new "
+               "files anyway";
+    }
+    return "";
+}
+
+const char* kind_name(CodeKind kind) {
+    switch (kind) {
+    case CodeKind::None: return "";
+    case CodeKind::Assets: return "assets";
+    case CodeKind::Wasm: return "wasm";
+    case CodeKind::Scripts: return "scripts";
+    case CodeKind::Native: return "native";
     }
     return "";
 }
@@ -95,15 +131,8 @@ bool is_script(std::string_view path) {
     return equal_ignoring_case(ext, ".j") || equal_ignoring_case(ext, ".ai") || equal_ignoring_case(ext, ".pld");
 }
 
-bool is_code_file(std::string_view path, std::string_view assets) {
-    if (equal_ignoring_case(path, "tome.mod.json")) return false;
-    std::string prefix(assets);
-    std::replace(prefix.begin(), prefix.end(), '\\', '/');
-    while (!prefix.empty() && prefix.back() == '/') prefix.pop_back();
-    if (prefix.empty()) return true;
-    prefix += '/';
-    const bool in_assets = path.size() > prefix.size() && equal_ignoring_case(path.substr(0, prefix.size()), prefix);
-    return !in_assets || is_script(path);
+bool is_code_file(std::string_view path) {
+    return !equal_ignoring_case(path, "tome.mod.json") && !equal_ignoring_case(path, signature::kFile);
 }
 
 std::string manifest(std::vector<CodeFile> files) {

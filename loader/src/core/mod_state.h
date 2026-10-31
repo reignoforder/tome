@@ -1,10 +1,10 @@
 #pragma once
 
 // tome/state.json: what the user chose for each mod (on or off) and which
-// code they allowed to run. A mod with code (a DLL) doesn't run until the
-// user turns it on once, in the mod menu or with /tome enable; that records
-// a SHA-256 of its code files. The decisions here are portable; ModManager
-// does the file work.
+// code they allowed to run. A mod with code (a DLL, game scripts, or any
+// other file the game reads) doesn't run until the user turns it on once, in
+// the mod menu or with /tome enable; that records a SHA-256 of its files. The
+// decisions here are portable; ModManager does the file work.
 
 #include "json.h"
 
@@ -15,12 +15,25 @@
 
 namespace tome::mod_state {
 
-// 1: "enabled" only. 2: "approved" and "approved_from" too.
-constexpr int kSchema = 2;
+// 1: "enabled" only. 2: "approved" and "approved_from" too, for DLLs and
+// game scripts. 3: the same for every mod with files the game reads (assets,
+// an icon). Approvals of an older schema aren't carried over: its hashes
+// cover other files, so those mods ask again.
+constexpr int kSchema = 3;
+
+// What a mod has that must be allowed, most powerful first wins.
+enum class CodeKind {
+    None,     // nothing the game or Tome runs or reads (only tome.mod.json, settings)
+    Assets,   // files the game reads with its own loaders (models, textures, sounds, UI, an icon)
+    Wasm,     // a WebAssembly module (docs/wasm-mods.md): sandboxed, but its natives reach map scripts
+    Scripts,  // game scripts among its assets (is_script)
+    Native,   // a DLL
+};
 
 struct Approval {
     std::string hash;    // code_hash of what was allowed (64 hex digits); "" if nothing was
     std::string folder;  // where it was in tome/mods then: a folder's name or a package's file name
+    std::string key;     // the tome.sig key it was signed with (core/signature.h, base64); "" if it wasn't
     bool operator==(const Approval&) const = default;
 };
 
@@ -32,16 +45,16 @@ struct Entry {
 
 using State = std::map<std::string, Entry>;  // by mod id
 
-// state.json's root. `legacy` is set for a file from before approvals
-// (schema 1): its mods ran without one, so the caller approves the ones
-// installed now instead of stopping them.
-State parse(const json::Value& root, bool& legacy);
+// state.json's root. `schema` is the file's (0 if it has none): one older
+// than kSchema is written again as kSchema.
+State parse(const json::Value& root, int& schema);
 json::Value serialize(const State& state);
 
 enum class Need {
-    None,     // runs if it's on (no code, or the code was allowed)
-    New,      // code that was never allowed
-    Changed,  // code that differs from what was allowed
+    None,           // runs if it's on (no code, or the code was allowed)
+    New,            // code that was never allowed
+    Changed,        // code that differs from what was allowed
+    SignerChanged,  // ...and what was allowed was signed, but this isn't, or by another key
 };
 
 // Whether a mod has to be allowed (again) before it runs:
@@ -50,13 +63,20 @@ enum class Need {
 // - a folder mod in the folder it was allowed in never again, so a mod
 //   being built into tome/mods hot-reloads as before;
 // - otherwise its code must hash to what was allowed (a replaced package,
-//   or another folder or package with the same id): Changed if it doesn't.
+//   or another folder or package with the same id);
+// - or, if what was allowed was signed, be signed by the same key (an
+//   update from the same author): SignerChanged if it isn't;
+// - Changed otherwise.
 // `code_hash` is "" if the code couldn't be read, which never matches.
-Need need(const Entry* entry, bool has_code, bool package, const std::string& folder, const std::string& code_hash);
+// `signer` is the key of the mod's valid tome.sig, "" if it has none.
+Need need(const Entry* entry, bool has_code, bool package, const std::string& folder, const std::string& code_hash,
+          const std::string& signer = {});
 
-// For the mod list: why a mod that needs approval doesn't run. `native`:
-// it has a DLL (otherwise only game scripts, is_script).
-const char* describe(Need need, bool native);
+// For the mod list: why a mod that needs approval doesn't run.
+const char* describe(Need need, CodeKind kind);
+
+// ModStatus::code_kind: "native", "scripts", "wasm", "assets" or "".
+const char* kind_name(CodeKind kind);
 
 struct CodeFile {
     std::string path;    // relative to the mod folder, with '/'
@@ -69,11 +89,11 @@ struct CodeFile {
 // in every game. `path` is '/' or '\' separated; ASCII case is ignored.
 bool is_script(std::string_view path);
 
-// Whether a file in a mod folder counts as code: everything but the top
-// tome.mod.json and the assets folder (`assets`, relative, '/' or '\'),
-// since a DLL can load any other file as code, plus the scripts among the
-// assets (is_script). ASCII case is ignored.
-bool is_code_file(std::string_view path, std::string_view assets);
+// Whether a file in a mod folder is hashed for its approval: everything but
+// the top tome.mod.json and tome.sig (a DLL can load any file as code, and
+// the game reads the assets with parsers that trust them; tome.sig signs
+// this hash). ASCII case is ignored.
+bool is_code_file(std::string_view path);
 
 // The text a mod's code hash is the SHA-256 of: one line per file, sorted by
 // path, as sha256sum prints them ("<hash>  <path>\n"), so it can be checked

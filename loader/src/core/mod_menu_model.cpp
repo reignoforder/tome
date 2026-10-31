@@ -113,8 +113,10 @@ std::string status_line(const ModStatus& m) {
     } else if (m.state == "waiting") {
         info = colored(kYellow, "Waiting (" + m.reason + ")");
     } else if (m.state == "approval") {
-        info = colored(kYellow, m.reason.find("changed") != std::string::npos ? "Code changed: not allowed yet"
-                                                                            : "New code: not allowed yet");
+        const bool changed = m.approval == "changed";
+        if (m.approval == "signer") info = colored(kRed, "Signer changed: not allowed yet");
+        else if (m.code_kind == "assets") info = colored(kYellow, changed ? "Files changed: not allowed yet" : "New files: not allowed yet");
+        else info = colored(kYellow, changed ? "Code changed: not allowed yet" : "New code: not allowed yet");
     } else {
         info = colored(kRed, ellipsize(first_line(m.reason.empty() ? m.state : m.reason), 60));
     }
@@ -155,14 +157,30 @@ std::string details_body(const ModStatus& m, const Data& data) {
     else if (m.reload == "map") line(colored(kGray, "Turning it on or off: ") + "applies at the next map");
     else if (m.reload == "restart") line(colored(kGray, "Turning it on or off: ") + "needs a restart");
     line(colored(kGray, "Status: ") + status_line(m));
-    if (!m.code_hash.empty()) line(colored(kGray, "Code SHA-256: ") + m.code_hash);
+    if (!m.code_hash.empty()) {
+        line(colored(kGray, m.code_kind == "assets" ? "Files SHA-256: " : "Code SHA-256: ") + m.code_hash);
+        line(colored(kGray, "Signed by: ") + (m.signer.empty() ? "not signed" : m.signer));
+    }
     if (m.state == "approval") {
         line("");
         line(colored(kYellow, m.code_kind == "scripts"
                                   ? "This mod replaces game scripts, which run in every game. Enable it only if you "
                                     "trust where it came from."
+                              : m.code_kind == "wasm"
+                                  ? "This mod runs WebAssembly code in a sandbox, which can only use what Tome gives "
+                                    "it, and the game reads its files with loaders that trust them. Enable it only if "
+                                    "you trust where it came from."
+                              : m.code_kind == "assets"
+                                  ? "This mod adds game files (models, textures, sounds, UI), which the game's own "
+                                    "loaders trust. Enable it only if you trust where it came from."
                                   : "This mod runs native code with full access to your computer. Enable it only if "
                                     "you trust where it came from."));
+        if (m.approval == "signer") {
+            line(colored(kRed, m.signer.empty()
+                                   ? "The version you allowed was signed by its author; this one isn't signed at all."
+                                   : "The version you allowed was signed by another key: this may not be from the "
+                                     "same author."));
+        }
     }
 
     std::vector<std::string> keybinds;

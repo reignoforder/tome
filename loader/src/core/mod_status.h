@@ -23,6 +23,7 @@ struct ModStatus {
     bool running = false; // enabled right now
     std::string state;    // "active", "disabled", "waiting" (game lock), "approval" (code not allowed), "error", ...
     std::string reason;
+    std::string approval;  // state "approval": "new", "changed" or "signer" (mod_state::Need); "" otherwise
     std::vector<std::string> warnings;
     std::string assets_pending;  // why the mod's asset changes are waiting; "" if they aren't
     bool restart_pending = false;  // ...and they wait for a restart
@@ -30,12 +31,13 @@ struct ModStatus {
 
     // For the mod menu's details page.
     std::string description;
-    std::string icon;  // tome.mod.json "icon", relative to the mod folder; "" if none
+    std::string icon;  // tome.mod.json "icon", relative to the mod folder; "" if none or its files aren't allowed yet
     std::vector<std::string> authors;
     std::string sync;    // "client" / "required"; "" if the metadata is invalid
     std::string sync_hash;  // a running "required" mod: its identity in the multiplayer handshake (8 hex digits)
-    std::string code_hash;  // a mod with code: SHA-256 of its code files (core/mod_state.h); "" otherwise
-    std::string code_kind;  // "native" (a DLL), "scripts" (game scripts among its assets) or "" (neither)
+    std::string code_hash;  // a mod with code: SHA-256 of its files (core/mod_state.h); "" otherwise
+    std::string signer;     // the key of its valid tome.sig (core/signature.h, base64); "" if not signed
+    std::string code_kind;  // "native" (a DLL), "scripts" (game scripts among its assets), "wasm" (a WebAssembly module), "assets" (other game files) or "" (none)
     std::string reload;  // "live" / "map" / "restart"
     std::vector<std::string> errors;  // every problem with tome.mod.json, in full
     std::string crash_calls;  // after a crash: where it was called from (likely), as logged

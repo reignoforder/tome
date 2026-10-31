@@ -1,0 +1,10 @@
+[package]
+name = "tome-wasm"
+description = "Rust API for Tome's WebAssembly mods"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+doctest = false

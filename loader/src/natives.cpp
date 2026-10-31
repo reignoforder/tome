@@ -42,6 +42,10 @@ struct Slot {
     std::string signature;
     std::string owner;
     void* volatile target = nullptr;  // read by the thunk on every call
+    Handler* volatile handler = nullptr;  // instead of a function (attach_handler); target is then the handler
+    std::string handler_signature;        // what the handler converts arguments and its result by
+    std::string bound;                    // `signature` as the engine has it (the last InitNatives); "" before
+    bool stale_logged = false;            // main thread
     volatile uint32_t code_mask = 0;  // bit i: parameter i is `code`; read by the thunk
     uint32_t arg_count = 0;           // parameters; each one is a 32-bit word
     tome_mod* mod = nullptr;          // the attached mod, for the guard (main thread)
@@ -86,10 +90,45 @@ void note_codes(const Slot* slot, const uint32_t* args) {
 
 // A mod's native, called by its thunk: runs it under a guard with a copy
 // of the arguments. A crashed native returns 0, like a disabled one.
-uint32_t call_guarded(const Slot* slot, const uint32_t* args) {
-    void* fn = slot->target;
+uint32_t call_guarded(Slot* slot, const uint32_t* args) {
+    // Both at once (attach, attach_handler and detach write them under the
+    // lock): read one by one, a change in between could pair a handler's
+    // target with no handler, and call the Handler object as code. Not held
+    // during the call, which may attach or detach natives itself.
+    void* fn;
+    Handler* handler;
+    bool stale = false;
+    std::string bound, registered;  // only when stale, for the log
+    {
+        SharedLock hold(g_lock);
+        fn = slot->target;
+        handler = slot->handler;
+        // A handler trusts the signature it was attached with: the engine
+        // may have another (tome.mod.json changed it, and a map loaded since,
+        // or the mod registered it again before one did), and then a result
+        // checked as one type would reach the engine as another (an integer
+        // as a string). 0 until they agree again.
+        stale = handler && slot->handler_signature != slot->bound;
+        if (stale && !slot->stale_logged) {
+            bound = slot->bound;
+            registered = slot->handler_signature;
+        }
+    }
     if (!fn) return 0;
     uint32_t result = 0;
+    if (stale) {
+        if (!slot->stale_logged) {
+            slot->stale_logged = true;
+            TOME_WARN("Native %s: the map has it as %s, but its mod registered it as %s; it returns 0 until they "
+                      "match (the next map load, or enabling the mod again)",
+                      slot->name.c_str(), bound.c_str(), registered.c_str());
+        }
+        return 0;
+    }
+    if (handler) {
+        guard::run(slot->mod, "native", slot->name.c_str(), [&] { result = handler->call(args); });
+        return result;
+    }
     guard::run(slot->mod, "native", slot->name.c_str(),
                [&] { result = hooks::call_with_stack(fn, args, slot->arg_count); });
     return result;
@@ -173,9 +212,11 @@ uint32_t hooked_init_natives() {
 
     size_t count;
     {
-        SharedLock hold(g_lock);
+        ExclusiveLock hold(g_lock);  // writes `bound`, which call_guarded reads under the lock
         for (const auto& slot : g_slots) {
             g_bind_native(slot->thunk, slot->name.c_str(), slot->signature.c_str());
+            slot->bound = slot->signature;
+            slot->stale_logged = false;
             ++slot->bind_count;
         }
         count = g_slots.size();
@@ -397,9 +438,30 @@ AttachResult attach(const std::string& owner, const std::string& name, void* fn,
         result = AttachResult::NotOwner;
     } else {
         it->second->mod = mod;
+        it->second->handler = nullptr;
         it->second->target = fn;
     }
     return result;
+}
+
+AttachResult attach_handler(const std::string& owner, const std::string& name, Handler* handler, tome_mod* mod,
+                            const std::string& signature) {
+    ExclusiveLock hold(g_lock);
+    auto it = g_by_name.find(name);
+    if (it == g_by_name.end()) return AttachResult::NotDeclared;
+    if (it->second->owner != owner || owner == "tome") return AttachResult::NotOwner;
+    it->second->mod = mod;
+    it->second->handler = handler;
+    it->second->handler_signature = signature;
+    it->second->stale_logged = false;
+    it->second->target = handler;  // non-null: the thunk calls call_guarded
+    return AttachResult::Ok;
+}
+
+std::string signature_of(const std::string& name) {
+    SharedLock hold(g_lock);
+    auto it = g_by_name.find(name);
+    return it == g_by_name.end() ? std::string() : it->second->signature;
 }
 
 void detach(const std::string& owner, const std::string& name) {
@@ -407,6 +469,7 @@ void detach(const std::string& owner, const std::string& name) {
     auto it = g_by_name.find(name);
     if (it != g_by_name.end() && it->second->owner == owner) {
         it->second->target = nullptr;
+        it->second->handler = nullptr;
         it->second->mod = nullptr;
     }
 }

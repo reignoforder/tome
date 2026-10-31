@@ -38,6 +38,10 @@ sudo dnf install cmake ninja-build mingw32-gcc-c++ wine xorg-x11-server-Xvfb
 On Debian or Ubuntu: `sudo dpkg --add-architecture i386 && sudo apt install
 cmake ninja-build g++-mingw-w64-i686 wine wine32 xvfb`.
 
+The first configure downloads WAMR 2.4.5 (the WebAssembly interpreter, 6 MB,
+checked against its SHA-256); offline, pass a copy of its archive:
+`-DTOME_WAMR_ARCHIVE=<file>` (`loader/third_party/wamr/TOME.md`).
+
 The `Makefile` wraps the usual steps (`make help` lists them all):
 
 ```sh
@@ -93,11 +97,18 @@ Warcraft III/
 ```
 
 A mod with code (a DLL) runs native code with full access to your computer,
-and one whose assets include game scripts (`.j`, `.ai`, `.pld`) runs JASS in
-every game, so it stays off until you turn it on once in the Mods menu (or with
-`/tome enable <id>` in chat); its details page shows a SHA-256 of its code.
-A `.tome` package whose code changes asks again; a mod folder doesn't, so
-rebuilding a mod into `tome/mods/` keeps hot reloading.
+one whose assets include game scripts (`.j`, `.ai`, `.pld`) runs JASS in
+every game, and any other game files (models, textures, sounds, UI, an icon)
+go through the game's own loaders, which trust them. So a new mod stays off
+until you turn it on once in the Mods menu (or with `/tome enable <id>` in
+chat); its details page shows a SHA-256 of its files. A `.tome` package whose
+files change asks again, unless its author signed both versions with the
+same key ("Signed by" on the details page; another key or none asks with a
+warning); a mod folder doesn't, so rebuilding a mod into `tome/mods/` keeps
+hot reloading. See `SECURITY.md` for what this does and doesn't protect.
+A WebAssembly mod (experimental, `"wasm"` in its `tome.mod.json`) is asked
+for too, but it runs sandboxed: it can only use what Tome gives it, not your
+computer.
 
 A mod can also come as one file, `<name>.tome` (a zip of its folder): put it
 in `tome/mods/` as it is. Tome unpacks it into `tome/packages/` and reloads

@@ -40,11 +40,16 @@ bool init() {
     return g_open_archive && g_close_archive && g_open_file_ex && g_get_file_size && g_read_file && g_close_file;
 }
 
-bool read_file(const char* name, std::string& out) {
+bool read_file(const char* name, std::string& out, size_t max, bool* too_large) {
+    if (too_large) *too_large = false;
     HANDLE file = nullptr;
     if (!g_open_file_ex || !g_open_file_ex(nullptr, name, 0, &file) || !file) return false;
     DWORD size = g_get_file_size(file, nullptr);
     bool ok = size != 0xFFFFFFFF;
+    if (ok && size > max) {
+        ok = false;
+        if (too_large) *too_large = true;
+    }
     if (ok) {
         out.resize(size);
         DWORD read = 0;

@@ -4,6 +4,8 @@
 [workspace]
 resolver = "3"
 members = ["tome-sys", "tome", "examples/hello-rs"]
+# WebAssembly mods: a workspace of their own (another target).
+exclude = ["wasm"]
 
 [workspace.package]
 version = "0.1.0"

@@ -39,6 +39,11 @@ loader/
     mod_menu_model.*      the mod menu's pages and what their buttons do
     mod_status.h          ModStatus, one row of the mod list
     settings.*            config.schema.json subset, settings values, menu steps
+    signature.*           tome.sig: Ed25519 signatures of mods (Monocypher), base64
+    wasm_abi.*            Wasm mods (wasm-mods.md): checked reads/writes of a module's memory, handles
+    wasm_layout.*         Wasm mods: the wasm32 structs Tome writes (events, units...), JASS signatures
+    wasm_imports.h        Wasm mods: Tome's import list (WAMR signatures) and the modules' limits
+    wasm_alloc.*          Wasm mods: the capped heap WAMR allocates from
     keys.*                key names, declared keybinds, keybinds.json, conflicts
     popup.*               popup layout (rows, paged columns), keys, TomePopup.fdf
     crash_report.*        tome/startups, the crash loop popup, crash report text
@@ -77,6 +82,9 @@ loader/
     restart.*             restarting the game (WM_CLOSE, then a rundll32 helper)
     debug_input.*         TOME_DEBUG_CLICKS: clicks, keys, typed text and chat lines (tests)
     log.*, paths.*        tome.log, game/tome/mods folders (TOME_HOME), moving the old layout
+    wasm_mods.*           WebAssembly mods (wasm-mods.md): WAMR, Tome's imports, callbacks, natives, traps
+  third_party/monocypher/ Ed25519 checks for core/signature (BSD-2 or CC0, 4.0.3, unmodified)
+  third_party/wamr/       WAMR 2.4.5 (Apache-2.0 WITH LLVM-exception): downloaded and patched at configure time; TOME.md
 sdk/                      everything for mod makers; README.md is the guide. Builds on its own too (sdk-dist zip)
   include/tome/tome.h     the public C API for mods
   include/tome/utf8.h     UTF-8 helpers (header-only; also used by Tome itself)
@@ -227,38 +235,48 @@ logs each error with the symbol's name.
   mod's `config/settings.json` to `config/<id>.json` and the rest of its
   `config/` to `config/<id>/`. It never overwrites; what it did is logged
   as `Layout:` lines.
-- State: `<home>/tome/state.json` (`{"schema":2,"mods":{"id":{"enabled":bool,
-  "approved":"<sha256>","approved_from":"<folder>"}}}`), parsed and written by
+- State: `<home>/tome/state.json` (`{"schema":3,"mods":{"id":{"enabled":bool,
+  "approved":"<sha256>","approved_from":"<folder>","approved_key":"<base64>"}}}`,
+  the key only for a signed mod), parsed and written by
   `core/mod_state.*`. New mods start enabled. Entries for mods that aren't
   installed are kept.
 - **Approval of mod code** (`core/mod_state.*`, `ModManager::approval_need`).
   A mod with a DLL is native code with full access to the machine, so its
   code doesn't run until the user turns it on once (the mod menu's Enable, or
   `/tome enable`; `set_enabled` records it). Until then the resolver sees it
-  as off, its assets aren't mounted, its DLL isn't even loaded, and its status
-  is `approval` with a reason the menu shows as "New code" / "Code changed".
+  as off, its assets aren't mounted, its DLL isn't even loaded, its icon
+  isn't shown, and its status is `approval` with a reason the menu shows as
+  "New code" / "Code changed" ("New files" / "Files changed" for assets).
   The log says how to allow it, once.
-  - **What counts as code:** a DLL, or game scripts among the assets
-    (`mod_state::is_script`: `.j`, `.ai`, and `.pld`, which `Preloader`
-    runs), since an asset-only mod that replaces `Blizzard.j` runs JASS in
-    every game (`Installed::has_code`). Such a mod's warning says "replaces
-    game scripts" instead of "runs native code" (`ModStatus.code_kind`).
-    Other assets (models, textures, sounds) aren't gated, though they're
-    read by the game's own parsers.
+  - **What counts as code** (`Installed::code_kind`, `mod_state::CodeKind`,
+    shown as `ModStatus.code_kind`): a DLL ("runs native code"); game scripts
+    among the assets (`mod_state::is_script`: `.j`, `.ai`, and `.pld`, which
+    `Preloader` runs), since an asset-only mod that replaces `Blizzard.j` runs
+    JASS in every game ("replaces game scripts"); and any other assets or an
+    icon ("adds game files"), since the game reads models, textures, sounds
+    and FDF with its own 1.27b parsers, which trust sizes in the file (the
+    BLP guard fixes one of them): a crafted file could run code without a
+    click otherwise. Only a mod with nothing but `tome.mod.json` (and
+    settings) needs no approval.
   - **What's hashed:** `Installed::code_hash`, the SHA-256 of a manifest of
-    every file in the mod except the top `tome.mod.json` and the assets
-    other than scripts (a DLL can load any other file as code). The manifest is
+    every file in the mod except the top `tome.mod.json` and `tome.sig`. The manifest is
     `sha256sum` output sorted by path (`<hash>  <path>\n`), so it can be
-    checked by hand. It's cached by folder until a file's name, size or time
-    changes; a file that can't be read gives "" (never allowed). The details
-    page shows it as "Code SHA-256".
+    checked by hand. Both are kept across starts in
+    `tome/cache/file-hashes.json` (`core/hash_cache.h`): the folder's hash
+    until a file's name, size or times change (so a start where nothing
+    changed opens none of the mod's files; the startup mount runs in
+    DllMain), and each file's SHA-256 until its size, times or file id
+    change, so only new or changed files are read again. The first refresh
+    saves the cache, not DllMain. A file that can't be read gives ""
+    (never allowed). The details page shows
+    it as "Code SHA-256".
   - **When it asks again:** a folder mod in the folder it was allowed in
     never does, so a mod being built into `tome/mods/` hot-reloads as before.
     Anything else (a replaced `.tome`, or another folder or package with the
     same id) runs only if its code hash is the one allowed.
-  - **Upgrading:** a schema 1 `state.json` had no approvals; the mods it
-    lists ran before, so their code is allowed as installed now and the file
-    is written as schema 2. Mods it doesn't list ask. An unparseable
+  - **Older `state.json`:** approvals of schema 1 and 2 aren't carried
+    over (they hashed other files): those mods ask again, and the file is
+    written as schema 3. Mods it doesn't list ask. An unparseable
     `state.json` allows nothing (and still isn't rewritten).
   - **DllMain:** `mount_startup_assets` applies the same approvals in memory
     (`implicit_approvals`, quietly); the first refresh records them.
@@ -266,6 +284,28 @@ logs each error with the symbol's name.
     those mods' code without a click, logged as `code allowed
     (TOME_DEBUG_APPROVE)`. The e2e test lists its mods with code and keeps an
     `unapproved` fixture whose "DLL" is text, to show it's never loaded.
+  - **Signatures** (`core/signature.*`, `ModManager::check_signature`): a
+    `tome.sig` at the top of the mod (`{"schema":1,"key":…,"signature":…}`,
+    base64, at most 4 KiB) is an Ed25519 signature by the author over
+    `tome-signature-v1\n<id>\n<code hash>\n<SHA-256 of tome.mod.json>\n`,
+    checked with Monocypher (`loader/third_party/monocypher`, BSD-2/CC0)
+    after the code hash; a key of small order is refused (anyone can sign
+    for one). A valid one sets `Installed::signer`; a malformed, oversized
+    or non-matching one is a warning and counts as unsigned. `approve`
+    records the signer with the hash. `mod_state::need`: code that differs
+    from what was allowed runs if what was allowed was signed and this is
+    signed by the same key (an update from the same author; the next refresh
+    records it, "signed by the same key as before"); if it isn't, or by
+    another key, it's `SignerChanged`, which the menu shows in red ("Signer
+    changed") with a warning. Code allowed unsigned stays `Changed`, however
+    it's signed now. The details page shows "Signed by". Signed by
+    `sdk/support/tome_sign.py` (RFC 8032's reference Ed25519 in plain Python,
+    with its test vectors as `selftest`) or `tome_package(SIGN_KEY)`, which
+    signs a staged copy of exactly the packed files. Tests: the RFC vectors
+    and a Python-made signature in unit tests; host tests sign the crash
+    fixture (Monocypher in-process; `tome_sign.py` on a folder with
+    subfolders and non-ASCII names; a `tome_package(SIGN_KEY)` package) with
+    `tests/host/test-signing.key`, a public test-only key; `fuzz_signature`.
   - **Not a boundary against local programs:** anything that can write
     `tome/mods/` can also write `state.json` or replace `tome.mix`. This is
     about mods that arrive by download or are passed around, not malware
@@ -1447,8 +1487,11 @@ API version 10: `popup`, `popup_close`, `restart_game`.
   extraction and the package checks, asserting every accepted name stays
   inside its folder), raw deflate (`inflate`), `tome.mod.json`, settings
   schemas and keybinds (`json`), map scripts and native declarations
-  (`jass`), paths, TOCs and package names (`paths`), and BLP textures
-  (`blp`). Built for the host
+  (`jass`), paths, TOCs and package names (`paths`), BLP textures
+  (`blp`), signatures (`signature`), what Wasm modules pass Tome's imports
+  and the layouts Tome writes for them (`wasm_abi`, `wasm_layout`), and
+  WebAssembly modules themselves through WAMR built in Tome's
+  configuration (`wamr`; `docs/wasm-mods.md`). Built for the host
   with clang, ASan and UBSan in `build-fuzz/`, apart from the mingw build;
   seeds from `fuzz/make_seeds.py`, the corpus in `build-fuzz/corpus/`, and
   crashing inputs kept in `fuzz/regressions/<target>/`. They run 64-bit, so

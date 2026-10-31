@@ -16,11 +16,15 @@ json::Value parsed(const char* text) {
     return root;
 }
 
-Entry approved(const std::string& hash, const std::string& folder) {
+Entry approved(const std::string& hash, const std::string& folder, const std::string& key = {}) {
     Entry e;
-    e.approved = {hash, folder};
+    e.approved = {hash, folder, key};
     return e;
 }
+
+// Two real Ed25519 public keys (not of small order).
+const std::string kKeyA = "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=";
+const std::string kKeyB = "A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=";
 
 bool contains(const char* text, const char* part) {
     return std::string(text).find(part) != std::string::npos;
@@ -29,24 +33,30 @@ bool contains(const char* text, const char* part) {
 } // namespace
 
 TEST(mod_state_schema_1_is_legacy) {
-    bool legacy = false;
-    State state = parse(parsed(R"({"schema": 1, "mods": {"hello": {"enabled": false}}})"), legacy);
-    CHECK(legacy);
+    int schema = -1;
+    State state = parse(parsed(R"({"schema": 1, "mods": {"hello": {"enabled": false}}})"), schema);
+    CHECK_EQ(schema, 1);
     CHECK_EQ(state.size(), 1u);
     CHECK(!state["hello"].enabled);
     CHECK(state["hello"].approved.hash.empty());
 
-    parse(parsed(R"({"mods": {}})"), legacy);
-    CHECK(legacy);
+    parse(parsed(R"({"mods": {}})"), schema);
+    CHECK_EQ(schema, 0);
+    parse(parsed(R"({"schema": "3", "mods": {}})"), schema);
+    CHECK_EQ(schema, 0);
+    parse(parsed(R"({"schema": 1e300, "mods": {}})"), schema);
+    CHECK_EQ(schema, kSchema);
+    parse(parsed(R"({"schema": -5, "mods": {}})"), schema);
+    CHECK_EQ(schema, 0);
 }
 
 TEST(mod_state_round_trip) {
     State state;
     state["hello"] = approved(kHashA, "hello.tome");
     state["off"].enabled = false;
-    bool legacy = true;
-    State back = parse(serialize(state), legacy);
-    CHECK(!legacy);
+    int schema = 0;
+    State back = parse(serialize(state), schema);
+    CHECK_EQ(schema, kSchema);
     CHECK_EQ(back.size(), 2u);
     CHECK(back["hello"].enabled);
     CHECK_EQ(back["hello"].approved.hash, kHashA);
@@ -57,14 +67,14 @@ TEST(mod_state_round_trip) {
 }
 
 TEST(mod_state_malformed_hash_allows_nothing) {
-    bool legacy = false;
+    int schema = 0;
     State state = parse(parsed(R"({"schema": 2, "mods": {
         "short": {"enabled": true, "approved": "abc", "approved_from": "short"},
         "upper": {"enabled": true, "approved": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"},
         "number": {"enabled": true, "approved": 5},
         "junk": 3}})"),
-                        legacy);
-    CHECK(!legacy);
+                        schema);
+    CHECK_EQ(schema, 2);
     CHECK(state["short"].approved.hash.empty());
     CHECK(state["short"].approved.folder.empty());
     CHECK(state["upper"].approved.hash.empty());
@@ -107,30 +117,73 @@ TEST(mod_state_package_needs_the_same_code) {
     CHECK(need(&e, true, false, "hello", kHashA) == Need::None);
 }
 
+TEST(mod_state_signed_updates) {
+    Entry e = approved(kHashA, "hello.tome", kKeyA);
+    // The same key: an update from the same author runs.
+    CHECK(need(&e, true, true, "hello.tome", kHashB, kKeyA) == Need::None);
+    // Another key, or none: asks, louder than for unsigned code.
+    CHECK(need(&e, true, true, "hello.tome", kHashB, kKeyB) == Need::SignerChanged);
+    CHECK(need(&e, true, true, "hello.tome", kHashB, "") == Need::SignerChanged);
+    CHECK(need(&e, true, true, "hello.tome", "", kKeyA) == Need::Changed);  // unreadable: never
+    // The very code that was allowed runs whoever signed it.
+    CHECK(need(&e, true, true, "hello.tome", kHashA, "") == Need::None);
+    // Allowed unsigned: a signature changes nothing.
+    Entry plain = approved(kHashA, "hello.tome");
+    CHECK(need(&plain, true, true, "hello.tome", kHashB, kKeyA) == Need::Changed);
+    // Never allowed: a signature allows nothing.
+    CHECK(need(nullptr, true, true, "hello.tome", kHashA, kKeyA) == Need::New);
+}
+
+TEST(mod_state_keys_round_trip) {
+    State state;
+    state["signed"] = approved(kHashA, "signed.tome", kKeyA);
+    state["plain"] = approved(kHashB, "plain");
+    int schema = 0;
+    State back = parse(serialize(state), schema);
+    CHECK_EQ(back["signed"].approved.key, kKeyA);
+    CHECK(back["plain"].approved.key.empty());
+    CHECK(!serialize(state).find("mods")->find("plain")->find("approved_key"));
+
+    // A malformed or weak key: as if it wasn't signed.
+    State weak = parse(parsed(R"({"schema": 3, "mods": {
+        "short": {"approved": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "approved_key": "AAAA"},
+        "zero": {"approved": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                 "approved_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}}})"),
+                       schema);
+    CHECK(weak["short"].approved.key.empty());
+    CHECK(weak["zero"].approved.key.empty());
+    CHECK_EQ(weak["zero"].approved.hash, kHashA);
+}
+
 TEST(mod_state_describe) {
-    CHECK_EQ(std::string(describe(Need::None, true)), std::string(""));
-    CHECK(contains(describe(Need::New, true), "native code"));
-    CHECK(contains(describe(Need::New, false), "game scripts"));
-    CHECK(contains(describe(Need::Changed, true), "changed"));
-    CHECK(contains(describe(Need::Changed, false), "changed"));
+    CHECK_EQ(std::string(describe(Need::None, CodeKind::Native)), std::string(""));
+    CHECK(contains(describe(Need::New, CodeKind::Native), "native code"));
+    CHECK(contains(describe(Need::New, CodeKind::Scripts), "game scripts"));
+    CHECK(contains(describe(Need::New, CodeKind::Assets), "game files"));
+    CHECK(contains(describe(Need::New, CodeKind::Wasm), "sandboxed code"));
+    CHECK(contains(describe(Need::Changed, CodeKind::Wasm), "code changed"));
+    CHECK_EQ(std::string(kind_name(CodeKind::Wasm)), std::string("wasm"));
+    CHECK(contains(describe(Need::Changed, CodeKind::Native), "code changed"));
+    CHECK(contains(describe(Need::Changed, CodeKind::Scripts), "code changed"));
+    CHECK(contains(describe(Need::Changed, CodeKind::Assets), "files changed"));
+    CHECK(contains(describe(Need::SignerChanged, CodeKind::Native), "no longer signed"));
+    CHECK_EQ(std::string(kind_name(CodeKind::Native)), std::string("native"));
+    CHECK_EQ(std::string(kind_name(CodeKind::Scripts)), std::string("scripts"));
+    CHECK_EQ(std::string(kind_name(CodeKind::Assets)), std::string("assets"));
+    CHECK_EQ(std::string(kind_name(CodeKind::None)), std::string(""));
 }
 
 TEST(mod_state_code_files) {
-    CHECK(is_code_file("hello.dll", "assets"));
-    CHECK(is_code_file("lib/helper.dll", "assets"));
-    CHECK(is_code_file("config.json", "assets"));
-    CHECK(is_code_file("payload.bin", "assets"));
-    CHECK(!is_code_file("tome.mod.json", "assets"));
-    CHECK(!is_code_file("TOME.MOD.JSON", "assets"));
-    CHECK(is_code_file("sub/tome.mod.json", "assets"));  // only the top one is metadata
-    CHECK(!is_code_file("assets/UI/x.blp", "assets"));
-    CHECK(is_code_file("assets/Scripts/Blizzard.j", "assets"));  // scripts among the assets are code
-    CHECK(is_code_file("Assets/AI/human.AI", "assets"));
-    CHECK(!is_code_file("Assets/ui/x.blp", "assets"));
-    CHECK(is_code_file("assets2/x.dll", "assets"));  // not inside the assets folder
-    CHECK(is_code_file("assets", "assets"));         // a file, not the folder
-    CHECK(!is_code_file("data/art/x.blp", "data\\art\\"));
-    CHECK(is_code_file("data/x.dll", "data/art"));
+    // Schema 3: every file but the top tome.mod.json.
+    CHECK(is_code_file("hello.dll"));
+    CHECK(is_code_file("assets/UI/x.blp"));
+    CHECK(is_code_file("icon.tga"));
+    CHECK(is_code_file("config.schema.json"));
+    CHECK(!is_code_file("tome.mod.json"));
+    CHECK(!is_code_file("Tome.Mod.Json"));
+    CHECK(!is_code_file("tome.sig"));  // it signs the hash
+    CHECK(is_code_file("sub/tome.sig"));
+    CHECK(is_code_file("sub/tome.mod.json"));
 }
 
 TEST(mod_state_scripts) {

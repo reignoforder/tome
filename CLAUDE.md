@@ -15,6 +15,7 @@ make e2e                                 # real game, 6 launches (~5 min), off s
 tools/game.sh start [VAR=val] / wait <regex> / shot <png> / stop / log / dir
 tools/fuzz.sh [seconds] [target...]      # libFuzzer + ASan/UBSan on the core parsers (host clang, build-fuzz/)
 tools/gen-rust-bindings.sh               # after changing tome.h: regenerate sdk/rust/tome-sys (bindgen)
+tools/gen-wasm-consts.py                 # after changing tome.h's enums: regenerate the Wasm SDKs' constants (C and Rust)
 make sdk                                 # build/tome-sdk-<version>.zip, the SDK for mod makers
 make container-test / container-e2e      # the same in a podman/docker image (tools/container/)
 make deploy                              # copy tome.mix into GAME_DIR: only when asked to
@@ -50,7 +51,11 @@ default) puts it in its own Xvfb; `tools/game.sh` shows it on screen unless
   After changing it, run `tools/gen-rust-bindings.sh` (a test checks). The
   C++ helpers (`tome.hpp`, generic `Mod::call`) need no change; the Rust
   crate `sdk/rust/tome` gets a wrapper only when a mod needs one (until
-  then `Tome::raw`). Released fields go into `tests/test_abi.cpp`.
+  then `Tome::raw`). Released fields go into `tests/test_abi.cpp`. A new API
+  function gets a WebAssembly import in `core/wasm_imports.h` (implemented
+  in `wasm_mods.cpp`), `tome_wasm.h` and the `tome-wasm` crate
+  (`sdk/rust/wasm`) if it can be one without handing the module a pointer
+  (`docs/wasm-mods.md`).
 - `sdk/` is for mod makers and must build on its own (the `sdk-dist` zip):
   nothing it builds may use files outside `sdk/`. Maintainer checks may
   (the Rust bindings test runs `tools/gen-rust-bindings.sh`), if they're
@@ -82,6 +87,12 @@ default) puts it in its own Xvfb; `tools/game.sh` shows it on screen unless
 - **Don't reload all of FrameDef.toc after startup:** it crashes later map
   loads. Use LoadTocFiles for Tome's own TOC.
 - **GCC warns about `__thiscall` on free functions but applies it.** The warning is silenced in `mod_menu.cpp`.
+- **GCC ignores `__declspec(thread)` on MinGW** (a warning only): the variable
+  is one global. WAMR's thread-locals were (patched, `third_party/wamr/TOME.md`);
+  use `thread_local`/`__thread`. Don't build third-party code with `-w`.
+- **WAMR isn't in the repository:** configuring downloads it into
+  `<build>/_deps/wamr-src` and patches it (`loader/third_party/wamr/wamr.cmake`,
+  `patch.cmake`). Change WAMR through `patch.cmake`, not those files.
 - **MinGW printf needs `__USE_MINGW_ANSI_STDIO=1`** (set globally) for `%zu`,
   and logging uses the `gnu_printf` format attribute.
 - **Wine doesn't report file changes inside subfolders**; the watcher also polls there (only under Wine).
@@ -120,6 +131,9 @@ default) puts it in its own Xvfb; `tools/game.sh` shows it on screen unless
   thread-local storage. The Rust SDK kept its closures there (freed at the
   thread's end; Tome called them later: an intermittent crash in `/hellors`,
   caught by the e2e test); now process-wide (`sdk/rust/tome/src/rt.rs`).
+- **libFuzzer's `-fork` mode (`FUZZ_JOBS`) can crash in its own parent**
+  (a SEGV in `fuzzer::GlobalEnv`, "crash" input empty): not a finding. Run
+  that target without `FUZZ_JOBS`.
 - **Mod callbacks run under the mod manager's lock** (enable, first load).
   API functions mods call there must not take it again (SRW locks aren't
   reentrant): settings have their own lock, keybinds get pushed their list.

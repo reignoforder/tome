@@ -1,0 +1,19 @@
+# The Rust crate for WebAssembly mods (tome-wasm) and its example: a
+# workspace of its own, since everything here builds for
+# wasm32-unknown-unknown (.cargo/config.toml), not for the DLL mods'
+# i686-pc-windows-gnu (../Cargo.toml).
+[workspace]
+resolver = "3"
+members = ["tome-wasm", "examples/hello-wasm-rs"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+
+[profile.release]
+# A panic is a trap (wasm32-unknown-unknown aborts): Tome disables the mod.
+strip = true
+lto = true
+opt-level = "s"

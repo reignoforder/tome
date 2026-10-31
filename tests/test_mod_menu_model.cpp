@@ -385,11 +385,13 @@ TEST(menu_shows_code_waiting_for_approval) {
     ModStatus fresh = mod("fresh", false);
     fresh.state = "approval";
     fresh.reason = "runs native code; turn it on to allow it";
+    fresh.approval = "new";
     fresh.code_hash = std::string(64, 'a');
     ModStatus changed = mod("changed", false);
     changed.package = true;
     changed.state = "approval";
     changed.reason = "its code changed since you allowed it; turn it on to allow the new code";
+    changed.approval = "changed";
     d.mods = {fresh, changed, mod("plain", true)};
     State s;
     View v = build(s, d, 3);
@@ -417,4 +419,32 @@ TEST(menu_shows_code_waiting_for_approval) {
     details = build(s, d, 3);
     CHECK(contains(details.body, "replaces game scripts"));
     CHECK(!contains(details.body, "native code"));
+
+    // Other game files only: "files", not "code".
+    d.mods[0].code_kind = "assets";
+    d.mods[0].reason = "adds game files; turn it on to allow them";
+    click_footer(s, d, 3, 3);
+    CHECK(contains(build(s, d, 3).rows[0].info, "New files: not allowed yet"));
+    click_row(s, d, 3, 0, true);
+    details = build(s, d, 3);
+    CHECK(contains(details.body, "adds game files"));
+    CHECK(contains(details.body, ("Files SHA-256: |r" + std::string(64, 'a')).c_str()));
+    CHECK(!contains(details.body, "native code"));
+    CHECK(contains(details.body, "Signed by: |rnot signed"));
+
+    // Signed by another key than the version allowed.
+    d.mods[0].code_kind = "native";
+    d.mods[0].signer = "A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=";
+    // From the field, not the reason's wording.
+    d.mods[0].reason = "reworded";
+    d.mods[0].approval = "signer";
+    click_footer(s, d, 3, 3);
+    CHECK(contains(build(s, d, 3).rows[0].info, "Signer changed: not allowed yet"));
+    click_row(s, d, 3, 0, true);
+    details = build(s, d, 3);
+    CHECK(contains(details.body, "Signed by: |rA6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg="));
+    CHECK(contains(details.body, "may not be from the same author"));
+    d.mods[0].signer.clear();
+    details = build(s, d, 3);
+    CHECK(contains(details.body, "this one isn't signed at all"));
 }

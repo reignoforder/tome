@@ -13,6 +13,9 @@ Two crates:
 button, events, a hook, a chat command, settings, a keybind and a popup.
 `../templates/rust` is the smallest mod to start from.
 
+For sandboxed WebAssembly mods there's a third crate, `tome-wasm`, in
+[`wasm/`](wasm) ([below](#webassembly-mods)).
+
 ## Setup
 
 ```sh
@@ -116,6 +119,66 @@ is a zip of the folder with `tome.mod.json` at the top:
   running Tome lacks the function. Event fields an older Tome doesn't fill
   read as empty, 0 or `None`.
 - **Windows 10 or later:** Rust's standard library needs it on this target.
+
+## WebAssembly mods
+
+**Experimental** (`../../docs/wasm-mods.md`). `wasm/tome-wasm` is the Rust
+API for WebAssembly mods: a module that runs sandboxed in Tome, can only
+call Tome's functions and gets handles instead of pointers, so players
+aren't asked to trust it with their computer. It's a workspace of its own
+(`wasm/Cargo.toml`), built for `wasm32-unknown-unknown`, with the example
+`wasm/examples/hello-wasm-rs` and the template `../templates/rust-wasm`.
+
+```sh
+rustup target add wasm32-unknown-unknown   # no MinGW, no C compiler
+cargo build --release                      # in sdk/rust/wasm, or a copy of the template
+```
+
+`tome.mod.json` names the module in `"wasm"` (`hello_wasm_rs.wasm`) instead
+of `"entry"`. A mod:
+
+```rust
+use tome_wasm::{Args, Event};
+
+fn load() {
+    tome_wasm::info!("loaded in Warcraft III {}", tome_wasm::game_info().build_name);
+}
+
+// Register everything here: Tome revokes it when the mod is disabled.
+fn enable() {
+    let _ = tome_wasm::register_command("hello", |args| tome_wasm::info!("hello {args}"));
+    let _ = tome_wasm::on_event(Event::GAME_START, |info| tome_wasm::info!("game on {}", info.map_name()));
+    // "native MyAdd takes integer a, integer b returns integer" in tome.mod.json
+    let _ = tome_wasm::register_native("MyAdd", |a: &Args| a.integer(0).wrapping_add(a.integer(1)));
+}
+
+tome_wasm::export_mod! { load: load, enable: enable }
+```
+
+How it differs from the `tome` crate:
+
+- **Free functions**, not methods of a `Tome` handle: a module is one mod.
+- **Callbacks** are `Fn` closures, as there, and they all go when the mod is
+  disabled (Tome revokes them). They run on the main thread; the first
+  enable runs before the game does, so register what needs the main thread
+  (`subscribe`) from a callback, as `hello-wasm-rs` does from the main menu.
+- **A panic is a trap** (`wasm32-unknown-unknown` aborts): the panic is
+  logged (`panicked: ...`), and Tome abandons the call and disables the mod.
+- **Data Tome hands over** (event fields, a native's string arguments) is
+  valid during the callback: `Unit::to_owned`, `String`s to keep it.
+- **Natives** take `&Args` (`integer`, `real`, `boolean`, `string`,
+  `handle`, `code`, by index) and return anything that converts into `Ret`:
+  `()`, integers, `bool`, `f32`, `Handle` (only one of the call's own
+  arguments), or text (`&str`, `String`, `Option<String>` for null).
+- **Not available:** hooks, `resolve`, services, paths: a mod that needs
+  them is a DLL. Files of its own: `config_read`/`config_write`.
+- **Constants** (`tome_wasm::consts`, and `Event::*`, `UiEvent::*`,
+  `FramePoint::*`) are generated from `tome.h` by `tools/gen-wasm-consts.py`.
+
+Tome's CMake build compiles `hello-wasm-rs` and the template when the
+target is installed (`tome_add_rust_mod(... WASM)`), runs the crate's tests
+on the host (`tome_wasm_rust_tests`), and the host and e2e tests run the
+example.
 
 ## Updating the bindings
 

@@ -1,0 +1,5 @@
+# Wasm mods are WebAssembly modules: rustup target add wasm32-unknown-unknown.
+# (Rust's own stack, 1 MiB at the bottom of the module's memory, so running
+# past it traps instead of overwriting data.)
+[build]
+target = "wasm32-unknown-unknown"

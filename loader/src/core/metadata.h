@@ -47,6 +47,9 @@ struct ModMetadata {
     // list of (game range, path) checked in order. Empty = assets-only mod.
     std::string entry;
     std::vector<std::pair<GameVersionRange, std::string>> entry_by_game;
+    // Or a WebAssembly module (docs/wasm-mods.md), relative to the mod
+    // folder, run sandboxed on every build; exclusive with `entry`.
+    std::string wasm;
 
     std::string assets;
     std::vector<std::string> requires_;  // mapped names / capabilities (§6.3)

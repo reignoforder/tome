@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/assets.h"
+#include "core/hash_cache.h"
 #include "core/hooks.h"
 #include "core/keys.h"
 #include "core/metadata.h"
@@ -11,6 +12,7 @@
 #include "mod_handle.h"
 #include "overlay.h"
 #include "paths.h"
+#include "wasm_mods.h"
 
 #include <tome/tome.h>
 
@@ -134,14 +136,20 @@ private:
         ModMetadata meta;
         std::vector<std::string> errors;
         std::vector<std::string> warnings;
-        std::wstring dll;  // entry for this build; empty for asset-only mods
+        std::wstring dll;  // entry for this build: the DLL, or the .wasm (`wasm`); empty for asset-only mods
         FileStamp dll_stamp;
-        // A DLL, or game scripts among the assets (mod_state::is_script):
-        // what has to be allowed before it runs.
-        bool has_code = false;
-        // With code: SHA-256 of its code files' manifest (core/mod_state.h);
-        // "" if one couldn't be read. Empty without code.
+        bool wasm = false;  // `dll` is a WebAssembly module (tome.mod.json "wasm"), not a DLL
+        // A DLL, game scripts among the assets (mod_state::is_script), other
+        // assets or an icon: what has to be allowed before it runs.
+        mod_state::CodeKind code_kind = mod_state::CodeKind::None;
+        bool has_code = false;  // code_kind != None
+        // With code: SHA-256 of its files' manifest (core/mod_state.h); ""
+        // if one couldn't be read. Empty without code.
         std::string code_hash;
+        // The key of its tome.sig if that's valid for these files
+        // (core/signature.h, base64); "" if there's none or it isn't (then
+        // a warning says why).
+        std::string signer;
         std::vector<overlay::AssetFile> assets;
         uint64_t assets_fingerprint = 0;  // 0: no asset files
         settings::Schema settings;
@@ -153,6 +161,10 @@ private:
     struct Runtime {
         tome_mod handle;
         HMODULE module = nullptr;
+        // A Wasm mod's instead of a module (wasm_mods.h); the lifecycle
+        // function pointers stay null for it.
+        std::unique_ptr<wasm_mods::Instance> wasm;
+        bool loaded() const { return module || wasm; }
         std::wstring source_dll;
         FileStamp stamp;
         std::wstring shadow_dll;
@@ -186,6 +198,7 @@ private:
     struct ParsedMeta {
         bool read = false;
         FileStamp stamp;  // of tome.mod.json; zero: read it again
+        std::string sha256;  // of the bytes parsed (tome.sig signs it); "" if unread
         ModMetadata meta;
         bool valid = false;
         std::vector<std::string> errors;
@@ -219,8 +232,9 @@ private:
     std::vector<std::string> set_enabled_locked(const std::string& id, bool enabled);
     std::vector<std::string> reload_locked(const std::string& id);
     // `invalid` (optional) is set when state.json exists but can't be
-    // parsed, `legacy` when it's from before approvals (mod_state::parse).
-    mod_state::State read_state(bool* invalid = nullptr, bool* legacy = nullptr) const;
+    // parsed; `schema` gets the file's (mod_state::parse; kSchema if
+    // there's no file, which has nothing to upgrade).
+    mod_state::State read_state(bool* invalid = nullptr, int* schema = nullptr) const;
     // Whether the user wants `id` to run: state.json (new mods start
     // enabled), unless safe mode is on.
     bool wanted_by_user(const mod_state::State& state, const std::string& id) const;
@@ -233,17 +247,30 @@ private:
     // Records `mod`'s code as allowed in `state` (nothing for a mod without
     // code), logging `how` unless it's null (in DllMain, before the log opens).
     static void approve(mod_state::State& state, const Installed& mod, const char* how);
-    // The approvals nobody clicks: mods a state.json from before approvals
-    // lists (they ran without one), and TOME_DEBUG_APPROVE's (tests).
-    static void implicit_approvals(mod_state::State& state, const std::vector<Installed>& installed, bool legacy,
-                                   bool log);
+    // The approvals nobody clicks: updates signed by the key the user
+    // allowed, and TOME_DEBUG_APPROVE's (tests).
+    void implicit_approvals(mod_state::State& state, const std::vector<Installed>& installed, bool log) const;
     // Also records the new file's stamp, so the watcher doesn't take Tome's
     // own write for an edit (disk_fingerprint).
     void write_state(const mod_state::State& state);
-    // Installed::code_hash, cached by folder until a code file's name, size or time changes.
+    // Installed::signer: checks the mod's tome.sig, if it has one, against
+    // its id, code hash and the SHA-256 of the tome.mod.json bytes its
+    // metadata was parsed from (ParsedMeta::sha256).
+    void check_signature(Installed& mod, const std::string& metadata_sha256) const;
+    // Installed::code_hash, cached by folder (in file_hashes_, so across
+    // starts too) until a code file's name, size or times change.
     std::string code_hash(const Installed& mod) const;
+    // A file's SHA-256 (empty if it can't be read), from the hash cache if
+    // it hasn't changed since it was last hashed; save_file_hashes writes
+    // the cache (tome/cache/file-hashes.json) if it changed.
+    std::string file_sha256(const std::wstring& path) const;
+    std::wstring file_hashes_path() const;
+    void load_file_hashes() const;
+    // Not in DllMain (mount_startup_assets): the first refresh saves.
+    void save_file_hashes() const;
 
     bool load(Runtime& rt, const Installed& mod, std::string& error);
+    bool load_wasm(Runtime& rt, const Installed& mod, std::string& error);
     void unload(Runtime& rt);
     void enable(Runtime& rt);
     void disable(Runtime& rt);
@@ -296,7 +323,18 @@ private:
     std::map<std::string, std::pair<uint64_t, std::string>> sync_hashes_;  // by folder: files' stamps, hash
     mutable std::map<std::string, ParsedMeta> meta_cache_;
     mutable std::map<std::string, ParsedSettings> settings_cache_;
-    mutable std::map<std::string, std::pair<uint64_t, std::string>> code_hash_cache_;  // by folder: stamps, hash
+    // The last check of each folder's tome.sig, by folder (check_signature).
+    struct CheckedSignature {
+        std::string text;  // tome.sig
+        std::string metadata_sha256;
+        std::string code_hash;
+        std::string signer;   // "" if it isn't valid
+        std::string warning;  // why it isn't
+        bool verified = false;
+    };
+    mutable std::map<std::string, CheckedSignature> signature_cache_;
+    mutable hash_cache::Cache file_hashes_;  // every code file's SHA-256 (file_sha256), each folder's code hash
+    mutable bool file_hashes_read_ = false;
     // Each .tome in tome/mods as of its last unpack, by file name.
     struct UnpackedPackage {
         FileStamp stamp;

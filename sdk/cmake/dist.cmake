@@ -5,7 +5,7 @@
 # build-*/ folders such as a template built in place, a template's
 # Cargo.lock), under one top folder.
 file(GLOB_RECURSE files RELATIVE "${SDK}" "${SDK}/*")
-list(FILTER files EXCLUDE REGEX "(^|/)(target|build|build-[^/]*)/|^templates/rust/Cargo\\.lock$|(^|/)__pycache__/")
+list(FILTER files EXCLUDE REGEX "(^|/)(target|build|build-[^/]*)/|^templates/rust(-wasm)?/Cargo\\.lock$|(^|/)__pycache__/")
 get_filename_component(stage "${OUT}" DIRECTORY)
 set(stage "${stage}/sdk-dist")
 file(REMOVE_RECURSE "${stage}")

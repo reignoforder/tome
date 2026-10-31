@@ -57,6 +57,7 @@ and can't leave it: no absolute paths, drive letters or `..`.
 | `conflicts` | `{ id: range }` | A warning when both run. |
 | `breaks` | `{ id: range }` | Can't run together: one of them stays off. |
 | `entry` | path, or `{ game range: path }` | The DLL (32-bit). A map is checked in order and the first matching range wins, for different DLLs per build. Leave it out for a mod without code. |
+| `wasm` | path | **Experimental.** A WebAssembly module (`.wasm`) Tome runs sandboxed, instead of a DLL: it can only use Tome's imports (`docs/wasm-mods.md` in Tome's repository). Not with `entry`. |
 | `assets` | path | A folder of game files the mod adds or replaces (textures, models, FDF, `Blizzard.j`...), merged into the game's files. Default: `assets`. |
 | `requires` | list of strings | Names from the mapping database that the mod can't work without (`"CTextFrame::SetText"`). Tome won't load the mod on a build where one isn't mapped. |
 | `natives` | list of strings | The JASS natives the mod provides, declared as a map declares them: `"native MyLog takes integer value returns nothing"`. Register their code in `tome_mod_enable`. |

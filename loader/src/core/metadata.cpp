@@ -14,7 +14,7 @@ const char* const kReservedFields[] = {"links", "$schema"};
 
 const char* const kKnownFields[] = {
     "schema", "id", "version", "name", "description", "authors", "license", "icon",
-    "game", "tome", "depends", "recommends", "conflicts", "breaks", "entry", "assets",
+    "game", "tome", "depends", "recommends", "conflicts", "breaks", "entry", "wasm", "assets",
     "requires", "natives", "provides", "sync", "reload", "load", "config", "keybinds",
 };
 
@@ -225,6 +225,18 @@ MetadataResult parse_metadata(const json::Value& root, ModMetadata& out) {
             }
         } else {
             r.error("\"entry\" must be a string or an object mapping game versions to paths");
+        }
+    }
+    if (const json::Value* wasm = root.find("wasm")) {
+        if (!wasm->is_string()) {
+            r.error("\"wasm\" must be a path inside the mod folder");
+        } else {
+            m.wasm = wasm->as_string();
+            if (!is_safe_relative_path(m.wasm)) r.error("\"wasm\" must be a path inside the mod folder");
+            else if (m.wasm.size() < 5 || m.wasm.compare(m.wasm.size() - 5, 5, ".wasm") != 0)
+                r.error("\"wasm\" must name a .wasm file");
+            if (!m.entry.empty() || !m.entry_by_game.empty())
+                r.error("a mod has \"entry\" (a DLL) or \"wasm\" (a WebAssembly module), not both");
         }
     }
 

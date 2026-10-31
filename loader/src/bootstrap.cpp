@@ -123,6 +123,22 @@ void announce_in_window_title(HWND window) {
     TOME_INFO("Window title set to \"%s\"", narrow(new_title).c_str());
 }
 
+// Data execution prevention: war3.exe is linked NX-compatible, so Windows
+// turns it on unless the system's policy or a compatibility shim turns it
+// off. It makes code written into data (a map exploit's) fault instead of
+// running. Tome only reports it: forcing it on could break a setup that
+// needs it off, and it doesn't stop code that's already running.
+void log_dep() {
+    DWORD flags = 0;
+    BOOL permanent = FALSE;
+    if (!GetProcessDEPPolicy(GetCurrentProcess(), &flags, &permanent)) {
+        TOME_INFO("DEP: unknown (error %lu)", GetLastError());
+        return;
+    }
+    if (flags & PROCESS_DEP_ENABLE) TOME_INFO("DEP: on%s", permanent ? " (permanent)" : "");
+    else TOME_WARN("DEP: off (the system's DEP policy or a compatibility setting turned it off for war3.exe)");
+}
+
 DWORD bootstrap() {
     // Until log::open succeeds, TOME_* lines go to the debugger only.
     if (!g_paths_ok) {
@@ -141,6 +157,7 @@ DWORD bootstrap() {
     for (const std::string& note : g_layout_notes) TOME_INFO("Layout: %s", note.c_str());
     TOME_INFO("game.dll already loaded when tome.mix was attached: %s",
               g_game_loaded_at_attach ? "yes" : "no");
+    log_dep();
     crash_loop::log_status();
 
     if (text::iequals(g_paths.host_exe, L"worldedit.exe")) {
