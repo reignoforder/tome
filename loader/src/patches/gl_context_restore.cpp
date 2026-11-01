@@ -31,7 +31,6 @@
 #include "patches.h"
 
 #include "core/context_restore.h"
-#include "game_build.h"
 #include "hooks.h"
 #include "log.h"
 #include "tome/tome.h"
@@ -80,12 +79,6 @@ void TOME_CALL on_can_draw(tome_mod*, tome_hook_call* call, void*) {
     }
 }
 
-bool gl_context_restore_needed(std::string& report) {
-    if (running_on_wine()) return true;
-    report = "not needed outside Wine";
-    return false;
-}
-
 bool install_gl_context_restore(uintptr_t base, const BuildMappings& build, std::string& report) {
     g_fullscreen_offset = build.gl.fullscreen_offset;
     g_destroy_context = reinterpret_cast<DestroyContextFn>(base + build.gl.destroy_context);
@@ -115,7 +108,7 @@ extern const Patch kGlContextRestore = {
     nullptr,  // any build that maps the symbols below
     kSymbols,
     nullptr,  // nothing to protect: a mod can't reopen a hole through it
-    gl_context_restore_needed,
+    only_under_wine,
     install_gl_context_restore,
 };
 

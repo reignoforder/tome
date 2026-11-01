@@ -83,7 +83,7 @@ bool install_ambient_sound(uintptr_t base, const BuildMappings& build, std::stri
     }
     hooks::Handler replace;
     replace.phase = TOME_HOOK_REPLACE;
-    replace.priority = INT32_MIN;  // innermost: mods' handlers run first, only the game's body is replaced
+    replace.last = true;  // innermost: mods' handlers run first, only the game's body is replaced
     replace.fn = on_init_midi;
     hooks::add(init, replace);
     report = "plays maps' MIDI ambient sounds again";

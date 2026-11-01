@@ -37,6 +37,7 @@ struct Patch {
     // Whether the patch is needed where the game runs (e.g. only under
     // Wine), checked before `install`; null if always. Returns false, with
     // the reason in `report`, to skip it: counted as skipped, not applied.
+    // only_under_wine for the Wine-only fixes.
     bool (*needed)(std::string& report);
     // Applies the patch; `base` is game.dll's load address. Returns false,
     // with a reason in `report`, if it couldn't be applied -- the game then
@@ -48,6 +49,10 @@ struct Patch {
 // build is identified and verified. Always returns true: a patch that doesn't
 // fit or fails is logged and skipped. `report` summarizes what was applied.
 bool install(uintptr_t base, const BuildMappings& build, std::string& report);
+
+// `needed` for a fix of a Wine bug: true under Wine, else false with
+// "not needed outside Wine".
+bool only_under_wine(std::string& report);
 
 // background-mute, once the game window is subclassed, on the main thread:
 // undoes a mute a crashed or quit run left in the system mixer, and keeps

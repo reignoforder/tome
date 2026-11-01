@@ -24,6 +24,7 @@ add_executable(tome_tests
     test_metadata.cpp
     test_mod_menu_model.cpp
     test_mod_state.cpp
+    test_movie_decoder.cpp
     test_mpq.cpp
     test_package.cpp
     test_path_guard.cpp

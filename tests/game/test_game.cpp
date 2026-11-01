@@ -90,10 +90,14 @@ TEST(game_startup_patches_apply) {
     CHECK(report.rfind(" applied, 0 skipped: ", std::string::npos) != std::string::npos);
     for (const char* patch : {"memhack-guard applied", "path-sanitizer applied", "blp-guard applied",
                               "d3d-reset-lights applied", "gl-context-restore applied", "background-mute applied",
-                              "widescreen applied", "ambient-sound applied"}) {
+                              "widescreen applied", "ambient-sound applied", "movie-display-reset applied",
+                              "movie-frame-length applied"}) {
         if (report.find(patch) == std::string::npos) test::fail(__FILE__, __LINE__, std::string(patch) + ": " + report);
     }
     CHECK(report.find("failed") == std::string::npos);
+    if (report.find("gamma ramp left") != std::string::npos || report.find("gamma restore left") != std::string::npos) {
+        test::fail(__FILE__, __LINE__, "movie gamma: " + report);
+    }
 
     CHECK(tome::mods_ready::install_sound_wait(report));
 

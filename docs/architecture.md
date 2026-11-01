@@ -208,6 +208,14 @@ logs each error with the symbol's name.
   lookup table, which the loader leaves alone), before anything is patched. A mismatch logs the symbol and leaves the game
   unmodified. A unit test runs the same check against the local
   `WarCraft III/game.dll` (skipped when there's none).
+- `"module"` (optional, lowercase, default `"game.dll"`) makes a file
+  describe another DLL Tome patches: `mappings/blizzard.ax.json` (the
+  movies' decoder). Such a file is kept apart from the game builds (never
+  identifies the game, never seen by mods' `resolve`), binds through its
+  own function (`bind_blizzard_ax`, `BlizzardAxMappings`), and its patch
+  finds it by the loaded DLL's header (`find_blizzard_ax_by_header`) and
+  checks it with `verify_loaded_module`. A module Tome doesn't know is an
+  error.
 - Names are stable across builds: `Class::Method` for functions,
   `Class.field` / `Class.vtable.Method` for offsets, `Thing.call.where` for
   call sites.
@@ -868,7 +876,7 @@ reason to make a fix a patch rather than ship it as a mod.
   "Ambient sound"): 1.27a turned off maps' day and night ambience:
   `CreateMIDISound` calls `CSound::InitMIDI`, which now makes a plain sound
   from the label, and MIDI labels aren't in the plain tables, so the sound
-  stays empty. The innermost REPLACE handler there (priority `INT32_MIN`,
+  stays empty. The innermost REPLACE handler there (`Handler.last`,
   so mods' BEFORE and REPLACE handlers still run first) makes it with the
   game's own MIDI constructor (`CreateMIDISnd`) into `CSound.midi`, with the
   ambient category (`SoundCategory.ambient`, so the Ambient sounds option
@@ -890,11 +898,13 @@ reason to make a fix a patch rather than ship it as a mod.
   `C44Matrix::Perspective` scales the projection's x term (or, narrower
   than 4:3, its y term) by the client area's aspect against 4:3
   (`core/widescreen.*`, unit-tested), so more of the map shows instead.
-  Only while `WorldView::SetupCamera` runs (BEFORE/AFTER handlers there):
+  Only while `WorldView::SetupCamera` runs, or `CSpriteFrame::SetupCamera`
+  for the world frame (`CGameUI.world_frame`: unit picking builds its own
+  projection there) (BEFORE/AFTER handlers on both):
   3D models in UI frames and the main menu's 3D background stay as they
   are, matching their stretched 2D art. The window size comes from
   `main_thread::client_size` (kept from `WM_SIZE`), not a call per frame.
-  Picking reads the same matrix. The player can turn it off (Tome >
+  The player can turn it off (Tome >
   Settings > Widescreen, on by default); it's checked every frame. Only
   the 3D view: the UI is still stretched. Reserves nothing.
 - **gl-context-restore** (`patches/gl_context_restore.cpp`,
@@ -907,6 +917,42 @@ reason to make a fix a patch rather than ship it as a mod.
   uploads again; a CreateContext that fails is tried again on the next frame.
   The decision is portable (`core/context_restore.*`, unit-tested). Skipped
   outside Wine (`needed`: `wine_get_version` in ntdll). Reserves nothing.
+- **movie-frame-length** (`patches/movie_frame_length.cpp`,
+  `docs/known-bugs.md`, "Under Wine"): `blizzard.ax`, the movies' decoder,
+  leaves every frame the length of its buffer (4 bytes a pixel whatever
+  format it plays in), and Wine's VMR7 copies that whole length into a
+  smaller YUY2 surface. A BEFORE handler on `Movie::SetDisplayMode` (the
+  first call in Movie::Play, on the main thread, before the graph exists)
+  loads `blizzard.ax` from game.dll's folder the first time and never frees
+  it, so DirectShow gets that copy; finds its mapping by PE timestamp and
+  size (`mappings/blizzard.ax.json`, below), checks it with
+  `verify_loaded_module`; and points that vtable slot (`patch_pointer`) at a
+  wrapper that calls it, then sets the output sample's length to one frame
+  of the format it's in (`core/movie_decoder.*`, unit-tested). The buffers
+  keep their size, so the decoder has room after a format change too.
+  Skipped outside Wine (`needed`). Reserves nothing.
+- **movie-display-reset** (`patches/movie_display_reset.cpp`,
+  `docs/known-bugs.md`, "Under Wine"): in a window the movie player resets
+  the display mode before and after a movie and retries without limit
+  while that fails, which under Wine on a display that can't change modes
+  hangs the game. The innermost REPLACE handler on `Movie::SetDisplayMode`
+  (`Handler.last`) does the windowed reset itself: nothing if the
+  display is already in its registry mode, otherwise the same retries for
+  about a second, then it goes on. In the fullscreen (cinematic) case it
+  puts the desktop's registry mode back the same way (nothing to do when
+  the game runs at the desktop's size) and writes the mode the display is
+  then in to `Movie.cinematic_mode`, as the game's body does when none of
+  its modes pass, so Movie::Play's window covers the screen. Proton emulates modes
+  and leaves the monitor as it is: the game's 800x600 played in a 4:3 box
+  with black around it, and any mode it scales leaves light lines along
+  the video's window. If the mode can't be read it hands on to the game's
+  body. It also points Movie::Play's `call [SetDeviceGammaRamp]`
+  (`Movie.gamma_call`, the fullscreen movie's 1/2.2 gamma ramp, which
+  Proton applies), then the restore when a key skips the movie
+  (`Movie.gamma_restore`), at a no-op that reports success, with
+  `patch_bytes` after checking that the slot holds gdi32's
+  SetDeviceGammaRamp; if that fails, the report says so and the rest still
+  applies. Skipped outside Wine (`needed`). Reserves nothing.
 - **path-sanitizer** (`patches/path_sanitizer.cpp`, `docs/known-bugs.md`):
   refuses path traversal in every JASS native that takes a file path (38;
   `docs/known-bugs.md` lists them). The writes (`PreloadGenEnd`,
@@ -1108,7 +1154,10 @@ API version 4 (`hook`, `unhook`, `hook_call_next` in `tome.h`).
 - **Chain order** (`core/hooks.cpp`, `run`): BEFORE handlers, then the
   REPLACE handlers nested (each calls `hook_call_next` for the rest; the
   last one's next is the original), then AFTER handlers. Within a phase,
-  higher priority first, ties in registration order. A BEFORE handler can
+  higher priority first, ties in registration order. Tome's own innermost
+  REPLACE handlers (built-in patches that replace only the game's body) set
+  `Handler.last`, which the mod API can't: they run after every other
+  handler of their phase, even a mod's at `INT32_MIN`. A BEFORE handler can
   set `skip_original` (and `result`); REPLACE and the original are then
   skipped, the AFTER handlers still run.
 - **Threads:** handlers run on whatever thread called the function. The

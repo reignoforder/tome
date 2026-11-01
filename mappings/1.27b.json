@@ -768,6 +768,23 @@
       "bytes": "55 8b ec 81 ec 6c 01 00 00 a1 ?? ?? ?? ?? 33 c5",
       "doc": "Pauses or resumes the game for a player (0xFF: none): PauseGame (0x20F4F0) passes (pause, local player, 0, 1, 1); the network pause and resume handlers 0x370900 and 0x370CB0 (pause, the event's player at +0x15, 1, 0, 0). Asks the net client (0x32AFF0 pause, 0x32B080 resume) and shows PAUSE_GAME_NOTIFY / RESUME_GAME_NOTIFY. ret 0x14."
     },
+    "Movie::SetDisplayMode": {
+      "kind": "function", "rva": "0x0013c3a0", "conv": "fastcall", "sig": "void(int cinematic, const int* mode)",
+      "bytes": "55 8b ec 81 ec b0 00 00 00 a1 ?? ?? ?? ?? 33 c5 89 45 fc 53",
+      "doc": "The movie player's display mode (GxMovie\\GxVideo.cpp, Movie::Play 0x13D520 calls it before the movie with cinematic = (fullscreen game), and 0x13D760 with 0 after it). cinematic (cl, low byte only; the rest of ecx is junk): EnumDisplaySettingsA(NULL, ENUM_CURRENT_SETTINGS) once, then for each of the 24 {width, height, bits, frequency} entries at .data 0xCE4230 (mode, if not null: flags at +0, bits 0-3 replacing the entry's frequency with +4, bits with +8, height with +0x10, width with +0xC) ChangeDisplaySettingsA(&dm, CDS_TEST | CDS_FULLSCREEN) at 0x13C4D2; the first that passes is set with CDS_FULLSCREEN (0x13C50B) and kept at .data 0xD5314C. Otherwise ChangeDisplaySettingsA(NULL, 0) and, while that fails, Sleep(50) and again with no limit: under Wine on a display that can't change modes (Xvfb) it never returns. The movie-display-reset patch hooks it. Plain ret."
+    },
+    "Movie.cinematic_mode": {
+      "kind": "data", "rva": "0x00d5314c",
+      "doc": "The movie player's fullscreen mode, 4 uint32: width, height, bits, frequency. Movie::SetDisplayMode (cinematic) writes the current mode's width, height and bits first, then copies the table entry it sets over it; Movie::Play (0x13D60E) makes its fullscreen window at 0,0 with this width and height. Under Wine the movie-display-reset patch writes the desktop's mode there instead of changing modes."
+    },
+    "Movie.gamma_call": {
+      "kind": "data", "rva": "0x0013d72c",
+      "doc": "In Movie::Play, fullscreen only: call [SetDeviceGammaRamp] (ff 15 + the import slot, 6 bytes), setting ramp[i] = pow(i / 255, 1 / 2.2) * 65535 on all three channels for the movie (the ramp before is saved at .data 0xD53160 by GetDeviceGammaRamp at 0x13D6B5 and set back at 0x13CE93). Wine takes the ramp and Proton applies it to OpenGL and Vulkan output, so the movies come out washed out (black at about 50 of 255). The movie-display-reset patch points the call at a no-op under Wine."
+    },
+    "Movie.gamma_restore": {
+      "kind": "data", "rva": "0x0013ce93",
+      "doc": "call [SetDeviceGammaRamp] (ff 15 + the import slot, 6 bytes) with the ramp saved at .data 0xD53160, in the function at 0x13CE80 that the movie window's procedure calls (0x13D93E) when Enter, Esc or Space skips the movie. Only a fullscreen movie fills 0xD53160; skipping a windowed one sets the zeros there. The movie-display-reset patch points it at a no-op under Wine along with Movie.gamma_call (the ramp is then never changed)."
+    },
     "PresentFrame": {
       "kind": "function", "rva": "0x00136fe0", "conv": "fastcall", "sig": "void(int flags)",
       "bytes": "51 8b 0d ?? ?? ?? ?? 8b 01 ff 50 48 b9 01 00 00",
@@ -923,7 +940,7 @@
     "CameraField.target_distance": { "kind": "constant", "value": "0x0", "doc": "CAMERA_FIELD_TARGET_DISTANCE: the camera's distance from its target, 1650 by default." },
     "CameraField.farz": { "kind": "constant", "value": "0x1", "doc": "CAMERA_FIELD_FARZ: the far clipping distance, 5000 by default; farther terrain isn't drawn." },
     "CameraPresets": { "kind": "data", "rva": "0x00a9f4e0", "doc": "float[4][4]: the classic zoom levels the mouse wheel steps through in a game (the camera code loads them with movaps, 0x35EAA2, 0x360122): heights 160, angles of attack 304/311/318/325, distances 1650/1600/1500/1400. The wheel only zooms in from the default." },
-    "CGameUI.world_frame": { "kind": "offset", "value": "0x3bc", "doc": "The CWorldFrameWar3 (a CFrame) the world is drawn in: anchored to the game UI with BOTTOMLEFT (0, 0.13) and TOPRIGHT (0, -0.02) (0x367EA7), between the console and the top bar. Moving its anchors moves the 3D view's edges." },
+    "CGameUI.world_frame": { "kind": "offset", "value": "0x3bc", "doc": "The CWorldFrameWar3 (a CFrame) the world is drawn in: anchored to the game UI with BOTTOMLEFT (0, 0.13) and TOPRIGHT (0, -0.02) (0x367EA7), between the console and the top bar. Moving its anchors moves the 3D view's edges. Also a CSpriteFrame (camera +0x140, rectangle +0x12C, the WorldView at +0x19C): unit picking sets up its projection with CSpriteFrame::SetupCamera (0x3911A5, 0x3C09CE)." },
     "CGameUI.console": { "kind": "offset", "value": "0x428", "doc": "The console, a CSimpleConsole (simple frame) made from the FDF frame the skin key \"SimpleConsole\" names (\"ConsoleUI\", UI\\FrameDef\\UI\\ConsoleUI.fdf: the top bar's and the bottom console's textures), anchored to all of the game UI. The command card, info panel, resource bar and top-left menu buttons are its children: its scale reaches them." },
     "CGameUI.console_upper": { "kind": "offset", "value": "0x420", "doc": "A second CSimpleConsole (0x3A1690), anchored to all of the game UI." },
     "CGameUI.minimap_layer": { "kind": "offset", "value": "0x41c", "doc": "A full-screen CFrame (0x0F54C0) holding the minimap (CMinimap, CGameUI +0x3C0) and the clock (CTimeOfDayIndicator, +0x3F8)." },
@@ -1231,6 +1248,11 @@
       "kind": "function", "rva": "0x003640f0", "conv": "thiscall", "sig": "void(void* this, float delta, const float* rect)",
       "bytes": "55 8b ec 56 8b f1 83 7e 38 01 75 17 f3 0f 10 45",
       "doc": "Sets up the world camera for a frame (name guessed): if this +0x38 is 1 it first calls 0x1A2C10 on +0x5C with delta, then the camera wrapper 0x1ADE90 (ecx = this +0x34, edx = rect, which runs CCamera::SetupProjection). Called once per frame in a game only, from 0x385D55 (the world frame's update, this = its +0x19C). The other cameras that reach Perspective don't pass here: 3D models in UI frames (0x0F64E0, in menus and games) and the main menu's 3D background (0x78D0E0). The widescreen patch hooks it (BEFORE and AFTER) to scale only the world view. ret 8."
+    },
+    "CSpriteFrame::SetupCamera": {
+      "kind": "function", "rva": "0x000f64e0", "conv": "thiscall", "sig": "void(CSpriteFrame* this)",
+      "bytes": "8b 81 40 01 00 00 85 c0 0f 84 12 00 00 00 8d 91",
+      "doc": "Sets up a sprite frame's 3D camera (this +0x140) for the frame's rectangle (+0x12C) through the wrapper 0x1ADE90, so CCamera::SetupProjection; without a camera it goes on at 0x0F6500. Called for 3D models in UI frames (portraits, the clock) and for the world frame (CGameUI.world_frame): by its own 0x3C1D6F and before the screen/world conversions at 0x3911AB and 0x3C09EC, which then read the transforms back (0x137270, 0x137180). Unit picking uses that projection, not the one from WorldView::SetupCamera. The widescreen patch hooks it (BEFORE and AFTER) to scale the world frame's. Plain ret."
     },
     "CGxDeviceOpenGl::CanDraw": {
       "kind": "function", "rva": "0x001442f0", "conv": "thiscall", "sig": "bool(CGxDeviceOpenGl* this)",

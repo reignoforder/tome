@@ -282,8 +282,15 @@ Perspective scales the world camera's matrix (only the calls made from
 its height and shows more at the sides, as in 1.29; a window narrower than
 4:3 (5:4) shows more at the top and bottom instead. At 4:3 nothing changes.
 3D models inside the UI (portraits, the main menu's background) are left
-alone, since their 2D frames are still stretched. Mouse picking uses the same matrix: checked with a
-selection and a move order at 90% of the width. **Still open:** the 2D UI
+alone, since their 2D frames are still stretched. Picking the ground uses
+the same matrix (a move order at 90% of the width lands under the cursor).
+Unit picking builds its own projection, through the world frame's
+`CSpriteFrame::SetupCamera`: until the patch scaled that one too, a unit's
+click area sat further from the middle of the screen than the unit (at
+16:10, a peasant at 75% of the width answered a click about 100 px further
+out, and near the sides off screen, so a building's larger area got the
+click). Checked at 1600 × 1000 on Booty Bay: a click on empty ground there
+selects nothing, and a peasant at 98% of the width selects. **Still open:** the 2D UI
 (console, top bar, command card, minimap) stays stretched, and the
 minimap's camera box keeps its 4:3 size. Like 1.29, a wider window sees more
 of the map in multiplayer.
@@ -333,6 +340,65 @@ Both are fixed by built-in patches:
   clears the lights anyway.
   Checked on the main menu: no warning and the same colours after four
   Alt+Tabs. Not reported to Wine yet as far as we know.
+- **Movies: a black screen forever.** Before a movie (the intro, the
+  campaign cinematics) and after it, a windowed game puts the desktop's
+  registry display mode back with `ChangeDisplaySettingsA(NULL, 0)` and
+  tries again every 50 ms until that works (`Movie::SetDisplayMode`,
+  `docs/reverse-engineering.md`). On a display where Wine can't change
+  modes (Xvfb) it fails every time, so the movie never starts.
+  **Fixed in Tome (movie-display-reset, built-in patch, only under
+  Wine):** the innermost REPLACE handler skips the reset when the display
+  is already in its registry mode, and otherwise gives up after about a
+  second and plays the movie in the current mode.
+- **Movies: small, with black all around (fullscreen).** A fullscreen
+  game sets the first of its 800x600 and 640x480 cinematic modes that
+  passes and makes the movie's window that size at 0,0. Proton takes the
+  mode but emulates it (the monitor stays at its own size), so on a 16:9
+  screen the movie sits in a 4:3 box with bars at the sides, besides its
+  own letterbox. **Fixed in Tome (movie-display-reset):** under Wine the
+  cinematic case puts the desktop's own mode back, also when the game runs
+  in another, and writes it to `Movie.cinematic_mode` (as the game does
+  when no mode passes); the window covers the screen and the
+  video is scaled (smoothly) to its width. The bars above and below are the
+  movies' own: they are 800x368, wider than 16:9. A smaller mode of the
+  desktop's shape, scaled by Proton, was tried and dropped: Proton's
+  scaling leaves a light line (one screen row) along the edge of Wine's
+  video window (`wine_quartz_window`), wherever it is and whatever its
+  background. Checked on GE-Proton11-11 in Xvfb at 2560x1440 and 2844x1600
+  (the scale of 864x486 on 1440 lines): no light line in the desktop's
+  mode, and the picture as smooth as in a scaled mode.
+- **Movies: washed out, grainy, purple blacks (fullscreen).** For a
+  fullscreen movie, Movie::Play sets a display gamma ramp of
+  pow(x, 1 / 2.2) and puts the old one back after (`Movie.gamma_call`).
+  Wine takes the ramp and Proton applies it to the movie's output (wined3d
+  OpenGL; with `WINE_D3D_CONFIG=renderer=no3d` the movie is drawn without
+  it and looks right). Black comes out at about 50 of 255, and the dark
+  scenes' compression noise and chroma blotches show several times over.
+  **Fixed in Tome (movie-display-reset):** under Wine that call, and the
+  restore when a key skips the movie (`Movie.gamma_restore`, which after a
+  windowed movie would set an all-zero ramp), go to a no-op, and the movie
+  shows as encoded. Checked on GE-Proton11-11 at
+  2560x1440 in Xvfb against frames decoded from the file: before, file
+  levels 0-10, 20-30 and 90-100 came out at about 50, 90 and 164; after, at
+  8, 27 and 97 (correlation 0.998).
+- **Movies: a crash on the first frame (GE-Proton 11).** The movies' BLZ0
+  video is decoded by the game's own DirectShow filter, `blizzard.ax`,
+  whose DecideBufferSize asks for 4 bytes a pixel whatever format it
+  connects with, and whose frames all claim the whole buffer
+  (`docs/reverse-engineering.md`, "blizzard.ax"). Windows' renderer copies
+  a frame by its surface's size. Wine's VMR7 copies the sample's length:
+  connected as YUY2 (800x368, 588,800 bytes), it copies 1,177,600 into the
+  surface, and the game crashes (an access violation writing in msvcrt's
+  memcpy, called from `quartz.dll`). It only happens where Wine hands the
+  compressed stream to `blizzard.ax` (the winedmo splitter: GE-Proton11-11);
+  GE-Proton10-34's splitter decodes the video itself and plays the movies.
+  It crashes without Tome too. **Fixed in Tome (movie-frame-length,
+  built-in patch, only under Wine):** before the first movie Tome loads
+  `blizzard.ax`, keeps it, and wraps its Transform to set each frame's
+  length to one frame of the format it's in. Checked on GE-Proton11-11:
+  the Sentinels opening cinematic plays to the end, windowed and fullscreen.
+  The intro at startup plays before Tome loads, so with `seenintromovie` 0
+  it still crashes there.
 
 ## Sound in the background
 

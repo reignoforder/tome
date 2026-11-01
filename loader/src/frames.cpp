@@ -3,6 +3,7 @@
 #include "core/frames.h"
 #include "core/path_guard.h"
 #include "core/rtti.h"
+#include "game_build.h"
 #include "guard.h"
 #include "log.h"
 #include "mod_manager.h"
@@ -48,7 +49,6 @@ using HasEventFn = int(__thiscall*)(void* object, uint32_t event);
 using EditGetTextFn = const char*(__thiscall*)(void* edit_box);
 using EditSetTextFn = void(__thiscall*)(void* edit_box, const char* text, int notify);
 using GlueGetFn = void*(*)();
-using GameUiGetFn = void*(__fastcall*)(int create, int forget);
 
 bool g_ready = false;
 uint32_t g_main_thread = 0;
@@ -618,7 +618,7 @@ void init(uintptr_t game_base, const BuildMappings& build, uint32_t main_thread_
     g_edit_get_text = reinterpret_cast<EditGetTextFn>(game_base + ui.edit_get_text);
     g_edit_set_text = reinterpret_cast<EditSetTextFn>(game_base + ui.edit_set_text);
     g_glue_get = reinterpret_cast<GlueGetFn>(game_base + build.game.glue_get);
-    g_game_ui_get = reinterpret_cast<GameUiGetFn>(game_base + build.game.game_ui_get);
+    g_game_ui_get = game_ui_get(game_base, build);
     init_observer(game_base);
     g_ready = true;
     declare_natives();

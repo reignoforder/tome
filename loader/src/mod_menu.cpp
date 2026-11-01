@@ -9,6 +9,7 @@
 #include "crash_handler.h"
 #include "crash_loop.h"
 #include "frames.h"
+#include "game_build.h"
 #include "hooks.h"
 #include "keybinds.h"
 #include "log.h"
@@ -44,7 +45,6 @@ using BindControlFn = void*(__thiscall*)(void* menu, const char* name, int comma
 using MenuEventFn = int(__thiscall*)(void* menu, void* event);
 using MenuSetupFn = int(__thiscall*)(void* menu, int a, int b);
 using SetPanelFn = void(__thiscall*)(void* esc_panel, int panel);
-using GameUiGetFn = void*(__fastcall*)(int create, int forget);
 using SetModeFn = void(__thiscall*)(void* game_ui, void* mode, int push);
 using EscMenuResetFn = void(__thiscall*)(void* esc_menu);
 
@@ -739,7 +739,7 @@ bool install_hooks(uintptr_t base, const BuildMappings& build, std::string& repo
     g_build = &build;
     g_bind_control = reinterpret_cast<BindControlFn>(base + ui.glue_bind_control);
     g_set_panel = reinterpret_cast<SetPanelFn>(base + ui.esc_menu_set_panel);
-    g_game_ui_get = reinterpret_cast<GameUiGetFn>(base + build.game.game_ui_get);
+    g_game_ui_get = game_ui_get(base, build);
     g_set_mode = reinterpret_cast<SetModeFn>(base + ui.game_ui_set_mode);
     g_esc_menu_reset = reinterpret_cast<EscMenuResetFn>(base + ui.esc_menu_reset);
 

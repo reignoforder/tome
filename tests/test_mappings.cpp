@@ -176,17 +176,28 @@ TEST(mappings_bind_reports_missing_names) {
 // The real data files, as compiled into tome.mix.
 TEST(mappings_embedded_files_are_complete) {
     CHECK(mappings::kEmbeddedFileCount > 0);
-    bool found_127b = false;
+    bool found_127b = false, found_ax = false;
     for (size_t i = 0; i < mappings::kEmbeddedFileCount; ++i) {
         const mappings::EmbeddedFile& file = mappings::kEmbeddedFiles[i];
         mappings::Build b;
         auto r = parse_text(file.text, b);
         for (const std::string& e : r.errors) test::fail(__FILE__, __LINE__, std::string(file.name) + ": " + e);
-        BuildMappings bound;
+        CHECK_EQ(std::string(file.name), b.name + ".json");
         std::vector<std::string> errors;
+        if (b.module == "blizzard.ax") {
+            found_ax = true;
+            BlizzardAxMappings ax;
+            CHECK(bind_blizzard_ax(b, ax, errors));
+            for (const std::string& e : errors) test::fail(__FILE__, __LINE__, std::string(file.name) + ": " + e);
+            CHECK_EQ(ax.transform, 0x4020u);
+            CHECK_EQ(ax.transform_slot, 0x623e4u);
+            CHECK_EQ(ax.output_width_offset, 0x1ecu);
+            continue;
+        }
+        CHECK_EQ(b.module, std::string("game.dll"));
+        BuildMappings bound;
         CHECK(bind_build(b, bound, errors));
         for (const std::string& e : errors) test::fail(__FILE__, __LINE__, std::string(file.name) + ": " + e);
-        CHECK_EQ(std::string(file.name), b.name + ".json");
 
         if (b.name == "1.27b") {
             found_127b = true;
@@ -214,6 +225,33 @@ TEST(mappings_embedded_files_are_complete) {
         }
     }
     CHECK(found_127b);
+    CHECK(found_ax);
+}
+
+// "module": a file can describe another DLL; each binds only as its own.
+TEST(mappings_module_field) {
+    mappings::Build b;
+    CHECK(parse_text(with_symbols(""), b).ok);
+    CHECK_EQ(b.module, std::string("game.dll"));
+    std::string text = with_symbols(R"j("BlzFilter.width": {"kind": "offset", "value": 1})j");
+    text.insert(1, R"("module": "blizzard.ax", )");
+    CHECK(parse_text(text, b).ok);
+    CHECK_EQ(b.module, std::string("blizzard.ax"));
+    BuildMappings bound;
+    std::vector<std::string> errors;
+    CHECK(!bind_build(b, bound, errors));
+    CHECK(!errors.empty() && errors[0].find("not game.dll") != std::string::npos);
+    BlizzardAxMappings ax;
+    errors.clear();
+    CHECK(!bind_blizzard_ax(b, ax, errors));  // only BlzFilter.width mapped
+    CHECK(!errors.empty());
+
+    text = with_symbols("");
+    text.insert(1, R"("module": "Game.DLL", )");
+    CHECK(has_error_containing(parse_text(text, b), "lowercase file name"));
+    text = with_symbols("");
+    text.insert(1, R"("module": 5, )");
+    CHECK(has_error_containing(parse_text(text, b), "lowercase file name"));
 }
 
 // A function's checked bytes stay inside it: a pattern that runs into the

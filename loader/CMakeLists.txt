@@ -127,6 +127,7 @@ add_library(tome_core STATIC
     src/core/metadata.cpp
     src/core/mod_menu_model.cpp
     src/core/mod_state.cpp
+    src/core/movie_decoder.cpp
     src/core/mpq.cpp
     src/core/package.cpp
     src/core/path_guard.cpp
@@ -189,6 +190,8 @@ add_library(tome_runtime OBJECT
     src/patches/d3d_reset_lights.cpp
     src/patches/gl_context_restore.cpp
     src/patches/memhack_guard.cpp
+    src/patches/movie_frame_length.cpp
+    src/patches/movie_display_reset.cpp
     src/patches/path_sanitizer.cpp
     src/patches/widescreen.cpp
     src/paths.cpp

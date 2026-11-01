@@ -1,7 +1,8 @@
 #pragma once
 
 // The mapping database: one JSON file per game build (mappings/<build>.json)
-// naming every address, offset and constant Tome or a mod uses. See
+// naming every address, offset and constant Tome or a mod uses, and one per
+// build of another module Tome patches (its "module", e.g. blizzard.ax). See
 // docs/architecture.md, "Mapping database", for the file format.
 
 #include "json.h"
@@ -42,11 +43,12 @@ struct Symbol {
 };
 
 struct Build {
+    std::string module = "game.dll";  // the file it describes, lowercase
     std::string name;          // community name, e.g. "1.27b"
     std::string file_version;  // e.g. "1.27.1.7085"
     uint32_t pe_timestamp = 0;
     uint32_t size_of_image = 0;
-    std::string sha256;        // of game.dll on disk, lowercase hex
+    std::string sha256;        // of the module on disk, lowercase hex
     std::vector<Symbol> symbols;
 
     const Symbol* find(std::string_view name) const;
@@ -272,6 +274,21 @@ struct BuildMappings {
         uint32_t midi_offset;       // CSound.midi
         uint32_t ambient_category;  // SoundCategory.ambient
     } sound;
+
+    // Optional here (bind_optional), but widescreen needs it (with
+    // CSpriteFrame::SetupCamera, its kSymbols): a build that doesn't map it
+    // runs without the patch. The hooked functions are found by name, not
+    // stored here.
+    struct {
+        uint32_t world_frame_offset;  // CGameUI.world_frame
+    } widescreen;
+
+    // Optional: movie-display-reset's (patches/movie_display_reset.cpp).
+    struct {
+        uint32_t cinematic_mode;  // Movie.cinematic_mode
+        uint32_t gamma_call;      // Movie.gamma_call (patched by movie-display-reset)
+        uint32_t gamma_restore;   // Movie.gamma_restore (patched by movie-display-reset)
+    } movie;
 };
 
 // The game's JASS event functions that events.cpp hooks by name (its
@@ -301,5 +318,20 @@ inline constexpr const char* kEventFunctions[] = {
 // optional ones noted above) or has the wrong kind; each error names the
 // symbol.
 bool bind_build(const mappings::Build& build, BuildMappings& out, std::vector<std::string>& errors);
+
+// blizzard.ax, the movies' BLZ0 decoder (module "blizzard.ax";
+// patches/movie_frame_length.cpp). RVAs into blizzard.ax.
+struct BlizzardAxMappings {
+    const mappings::Build* data = nullptr;
+    uint32_t transform;            // BlzFilter::Transform
+    uint32_t transform_slot;       // BlzFilter.vtable.Transform_slot: its vtable slot
+    uint32_t width_offset;         // BlzFilter.width: the movie's
+    uint32_t height_offset;        // BlzFilter.height
+    uint32_t format_offset;        // BlzFilter.format: movie_decoder::Format
+    uint32_t output_width_offset;  // BlzFilter.output_width: the output type's biWidth
+};
+
+// Fills `out` from a blizzard.ax mapping; as bind_build.
+bool bind_blizzard_ax(const mappings::Build& build, BlizzardAxMappings& out, std::vector<std::string>& errors);
 
 } // namespace tome

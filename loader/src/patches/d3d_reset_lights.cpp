@@ -27,7 +27,6 @@
  */
 #include "patches.h"
 
-#include "game_build.h"
 #include "hooks.h"
 #include "tome/tome.h"
 
@@ -56,12 +55,6 @@ void TOME_CALL on_release_for_reset(tome_mod*, tome_hook_call* call, void*) {
     for (uint32_t i = 0; i < kGameLights; ++i) light_enable(device, i, 0);
 }
 
-bool d3d_reset_lights_needed(std::string& report) {
-    if (running_on_wine()) return true;
-    report = "not needed outside Wine";
-    return false;
-}
-
 bool install_d3d_reset_lights(uintptr_t, const BuildMappings& build, std::string& report) {
     g_device_offset = build.d3d.device_offset;
     std::string error;
@@ -88,7 +81,7 @@ extern const Patch kD3dResetLights = {
     nullptr,  // any build that maps the symbols below
     kSymbols,
     nullptr,  // nothing to protect: a mod can't reopen a hole through it
-    d3d_reset_lights_needed,
+    only_under_wine,
     install_d3d_reset_lights,
 };
 

@@ -1,5 +1,6 @@
 #include "patches.h"
 
+#include "game_build.h"
 #include "hooks.h"
 
 #include <string>
@@ -15,6 +16,8 @@ extern const Patch kGlContextRestore;
 extern const Patch kBackgroundMute;
 extern const Patch kWidescreen;
 extern const Patch kAmbientSound;
+extern const Patch kMovieDisplayReset;
+extern const Patch kMovieFrameLength;
 
 const Patch* const kAll[] = {
     &kMemhackGuard,
@@ -25,6 +28,8 @@ const Patch* const kAll[] = {
     &kBackgroundMute,
     &kWidescreen,
     &kAmbientSound,
+    &kMovieDisplayReset,
+    &kMovieFrameLength,
 };
 
 namespace {
@@ -47,6 +52,12 @@ const char* first_missing(const char* const* symbols, const mappings::Build& bui
 }
 
 } // namespace
+
+bool only_under_wine(std::string& report) {
+    if (running_on_wine()) return true;
+    report = "not needed outside Wine";
+    return false;
+}
 
 bool install(uintptr_t base, const BuildMappings& build, std::string& report) {
     // init is idempotent and events::install may have run it already; call it

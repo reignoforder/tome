@@ -78,6 +78,15 @@ bool is_valid_name(const std::string& s) {
     return true;
 }
 
+// A module's file name as Windows shows it lowercased: letters, digits, _ - .
+bool is_lower_name(const std::string& s) {
+    if (s.size() > 64) return false;
+    for (char c : s) {
+        if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.')) return false;
+    }
+    return true;
+}
+
 class Parser {
 public:
     explicit Parser(Build& out) : out_(out) {}
@@ -235,6 +244,13 @@ public:
             return finish();
         }
 
+        if (const json::Value* module = root.find("module")) {
+            if (!module->is_string() || module->as_string().empty() || !is_lower_name(module->as_string())) {
+                error("build: \"module\" must be a lowercase file name, e.g. \"blizzard.ax\"");
+            } else {
+                out_.module = module->as_string();
+            }
+        }
         if (const std::string* name = string_field(root, "name", "build", true)) out_.name = *name;
         if (const std::string* version = string_field(root, "file_version", "build", true)) {
             out_.file_version = *version;
@@ -321,23 +337,33 @@ const char* to_string(Convention convention) {
 } // namespace tome::mappings
 
 namespace tome {
+namespace {
+
+void bind_symbol(const mappings::Build& build, const char* name, mappings::Kind kind, uint32_t& field,
+                 std::vector<std::string>& errors) {
+    const mappings::Symbol* sym = build.find(name);
+    if (!sym) {
+        errors.push_back(std::string("\"") + name + "\" isn't mapped");
+    } else if (sym->kind != kind) {
+        errors.push_back(std::string("\"") + name + "\" is a " + to_string(sym->kind) + ", expected a " +
+                         to_string(kind));
+    } else {
+        field = sym->value;
+    }
+}
+
+} // namespace
 
 bool bind_build(const mappings::Build& build, BuildMappings& out, std::vector<std::string>& errors) {
     using mappings::Kind;
     const size_t errors_before = errors.size();
     out = BuildMappings{};
     out.data = &build;
-    auto bind = [&](const char* name, Kind kind, uint32_t& field) {
-        const mappings::Symbol* sym = build.find(name);
-        if (!sym) {
-            errors.push_back(std::string("\"") + name + "\" isn't mapped");
-        } else if (sym->kind != kind) {
-            errors.push_back(std::string("\"") + name + "\" is a " + to_string(sym->kind) + ", expected a " +
-                             to_string(kind));
-        } else {
-            field = sym->value;
-        }
-    };
+    if (build.module != "game.dll") {
+        errors.push_back("a mapping of " + build.module + ", not game.dll");
+        return false;
+    }
+    auto bind = [&](const char* name, Kind kind, uint32_t& field) { bind_symbol(build, name, kind, field, errors); };
     // For symbols only a built-in patch needs: a build that doesn't map them
     // still binds (the field stays 0 and patches::install skips that patch),
     // but one mapped with the wrong kind is still an error.
@@ -550,6 +576,13 @@ bool bind_build(const mappings::Build& build, BuildMappings& out, std::vector<st
     bind_optional("CSound.sound", Kind::Offset, sound.sound_offset);
     bind_optional("CSound.midi", Kind::Offset, sound.midi_offset);
     bind_optional("SoundCategory.ambient", Kind::Constant, sound.ambient_category);
+
+    auto& widescreen = out.widescreen;  // widescreen's symbols (patches/widescreen.cpp)
+    bind_optional("CGameUI.world_frame", Kind::Offset, widescreen.world_frame_offset);
+    auto& movie = out.movie;  // movie-display-reset's symbols (patches/movie_display_reset.cpp)
+    bind_optional("Movie.cinematic_mode", Kind::Data, movie.cinematic_mode);
+    bind_optional("Movie.gamma_call", Kind::Data, movie.gamma_call);
+    bind_optional("Movie.gamma_restore", Kind::Data, movie.gamma_restore);
     // The handshake writes the names into the action and reads the lobby's
     // text; each must leave room for its 0x100 bytes. (Only if they're all
     // mapped: a missing one is reported above.)
@@ -563,6 +596,24 @@ bool bind_build(const mappings::Build& build, BuildMappings& out, std::vector<st
                             ui.main_menu_setup_offset, ui.observer_event_offset}) {
         if (offset % 4 != 0) errors.push_back("vtable offsets must be multiples of 4");
     }
+    return errors.size() == errors_before;
+}
+
+bool bind_blizzard_ax(const mappings::Build& build, BlizzardAxMappings& out, std::vector<std::string>& errors) {
+    using mappings::Kind;
+    const size_t errors_before = errors.size();
+    out = BlizzardAxMappings{};
+    out.data = &build;
+    if (build.module != "blizzard.ax") {
+        errors.push_back("a mapping of " + build.module + ", not blizzard.ax");
+        return false;
+    }
+    bind_symbol(build, "BlzFilter::Transform", Kind::Function, out.transform, errors);
+    bind_symbol(build, "BlzFilter.vtable.Transform_slot", Kind::Data, out.transform_slot, errors);
+    bind_symbol(build, "BlzFilter.width", Kind::Offset, out.width_offset, errors);
+    bind_symbol(build, "BlzFilter.height", Kind::Offset, out.height_offset, errors);
+    bind_symbol(build, "BlzFilter.format", Kind::Offset, out.format_offset, errors);
+    bind_symbol(build, "BlzFilter.output_width", Kind::Offset, out.output_width_offset, errors);
     return errors.size() == errors_before;
 }
 

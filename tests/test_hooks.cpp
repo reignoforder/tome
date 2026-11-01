@@ -198,6 +198,15 @@ TEST(hooks_chain_order) {
     hooks::insert(chain, handler(TOME_HOOK_AFTER, 5, trace_handler, "a5", 5));
     CHECK_EQ(run(chain, 1), 2u);
     CHECK_EQ(g_trace, std::string("b10 b0 b0late original a5 a0 "));
+
+    // A `last` handler (Tome's innermost) runs after its phase's others,
+    // even one at INT32_MIN registered after it.
+    hooks::Handler last = handler(TOME_HOOK_BEFORE, INT32_MAX, trace_handler, "last", 6);
+    last.last = true;
+    hooks::insert(chain, last);
+    hooks::insert(chain, handler(TOME_HOOK_BEFORE, INT32_MIN, trace_handler, "bmin", 7));
+    CHECK_EQ(run(chain, 1), 2u);
+    CHECK_EQ(g_trace, std::string("b10 b0 b0late bmin last original a5 a0 "));
 }
 
 TEST(hooks_replace_nests_and_args_flow) {

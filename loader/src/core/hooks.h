@@ -64,14 +64,18 @@ struct Handler {
     tome_mod* mod = nullptr;
     int32_t phase = TOME_HOOK_BEFORE;
     int32_t priority = 0;
+    // Tome's own innermost handlers (not settable through the mod API):
+    // after every handler of its phase without it, whatever their priority,
+    // so a mod's handler at INT32_MIN still runs before it.
+    bool last = false;
     tome_hook_fn fn = nullptr;
     void* user = nullptr;
     uint64_t seq = 0;  // registration order, for equal priorities
     std::shared_ptr<Gate> gate;  // optional
 };
 
-// Inserts `h` in run order: by phase, then higher priority first, then
-// earlier registration first.
+// Inserts `h` in run order: by phase, then `last` ones after the rest, then
+// higher priority first, then earlier registration first.
 void insert(std::vector<Handler>& chain, const Handler& h);
 
 // Removes the handlers matching all given fields; returns how many.

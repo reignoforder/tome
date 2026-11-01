@@ -5,6 +5,7 @@
 #include "crash_loop.h"
 #include "storm.h"
 #include "frames.h"
+#include "game_build.h"
 #include "guard.h"
 #include "handshake.h"
 #include "hooks.h"
@@ -33,7 +34,6 @@ namespace tome::events {
 namespace {
 
 using GlueGetFn = void*(*)();
-using GameUiGetFn = void*(__fastcall*)(int create, int forget);
 using DisplayTextFn = void(__thiscall*)(void* game_ui, float x, float y, const char* text, float duration,
                                         uint32_t color);
 using StringTextFn = const char*(__thiscall*)(const void* string);
@@ -1275,7 +1275,7 @@ bool install(uintptr_t game_base, const BuildMappings& build, std::string& repor
     g_base = game_base;
     g_build = &build;
     g_glue_get = reinterpret_cast<GlueGetFn>(game_base + build.game.glue_get);
-    g_game_ui_get = reinterpret_cast<GameUiGetFn>(game_base + build.game.game_ui_get);
+    g_game_ui_get = game_ui_get(game_base, build);
     g_display_text = reinterpret_cast<DisplayTextFn>(game_base + build.game.game_ui_display_text);
     g_string_text = reinterpret_cast<StringTextFn>(game_base + build.jass.string_get_text);
     units::init(game_base, build);

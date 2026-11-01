@@ -649,7 +649,7 @@ Wine (the separate `enhanced-options` mod, once `fps-unlock`, is built on it):
 | GetTickCount | import slot `0xA7C148` | 118 calls through the thunk `0x092A10`, a few `call [slot]`. Windows advances it every 15.6 ms; frames can't come faster than that (Wine: 1 ms). Rounding it down to 16 ms steps under Wine dropped maxfps 200 to 62.5 fps, the classic ~64 cap. The net clock `0x092A20` uses QueryPerformanceCounter instead when `.data 0xD3D5C4` is set, else GetTickCount; the net client subtracts readings unsigned and caps its bank at 4000 ms (`0x32D812`), so a clock that steps back would run the game up to 4 s ahead. |
 | CGxDeviceD3d::BuildPresentParams | `0x13FED0` | `void __thiscall(D3DPRESENT_PARAMETERS*)`, `ret 4`. Callers: CreateDevice (`0x13FC20`, IDirect3D9 vtable `+0x40`) and the reset after a lost device (`0x1404DD`, IDirect3DDevice9 `+0x40`). In fullscreen the size, format and refresh rate (`+0x30`) are those of display mode `+0x98` (picked at start-up) of adapter `+0x94` from the IDirect3D9 at `+0x580` (EnumAdapterModes, vtable `+0x1C`); in a window `Windowed` (`+0x20`) is 1 and the format the desktop's (GetAdapterDisplayMode, `+0x20`). PresentationInterval (`+0x34`) is always 0 (DEFAULT): vsync on. OpenGL never calls `wglSwapIntervalEXT`, so the driver decides. |
 | CGxDeviceD3d::CanDraw | `0x140410` | `bool __thiscall(device)`, plain `ret`. Device vtable `+0x3C`, before every frame. TestCooperativeLevel; on `D3DERR_DEVICENOTRESET` (or, in a window only, a resize pending at `+0x730`) ReleaseForReset(0), BuildPresentParams, `IDirect3DDevice9::Reset` (`+0x40`), RestoreState. False while the device is lost. Running the same four steps from a BEFORE hook on it resets the device on demand, in a window or fullscreen: Enhanced Options does so to change vsync (and the fullscreen refresh rate) during a game. Checked in a window under Wine: Reset returned 0 every time, the game drew on, and the frame rate went from 165 (vsync, a 165 Hz monitor) to 190 and back. |
-| Fullscreen ↔ window | | The device's fullscreen display mode is 5 ints at `+0x98` (CGxDevice.display_mode): its index in the adapter's list for the format, width (`+0x9C`, the "fullscreen flag" everything reads), height, bits and refresh rate; all 0 in a window. The window is made at `0x1400C0` with style `0x06CF0000` and ex-style `WS_EX_APPWINDOW` in a window, `0x86080000` and `WS_EX_APPWINDOW \| WS_EX_TOPMOST` in fullscreen, and a window is centered (`0x140020`). Switching during a game (Enhanced Options, checked under Wine in both directions, from a fullscreen start and a windowed one): fill or clear the mode (the Video options' size and depth, an EnumAdapterModes index), restyle the window (fullscreen: the mode's size at the monitor's corner, before the Reset; a window: after it, as Direct3D gives back the style the window had when it went fullscreen), then the Reset above. Under Wine (wined3d) a device created fullscreen then drew nothing into the window until it was minimized and restored once (wined3d also warns it can't unhook the window: its procedure was replaced after its own); the switch does that. OpenGL makes its mode as it starts (ChangeDisplaySettings, `0x13C4D2`), so it still needs a restart. |
+| Fullscreen ↔ window | | The device's fullscreen display mode is 5 ints at `+0x98` (CGxDevice.display_mode): its index in the adapter's list for the format, width (`+0x9C`, the "fullscreen flag" everything reads), height, bits and refresh rate; all 0 in a window. The window is made at `0x1400C0` with style `0x06CF0000` and ex-style `WS_EX_APPWINDOW` in a window, `0x86080000` and `WS_EX_APPWINDOW \| WS_EX_TOPMOST` in fullscreen, and a window is centered (`0x140020`). Switching during a game (Enhanced Options, checked under Wine in both directions, from a fullscreen start and a windowed one): fill or clear the mode (the Video options' size and depth, an EnumAdapterModes index), restyle the window (fullscreen: the mode's size at the monitor's corner, before the Reset; a window: after it, as Direct3D gives back the style the window had when it went fullscreen), then the Reset above. Under Wine (wined3d) a device created fullscreen then drew nothing into the window until it was minimized and restored once (wined3d also warns it can't unhook the window: its procedure was replaced after its own); the switch does that. OpenGL makes its mode as it starts (ChangeDisplaySettingsExA, `0x13ACFA`), so it still needs a restart. |
 | CGxDeviceD3d::ReleaseForReset | `0x13FDC0` | `void __thiscall(device, int release_textures)`, `ret 4`. Clears the state caches (render states `+0x748`, 256 hashed `{kind, state, value}` slots of 12 bytes, which `0x142C60` checks before every SetRenderState; texture stages `+0x1348`/`+0x1358`; lights `+0x1B58`, 8 × `0x74`) and releases the surfaces at `+0x6C0..+0x6D8`; with 1 also the textures (`0x143B00`). Called with 0 before Reset (`0x1404D2`), with 1 by the teardown (`0x13FD2B`). The d3d-reset-lights patch hooks it. |
 | CGxDeviceD3d::RestoreState | `0x142E50` | `void __thiscall(device)`, plain `ret`. After CreateDevice (`0x13FC9A`) and Reset (`0x1404FA`): z, lighting and fog states, the 8 lights from `+0x3C0` (enabled 0–4 on the main menu), the cull mode, then SetGamma(gamma, force 1). |
 | CGxDeviceD3d::SetGamma | `0x13F870` | `void __thiscall(device, float exponent, int force)`, `ret 8`. Vtable `+0x1C`. Returns early if the exponent equals the cached one (`CGxDevice.gamma`, `+0xD8`) and force is 0. In fullscreen (`+0x9C` nonzero) with `D3DCAPS2_FULLSCREENGAMMA` (`0x20000` in `+0x594`) sends `SetGammaRamp` with `(i/255)^(exponent + rand()/32767/1000) × 65535`. The Gamma option g gives exponent `(100 − g)/100 + 0.2` (Options::Apply, `0x04057F`, through `0x136B80`). |
@@ -658,6 +658,10 @@ Wine (the separate `enhanced-options` mod, once `fps-unlock`, is built on it):
 | CGxDeviceOpenGl::ReleaseTextures | `0x13ED30` | `void __thiscall(device)`, plain `ret`. glDeleteTextures for the `+0x540` count / `+0x544` array of textures, clears each name (`+0x30`) and marks it dirty (`0x13A1E0`); the upload (vtable `+0x00`, `0x13EDB0`) makes new ones. |
 | CGxDeviceOpenGl::DestroyContext | `0x13AFA0` | `void __thiscall(device)`, plain `ret`. ReleaseTextures, wglMakeCurrent(0), wglDeleteContext (`+0x580`), release the DC (`+0x57C`). |
 | CGxDeviceOpenGl::CreateContext | `0x13AF40` | `bool __thiscall(device)`, plain `ret`. GetDC of the window `+0x578`, wglCreateContext (`0x13F5C0`), make current, driver queries (`0x13F2E0`), GL state setup (`0x13DCC0`). |
+| Movie::SetDisplayMode | `0x13C3A0` | `void __fastcall(int cinematic, const int* mode)`, plain `ret`. The movie player's display mode (GxMovie\GxVideo.cpp): Movie::Play (`0x13D520`) calls it before the movie with cinematic = (fullscreen game), `0x13D760` with 0 after it. cinematic is `cl` only (`sete cl`; the rest of `ecx` is junk). Set: EnumDisplaySettingsA(ENUM_CURRENT_SETTINGS), then the 24 {width, height, bits, frequency} modes at `.data 0xCE4230` (with `mode`'s fields where its flag bits say) through ChangeDisplaySettingsA(CDS_TEST \| CDS_FULLSCREEN) (`0x13C4D2`); the first that passes is set (`0x13C50B`) and kept at `.data 0xD5314C`. Otherwise ChangeDisplaySettingsA(NULL, 0), and while that fails Sleep(50) and again, with no limit: under Wine on a display that refuses it (Xvfb) the game hangs on a black screen before the movie starts. The movie-display-reset patch replaces that loop (`docs/known-bugs.md`, "Under Wine"). |
+| Movie.cinematic_mode | `0xD5314C` (data) | 4 uint32: width, height, bits, frequency. Movie::SetDisplayMode (cinematic) writes the current mode's width, height and bits first, then the table entry it sets over all four. Movie::Play (`0x13D60E`) makes the fullscreen movie window with CreateWindowExA(WS_EX_TOPMOST, WS_POPUP, 0, 0, width, height). Under Proton the 800x600 mode is emulated, so that window is 4:3 on any monitor; movie-display-reset puts the desktop's registry mode back and writes it here instead (a mode Proton scales leaves light lines along the video's window). |
+| Movie.gamma_call | `0x13D72C` (data: an instruction) | In Movie::Play, fullscreen only: `call [SetDeviceGammaRamp]` (`ff 15` + import slot, 6 bytes) with ramp[i] = pow(i / 255, 1 / 2.2) * 65535 on all channels (exponent: double at `0xA90310`). The ramp before is saved at `0xD53160` (GetDeviceGammaRamp at `0x13D6B5`) and set back at `0x13CE93`. Proton applies it to the movie's OpenGL output, washing it out; movie-display-reset points the call at a no-op under Wine. |
+| Movie.gamma_restore | `0x13CE93` (data: an instruction) | `call [SetDeviceGammaRamp]` with the ramp saved at `0xD53160`, in `0x13CE80`, which the movie window's procedure calls (`0x13D93E`) when Enter, Esc or Space skips the movie. Only a fullscreen movie fills `0xD53160`, so skipping a windowed one sets zeros. movie-display-reset points it at a no-op under Wine too, after Movie.gamma_call. |
 
 OpenGL fullscreen under Wine: minimizing makes Wine drop the driver's context
 (`wglMakeCurrent(NULL)` it issues itself) and restoring makes a new, empty one
@@ -1072,13 +1076,16 @@ Found from the six calls to `tan` (`_libm_sse2_tan_precise`, import
 |------|-----|-------|
 | C44Matrix::Perspective | `0x126E30` | `void __thiscall(float* m, float fov, float aspect, float near, float far)`, `ret 0x10`. `t = tan(fov · 0.5 / sqrt(aspect² + 1))` (fov is spread over the diagonal), `m[0] = 1/(t·aspect)`, `m[5] = 1/t`, `m[10] = (far+near)/(far−near)`, `m[11] = 1`, `m[14] = −2·far·near/(far−near)`, the rest 0. Only caller: `0x1ADF40`. The off-center variant just before it (`ret 0x18`) has no `tan`. |
 | CCamera::SetupProjection | `0x1ADF40` | `__thiscall(camera, rect*, unused)`, `ret 8` (its one caller, the wrapper at `0x1ADE90`, takes the rect in `edx` and one stack argument and pushes both; `ret 4`). fov from camera `+0x114` (1.0466 in a game), near `+0xCC` (331), far `+0xAC` (70000), aspect from the viewport rect, which is in UI units: 1.3333 for the world view in every window shape (measured at 1272 × 686). |
+| CSpriteFrame::SetupCamera | `0x0F64E0` | `void __thiscall(frame)`, plain `ret`. Camera at `+0x140`, rect at `+0x12C`, then the wrapper `0x1ADE90`; without a camera it goes on at `0x0F6500`. Used for 3D models in UI frames and for the world frame (`CGameUI+0x3BC`, a CSpriteFrame too): by its own `0x3C1D6F` and before the screen/world conversions at `0x3911AB` and `0x3C09EC` (`CGameUI::Get(1)` then `+0x3BC`), which read the transforms back (`0x137270`, `0x137180`) for unit picking. |
 | WorldView::SetupCamera | `0x3640F0` | `void __thiscall(this, float delta, const float* rect)`, `ret 8` (name guessed). If `this+0x38` is 1, first `0x1A2C10` on `+0x5C` with delta; then the wrapper `0x1ADE90` with the camera at `+0x34`. Once per frame, in games only, from the world frame's update (`0x385D55`, `this` = its `+0x19C`). |
 
 Measured in a game at 16:9: `m[0] = 2.3098`, `m[5] = 3.0797` (ratio 0.75,
 correct only for 4:3). Scaling `m[0]` by (4/3) / (window width / height)
-after Perspective gives correct proportions, and mouse picking follows (a
-move order at 90% of the width lands under the cursor), so picking reads
-the same matrix.
+after Perspective gives correct proportions, and picking the ground follows
+(a move order at 90% of the width lands under the cursor). Unit picking
+doesn't: it sets up a projection of its own (below), which kept the 4:3
+one, so units answered clicks further from the middle of the screen than
+they were drawn.
 
 Every camera reaches Perspective through the wrapper `0x1ADE90`, which has
 three callers. Counted per 2 s at 16:9 by hooking the wrapper:
@@ -1091,7 +1098,10 @@ three callers. Counted per 2 s at 16:9 by hooking the wrapper:
 
 Only the world view may be widened: the others sit in 2D art that is still
 stretched, so the widescreen patch scales only Perspective calls made while
-WorldView::SetupCamera runs.
+WorldView::SetupCamera runs, or CSpriteFrame::SetupCamera for the world
+frame (part of the `0x0F64E0` count above). That one uses the world
+frame's rect, not WorldView's, but the same (4/3) / window aspect applies:
+the UI space is stretched the same way whatever the rect.
 
 ## Crash handler
 
@@ -1238,6 +1248,42 @@ engine sets it some other way (not a direct `mov [eax+0x14]` after the
 table lookup). Next step: find the engine's constructor (its vtable's
 deleting destructor is called from `0x90C850`) and make a thread table
 with it in slot 5 before compiling.
+
+## blizzard.ax (for the movie-frame-length patch)
+
+The movies (`Movies\*.mpq`, AVIs of `BLZ0` video and MP3 sound) are decoded
+by the install's `blizzard.ax`, a DirectShow transform filter (a DivX
+decoder built on the base classes' `CTransformFilter`). `war3.exe` loads it
+and calls its `DllRegisterServer` at startup; DirectShow then loads it by
+CLSID from the game folder. Its addresses are in `mappings/blizzard.ax.json`
+(`"module": "blizzard.ax"`, `BlzFilter.*`), checked when the patch loads it
+and by a unit test against the local file.
+
+- Build: PE timestamp `0x3CDC61D0` (May 2002), SizeOfImage `0x96000`, fixed
+  base `0x1C400000` (with relocations), 612,328 bytes. Unchanged in 1.27b.
+- Filter vtable (`.data1`, RVA `0x623C0` on): Transform `0x4020`,
+  CheckInputType `0x4540`, CheckTransform `0x4680`, **DecideBufferSize
+  `0x5410`** (slot at RVA `0x623F0`), GetMediaType `0x47C0`, SetMediaType
+  `0x34D0` (slot `0x62404`).
+- Fields (filter `this`): input pin `+0x8C`, movie width `+0xEC`, height
+  `+0xF0` (from the input's VIDEOINFOHEADER), output format code `+0xF4`
+  (SetMediaType, and Transform on a sample that changes the type: RGB32 4, RGB24 6, RGB555 8, RGB565 `0xA`, YUY2 1, UYVY 2,
+  YV12 and I420 `0xD`), a flag at `+0x16C` (2 buffers instead of 1), the
+  output type's VIDEOINFOHEADER at `+0x1B8` (its biWidth at `+0x1EC`: the
+  row width in pixels Transform decodes with, `0x404498`; the movie's width
+  rounded up to 32 if it's 0).
+- DecideBufferSize (`HRESULT __thiscall(this, IMemAllocator*,
+  ALLOCATOR_PROPERTIES*)`, `ret 8`): `cbBuffer = width * 4 * height`
+  whatever `+0xF4` says, then `SetProperties`. Transform decodes into the
+  output sample and calls only `SetPreroll(FALSE)` on it, never
+  `SetActualDataLength`, so a frame's length is the buffer's. A renderer that copies the sample's
+  length (Wine's VMR7) overruns a YUY2 surface by half.
+- Under GE-Proton11-11 (winedmo splitter) the graph is splitter → this
+  filter → VMR7, connected as YUY2 800x368. Under GE-Proton10-34 Wine's AVI
+  splitter decodes `BLZ0` itself (YV12 to the renderer) and the filter
+  isn't used for the picture. Seen with `WINEDEBUG=+quartz,+strmbase`.
+- Movie::Play (game.dll `0x13D520`, `ret 8`) calls Movie::SetDisplayMode
+  first, before any DirectShow call: the patch's hook point.
 
 ## Methods and tools
 

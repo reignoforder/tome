@@ -73,6 +73,7 @@ std::vector<std::string> split_params(const std::string& list) {
 
 bool run_order(const Handler& a, const Handler& b) {
     if (a.phase != b.phase) return a.phase < b.phase;
+    if (a.last != b.last) return b.last;
     if (a.priority != b.priority) return a.priority > b.priority;
     return a.seq < b.seq;
 }

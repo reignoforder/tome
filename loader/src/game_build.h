@@ -26,4 +26,11 @@ bool identify_game_build(HMODULE game, GameBuild& out);
 // True when the game runs under Wine (ntdll exports wine_get_version).
 bool running_on_wine();
 
+// CGameUI::Get(create, forget): the game UI (null outside a game with
+// create 0). Main thread.
+using GameUiGetFn = void*(__fastcall*)(int create, int forget);
+inline GameUiGetFn game_ui_get(uintptr_t base, const BuildMappings& build) {
+    return reinterpret_cast<GameUiGetFn>(base + build.game.game_ui_get);
+}
+
 } // namespace tome

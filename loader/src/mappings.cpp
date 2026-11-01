@@ -10,11 +10,13 @@ namespace {
 
 struct Loaded {
     mappings::Build data;
-    BuildMappings bound;
+    BuildMappings bound;          // module game.dll
+    BlizzardAxMappings ax_bound;  // module blizzard.ax
 };
 
 struct Database {
-    std::vector<std::unique_ptr<Loaded>> builds;
+    std::vector<std::unique_ptr<Loaded>> builds;  // of game.dll
+    std::vector<std::unique_ptr<Loaded>> blizzard_ax;
     std::vector<std::string> errors;
 };
 
@@ -33,10 +35,17 @@ const Database& database() {
             } else {
                 mappings::ParseResult parsed = mappings::parse_build(root, loaded->data);
                 errors = std::move(parsed.errors);
-                if (parsed.ok) bind_build(loaded->data, loaded->bound, errors);
+                const std::string& module = loaded->data.module;
+                if (parsed.ok && module == "game.dll") {
+                    bind_build(loaded->data, loaded->bound, errors);
+                } else if (parsed.ok && module == "blizzard.ax") {
+                    bind_blizzard_ax(loaded->data, loaded->ax_bound, errors);
+                } else if (parsed.ok) {
+                    errors.push_back("unknown module \"" + module + "\"");
+                }
             }
             if (errors.empty()) {
-                out.builds.push_back(std::move(loaded));
+                (loaded->data.module == "game.dll" ? out.builds : out.blizzard_ax).push_back(std::move(loaded));
             } else {
                 for (const std::string& e : errors) out.errors.push_back(std::string(file.name) + ": " + e);
             }
@@ -54,18 +63,28 @@ const IMAGE_NT_HEADERS32* nt_headers(HMODULE module) {
     return nt->Signature == IMAGE_NT_SIGNATURE ? nt : nullptr;
 }
 
-} // namespace
-
-const BuildMappings* find_build_by_header(HMODULE game) {
-    const IMAGE_NT_HEADERS32* nt = nt_headers(game);
+const Loaded* find_by_header(const std::vector<std::unique_ptr<Loaded>>& builds, HMODULE module) {
+    const IMAGE_NT_HEADERS32* nt = nt_headers(module);
     if (!nt) return nullptr;
-    for (const auto& build : database().builds) {
+    for (const auto& build : builds) {
         if (nt->FileHeader.TimeDateStamp == build->data.pe_timestamp &&
             nt->OptionalHeader.SizeOfImage == build->data.size_of_image) {
-            return &build->bound;
+            return build.get();
         }
     }
     return nullptr;
+}
+
+} // namespace
+
+const BuildMappings* find_build_by_header(HMODULE game) {
+    const Loaded* build = find_by_header(database().builds, game);
+    return build ? &build->bound : nullptr;
+}
+
+const BlizzardAxMappings* find_blizzard_ax_by_header(HMODULE ax) {
+    const Loaded* build = find_by_header(database().blizzard_ax, ax);
+    return build ? &build->ax_bound : nullptr;
 }
 
 const BuildMappings* find_build_by_sha256(const char* sha256) {
@@ -76,12 +95,16 @@ const BuildMappings* find_build_by_sha256(const char* sha256) {
 }
 
 bool verify_loaded_build(HMODULE game, const BuildMappings& build, std::vector<std::string>& errors) {
-    const IMAGE_NT_HEADERS32* nt = nt_headers(game);
+    return verify_loaded_module(game, *build.data, errors);
+}
+
+bool verify_loaded_module(HMODULE module, const mappings::Build& build, std::vector<std::string>& errors) {
+    const IMAGE_NT_HEADERS32* nt = nt_headers(module);
     if (!nt) {
-        errors.push_back("game.dll has no PE header");
+        errors.push_back(build.module + " has no PE header");
         return false;
     }
-    std::vector<std::string> found = mappings::verify_code(*build.data, reinterpret_cast<const uint8_t*>(game),
+    std::vector<std::string> found = mappings::verify_code(build, reinterpret_cast<const uint8_t*>(module),
                                                            nt->OptionalHeader.SizeOfImage);
     errors.insert(errors.end(), found.begin(), found.end());
     return found.empty();

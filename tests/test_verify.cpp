@@ -200,3 +200,29 @@ TEST(verify_embedded_mappings_against_local_game) {
     }
     if (!matched) std::printf("  skipped: the local game.dll isn't a mapped build\n");
 }
+
+// mappings/blizzard.ax.json against the local install's blizzard.ax.
+TEST(verify_blizzard_ax_mapping_against_local_game) {
+    std::vector<uint8_t> file;
+    if (!read_file(TOME_TEST_GAME_DIR "/blizzard.ax", file)) {
+        std::printf("  skipped: no %s/blizzard.ax\n", TOME_TEST_GAME_DIR);
+        return;
+    }
+    pe::Image image;
+    std::string error;
+    if (!pe::map_image(file, image, error)) {
+        test::fail(__FILE__, __LINE__, "blizzard.ax: " + error);
+        return;
+    }
+    bool matched = false;
+    for (size_t i = 0; i < mappings::kEmbeddedFileCount; ++i) {
+        mappings::Build b;
+        if (!parse_build_text(mappings::kEmbeddedFiles[i].text, b) || b.module != "blizzard.ax") continue;
+        if (b.pe_timestamp != image.timestamp || b.size_of_image != image.size_of_image) continue;
+        matched = true;
+        for (const std::string& e : mappings::verify_code(b, image.bytes.data(), image.bytes.size())) {
+            test::fail(__FILE__, __LINE__, b.name + ": " + e);
+        }
+    }
+    if (!matched) std::printf("  skipped: the local blizzard.ax isn't a mapped build\n");
+}
