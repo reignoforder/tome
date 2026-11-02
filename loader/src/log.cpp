@@ -40,6 +40,12 @@ bool open(const std::wstring& path) {
     return true;
 }
 
+void close() {
+    ExclusiveLock hold(g_lock);
+    if (g_file != INVALID_HANDLE_VALUE) CloseHandle(g_file);
+    g_file = INVALID_HANDLE_VALUE;
+}
+
 void keep_lines(bool keep) {
     ExclusiveLock hold(g_lock);
     g_keep = keep;

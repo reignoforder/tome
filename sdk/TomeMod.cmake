@@ -28,15 +28,145 @@ if(NOT TARGET tome_sdk)
     target_include_directories(tome_sdk INTERFACE "${CMAKE_CURRENT_LIST_DIR}/include")
 endif()
 
-# tome_add_mod(<target> SOURCES ... METADATA <tome.mod.json> [FILES ...])
+# Checks at build time and tests without the game (README.md, "Testing a
+# mod"): tome-check and tome_test.dll are Tome itself against a fake game.
+# They're in the SDK zip's bin/ and lib/ (Tome's own build makes them, and
+# sets TOME_TOOLS_FROM_TARGETS); as Windows programs they run under Wine on
+# Linux. TOME_CHECK: AUTO runs tome-check after building each mod when it
+# and a way to run it are there, ON requires them, OFF never runs it.
+set(TOME_CHECK AUTO CACHE STRING "Check each mod with tome-check after building it (AUTO, ON, OFF)")
+set_property(CACHE TOME_CHECK PROPERTY STRINGS AUTO ON OFF)
+
+# Sets, in the caller: _tome_check_exe (empty if there's none), whether
+# tome_test.dll is there (_tome_test_found: the tome_test target), and
+# _tome_runner (what runs a Windows program here; "" on Windows) with
+# _tome_runner_found.
+function(_tome_tools)
+    set(sdk "${CMAKE_CURRENT_FUNCTION_LIST_DIR}")
+    set(check "")
+    set(test_found FALSE)
+    if(TOME_TOOLS_FROM_TARGETS)
+        set(check "$<TARGET_FILE:tome_check>")
+        set(test_found TRUE)
+    elseif(EXISTS "${sdk}/bin/tome-check.exe")
+        set(check "${sdk}/bin/tome-check.exe")
+        if(EXISTS "${sdk}/bin/tome_test.dll" AND EXISTS "${sdk}/lib/libtome_test.dll.a")
+            if(NOT TARGET tome_test)
+                add_library(tome_test SHARED IMPORTED GLOBAL)
+                set_target_properties(tome_test PROPERTIES
+                    IMPORTED_LOCATION "${sdk}/bin/tome_test.dll"
+                    IMPORTED_IMPLIB "${sdk}/lib/libtome_test.dll.a")
+            endif()
+            set(test_found TRUE)
+        endif()
+    endif()
+    set(runner "")
+    set(runner_found FALSE)
+    if(CMAKE_HOST_WIN32)
+        set(runner_found TRUE)
+    elseif(CMAKE_CROSSCOMPILING_EMULATOR)
+        set(runner "${CMAKE_CROSSCOMPILING_EMULATOR}")
+        set(runner_found TRUE)
+    else()
+        find_program(TOME_WINE wine)
+        if(TOME_WINE)
+            set(runner "${TOME_WINE}")
+            set(runner_found TRUE)
+        endif()
+    endif()
+    set(_tome_check_exe "${check}" PARENT_SCOPE)
+    set(_tome_test_found ${test_found} PARENT_SCOPE)
+    set(_tome_runner "${runner}" PARENT_SCOPE)
+    set(_tome_runner_found ${runner_found} PARENT_SCOPE)
+endfunction()
+
+# _tome_add_check(<target> <mod folder> <no_check> DEPENDS <files>... [CHECK_WITH <mods>...])
+#
+# <target>_check: tome-check on the mod folder once <target> is built (after
+# all its POST_BUILD steps), again whenever the DEPENDS files or tome-check
+# change. CHECK_WITH: the mods it needs (targets of tome_add_*mod, or mod
+# folders), loaded with it. A problem fails the build.
+function(_tome_add_check target dir no_check)
+    cmake_parse_arguments(CHECK "" "" "DEPENDS;CHECK_WITH" ${ARGN})
+    if(no_check OR TOME_CHECK STREQUAL "OFF")
+        return()
+    endif()
+    _tome_tools()
+    if(NOT _tome_check_exe OR NOT _tome_runner_found)
+        if(TOME_CHECK STREQUAL "ON")
+            message(FATAL_ERROR "TOME_CHECK=ON: tome-check needs the SDK zip's bin/tome-check.exe and, on Linux, Wine")
+        endif()
+        get_property(told GLOBAL PROPERTY _TOME_CHECK_TOLD)
+        if(NOT told)
+            message(STATUS "Mods aren't checked after building (tome-check needs the SDK zip's bin/ and, on Linux, Wine)")
+            set_property(GLOBAL PROPERTY _TOME_CHECK_TOLD TRUE)
+        endif()
+        return()
+    endif()
+    set(deps ${target} ${CHECK_DEPENDS})
+    if(TOME_TOOLS_FROM_TARGETS)
+        list(APPEND deps tome_check)
+    else()
+        list(APPEND deps "${_tome_check_exe}")
+    endif()
+    # A CHECK_WITH mod may be defined later in the project: its name is told
+    # from a folder once the whole project is read (the top folder's end). The
+    # values are put into the call now: a deferred call reads variables when
+    # it runs, in the top folder's scope.
+    set(args "")
+    foreach(value IN ITEMS "${target}" "${dir}" "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}"
+            "${_tome_runner}" "${_tome_check_exe}" "${deps}" "${CHECK_CHECK_WITH}")
+        string(APPEND args " [==[${value}]==]")
+    endforeach()
+    cmake_language(EVAL CODE "cmake_language(DEFER DIRECTORY [==[${CMAKE_SOURCE_DIR}]==] CALL _tome_add_check_now${args})")
+endfunction()
+
+# The rest of _tome_add_check, once every target is defined.
+function(_tome_add_check_now target dir source_dir binary_dir runner check_exe deps check_with)
+    set(with "")
+    foreach(mod IN LISTS check_with)
+        if(TARGET ${mod})
+            get_target_property(folder ${mod} TOME_MOD_FOLDER)
+            list(APPEND with "${CMAKE_BINARY_DIR}/mods/${folder}")
+            list(APPEND deps ${mod})
+            # A custom target (Rust and Wasm mods) only orders the build: its
+            # entry file makes the check run again when that mod changes.
+            get_target_property(type ${mod} TYPE)
+            get_target_property(entry ${mod} TOME_MOD_ENTRY)
+            if(type STREQUAL "UTILITY" AND entry)
+                list(APPEND deps "${CMAKE_BINARY_DIR}/mods/${folder}/${entry}")
+            endif()
+        else()
+            get_filename_component(path "${mod}" ABSOLUTE BASE_DIR "${source_dir}")
+            list(APPEND with "${path}")
+        endif()
+    endforeach()
+    set(stamp "${binary_dir}/${target}.checked")
+    add_custom_command(OUTPUT "${stamp}"
+        # Wine's own messages would drown tome-check's.
+        COMMAND ${CMAKE_COMMAND} -E env WINEDEBUG=-all ${runner} "${check_exe}" "${dir}" ${with}
+        COMMAND ${CMAKE_COMMAND} -E touch "${stamp}"
+        DEPENDS ${deps}
+        COMMENT "Checking ${target} with tome-check"
+        VERBATIM
+    )
+    add_custom_target(${target}_check ALL DEPENDS "${stamp}")
+endfunction()
+
+# tome_add_mod(<target> SOURCES ... METADATA <tome.mod.json> [FOLDER <name>] [FILES ...]
+#              [CHECK_WITH <mods>...] [NO_CHECK])
 #
 # Builds a mod DLL and assembles a ready-to-install folder at
 # <build>/mods/<mod folder>/ containing the DLL, its tome.mod.json and the
 # FILES (paths relative to the source folder, kept as they are, e.g. ui/x.fdf).
 # The folder goes into tome/mods/ as it is; tome_package() makes a .tome of it.
+#
+# Then <target>_check checks the folder with tome-check, as Tome would load
+# it (TOME_CHECK above): a problem fails the build. CHECK_WITH: the mods it
+# needs (their targets, or folders), loaded with it; NO_CHECK: not checked.
 function(tome_add_mod target)
     tome_require_32bit()
-    cmake_parse_arguments(MOD "" "METADATA;FOLDER" "SOURCES;FILES" ${ARGN})
+    cmake_parse_arguments(MOD "NO_CHECK" "METADATA;FOLDER" "SOURCES;FILES;CHECK_WITH" ${ARGN})
     if(NOT MOD_FOLDER)
         set(MOD_FOLDER ${target})
     endif()
@@ -81,12 +211,15 @@ function(tome_add_mod target)
     list(TRANSFORM MOD_FILES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/" OUTPUT_VARIABLE file_paths)
     list(APPEND file_paths "${CMAKE_CURRENT_SOURCE_DIR}/${MOD_METADATA}")
     set_property(TARGET ${target} APPEND PROPERTY LINK_DEPENDS ${file_paths})
+    # The DLL is relinked when the metadata or a file changes (LINK_DEPENDS).
+    _tome_add_check(${target} "${CMAKE_BINARY_DIR}/mods/${MOD_FOLDER}" "${MOD_NO_CHECK}" CHECK_WITH ${MOD_CHECK_WITH})
     # For tome_package.
     set_target_properties(${target} PROPERTIES TOME_MOD_FOLDER "${MOD_FOLDER}" TOME_MOD_FILES "${MOD_FILES}"
         TOME_MOD_ENTRY "$<TARGET_FILE_NAME:${target}>" TOME_MOD_METADATA "${CMAKE_CURRENT_SOURCE_DIR}/${MOD_METADATA}")
 endfunction()
 
-# tome_add_rust_mod(<target> CRATE <dir> METADATA <tome.mod.json> [FOLDER <name>] [FILES ...] [WASM])
+# tome_add_rust_mod(<target> CRATE <dir> METADATA <tome.mod.json> [FOLDER <name>] [FILES ...] [WASM]
+#                   [CHECK_WITH <mods>...] [NO_CHECK])
 #
 # The same for a mod written in Rust (sdk/rust): builds the cdylib crate in
 # CRATE with cargo for i686-pc-windows-gnu, using this build's MinGW
@@ -100,8 +233,10 @@ endfunction()
 # built for wasm32-unknown-unknown (rustup target add
 # wasm32-unknown-unknown): hello-wasm-rs makes hello_wasm_rs.wasm, which
 # goes in tome.mod.json "wasm". Needs no C compiler.
+#
+# Checked by tome-check after each build, as tome_add_mod's mods are.
 function(tome_add_rust_mod target)
-    cmake_parse_arguments(MOD "WASM" "CRATE;METADATA;FOLDER" "FILES" ${ARGN})
+    cmake_parse_arguments(MOD "WASM;NO_CHECK" "CRATE;METADATA;FOLDER" "FILES;CHECK_WITH" ${ARGN})
     if(NOT MOD_WASM)
         tome_require_32bit()
     endif()
@@ -159,6 +294,9 @@ function(tome_add_rust_mod target)
         USES_TERMINAL
         VERBATIM
     )
+    list(TRANSFORM MOD_FILES PREPEND "${crate}/" OUTPUT_VARIABLE file_paths)
+    _tome_add_check(${target} "${dir}" "${MOD_NO_CHECK}" DEPENDS "${dir}/${dll}" "${crate}/${MOD_METADATA}" ${file_paths}
+        CHECK_WITH ${MOD_CHECK_WITH})
     set_target_properties(${target} PROPERTIES TOME_MOD_FOLDER "${MOD_FOLDER}" TOME_MOD_FILES "${MOD_FILES}"
         TOME_MOD_ENTRY "${dll}" TOME_MOD_SOURCE_DIR "${crate}" TOME_MOD_METADATA "${crate}/${MOD_METADATA}")
 endfunction()
@@ -194,15 +332,16 @@ function(tome_find_wasm_toolchain)
 endfunction()
 
 # tome_add_wasm_mod(<target> SOURCES <.c/.cpp>... METADATA <tome.mod.json>
-#                   [FOLDER <name>] [FILES ...])
+#                   [FOLDER <name>] [FILES ...] [CHECK_WITH <mods>...] [NO_CHECK])
 #
 # A WebAssembly mod (include/tome/tome_wasm.h): compiles the SOURCES and
 # support/tome_wasm.c (its runtime) with clang for wasm32, no libc, links
 # <build>/mods/<mod folder>/<target>.wasm (tome.mod.json "wasm") and copies
 # tome.mod.json and the FILES there. Needs tome_find_wasm_toolchain() to have
 # found one. C++ works without exceptions, RTTI or a standard library.
+# Checked by tome-check after each build, as tome_add_mod's mods are.
 function(tome_add_wasm_mod target)
-    cmake_parse_arguments(MOD "" "METADATA;FOLDER" "SOURCES;FILES" ${ARGN})
+    cmake_parse_arguments(MOD "NO_CHECK" "METADATA;FOLDER" "SOURCES;FILES;CHECK_WITH" ${ARGN})
     if(NOT MOD_FOLDER)
         set(MOD_FOLDER ${target})
     endif()
@@ -253,6 +392,7 @@ function(tome_add_wasm_mod target)
         VERBATIM
     )
     add_custom_target(${target} ALL DEPENDS "${wasm}")
+    _tome_add_check(${target} "${dir}" "${MOD_NO_CHECK}" DEPENDS "${wasm}" CHECK_WITH ${MOD_CHECK_WITH})
     set_target_properties(${target} PROPERTIES TOME_MOD_FOLDER "${MOD_FOLDER}" TOME_MOD_FILES "${MOD_FILES}"
         TOME_MOD_ENTRY "${target}.wasm" TOME_MOD_METADATA "${CMAKE_CURRENT_SOURCE_DIR}/${MOD_METADATA}")
 endfunction()
@@ -324,4 +464,42 @@ function(tome_package target)
         )
     endif()
     add_custom_target(${target}_package ALL DEPENDS "${out}")
+endfunction()
+
+# tome_add_mod_test(<target> SOURCES ... [MODS <mod targets>...])
+#
+# A test program for mods (include/tome/tome_test.h): built with the SOURCES,
+# linked with tome_test.dll (copied next to it) and added to CTest, which
+# runs it under Wine on Linux. MODS are built first. The tests find the
+# built mods in TOME_TEST_MODS_DIR (<build>/mods), so a test installs one
+# with tome_test_install(TOME_TEST_MODS_DIR "/my-mod"). The mods can be
+# written in any language; the test is C or C++ (32-bit, like the mods).
+function(tome_add_mod_test target)
+    tome_require_32bit()
+    cmake_parse_arguments(TEST "" "" "SOURCES;MODS" ${ARGN})
+    _tome_tools()
+    if(NOT _tome_test_found)
+        message(STATUS "${target}: not built (tome_add_mod_test needs the SDK zip's bin/tome_test.dll and lib/)")
+        return()
+    endif()
+    add_executable(${target} ${TEST_SOURCES})
+    target_link_libraries(${target} PRIVATE tome_sdk tome_test)
+    target_compile_definitions(${target} PRIVATE TOME_TEST_MODS_DIR="${CMAKE_BINARY_DIR}/mods")
+    if(NOT MSVC)
+        target_link_options(${target} PRIVATE -static -static-libgcc)
+    endif()
+    if(TEST_MODS)
+        add_dependencies(${target} ${TEST_MODS})
+    endif()
+    add_custom_command(TARGET ${target} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:tome_test>" "$<TARGET_FILE_DIR:${target}>"
+        VERBATIM
+    )
+    if(_tome_runner_found)
+        # Through _tome_runner: Wine also when it was found without the
+        # toolchain's CMAKE_CROSSCOMPILING_EMULATOR (a file path, unlike the
+        # target's name, doesn't get the emulator added a second time).
+        add_test(NAME ${target} COMMAND ${_tome_runner} "$<TARGET_FILE:${target}>")
+        set_tests_properties(${target} PROPERTIES ENVIRONMENT "WINEDEBUG=-all")
+    endif()
 endfunction()

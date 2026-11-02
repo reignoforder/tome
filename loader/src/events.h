@@ -57,6 +57,13 @@ uint32_t frames_since_ui_tick();
 // in other builds.
 uint32_t control_clicks();
 
+// Runs the handlers of `info.event` as if the game had raised it, for the
+// fake game of tome_test.dll: `info.size` 0 takes the defaults a real event
+// of that kind has (make_info), and null strings are passed as "". Main thread.
+void dispatch_for_test(tome_event_info info);
+// The fields a real event of that kind starts from (size set, players -1, strings "").
+tome_event_info default_info_for_test(int32_t event);
+
 // Shows a message in the game's message area. False outside a game.
 bool display_text(const std::string& text, float seconds);
 

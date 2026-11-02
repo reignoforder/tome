@@ -42,7 +42,10 @@ default) puts it in its own Xvfb; `tools/game.sh` shows it on screen unless
 - Portable logic goes in `loader/src/core/` with unit tests; Windows code goes in `loader/src/`.
 - Prefer a deterministic test over an e2e check: loader behavior goes in
   `tests/host/` (fake game image, `harness.h`), patching real game code in
-  `tests/game/`; the e2e test is for what needs the game running.
+  `tests/game/`; the e2e test is for what needs the game running. The fake
+  game (`loader/src/testing/fake_game.*`) also runs mod makers' checks and
+  tests (`tome-check`, `tome_test.dll`, `sdk/include/tome/tome_test.h`,
+  shipped in the SDK zip): keep what it fakes working for them too.
 - A `core/` parser of untrusted bytes (other players, maps, packages,
   `tome.mod.json`) gets a target in `fuzz/`; a crashing input goes into
   `fuzz/regressions/<target>/` with a unit test.

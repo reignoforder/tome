@@ -6,9 +6,12 @@
 #   cmake --build build
 #
 # build/mods/my-c-mod/ goes into the game's tome/mods/ as it is;
-# build/packages/my-c-mod.tome is the same mod as one file.
+# build/packages/my-c-mod.tome is the same mod as one file. Building also
+# checks it with tome-check, and `ctest --test-dir build` runs test_mod.c
+# (both run under Wine on Linux).
 cmake_minimum_required(VERSION 3.20)
 project(my_c_mod C)
+enable_testing()
 
 set(TOME_SDK_DIR "${CMAKE_CURRENT_LIST_DIR}/../.." CACHE PATH "Tome's sdk folder")
 include("${TOME_SDK_DIR}/TomeMod.cmake")
@@ -16,3 +19,4 @@ include("${TOME_SDK_DIR}/TomeMod.cmake")
 tome_add_mod(my_c_mod SOURCES mod.c METADATA tome.mod.json FOLDER my-c-mod)
 set_target_properties(my_c_mod PROPERTIES OUTPUT_NAME my-c-mod)
 tome_package(my_c_mod)
+tome_add_mod_test(my_c_mod_tests SOURCES test_mod.c MODS my_c_mod)

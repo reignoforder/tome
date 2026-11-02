@@ -1372,6 +1372,19 @@ void fill_api(tome_api& api) {
     api.map_script_shadows = api_map_script_shadows;
 }
 
+void dispatch_for_test(tome_event_info info) {
+    if (info.size == 0) info = make_info(info.event, 0);
+    for (const char** text : {&info.map_name, &info.map_path, &info.map_description, &info.player_name, &info.text,
+                              &info.object_name, &info.save_name}) {
+        if (!*text) *text = "";
+    }
+    fire_info(info);
+}
+
+tome_event_info default_info_for_test(int32_t event) {
+    return make_info(event, 0);
+}
+
 bool display_text(const std::string& text, float seconds) {
     if (!g_ready || !g_game_started) return false;
     void* game_ui = g_game_ui_get(0, 0);

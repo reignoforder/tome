@@ -632,6 +632,10 @@ bool on_main_thread() {
     return GetCurrentThreadId() == g_main_thread;
 }
 
+void set_main_thread(uint32_t main_thread_id) {
+    g_main_thread = main_thread_id;
+}
+
 void fill_api(tome_api& api) {
     // Each one returns TOME_ERR_UNAVAILABLE (or NULL) until init has run.
     api.on_ui = api_on_ui;

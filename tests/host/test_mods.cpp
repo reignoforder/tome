@@ -10,6 +10,7 @@
 #include "monocypher-ed25519.h"
 #include "mod_manager.h"
 #include "sha256.h"
+#include "units.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -89,6 +90,20 @@ TEST(host_natives_bound_and_called) {
     CHECK(native != nullptr);
     if (native) CHECK_EQ(native(41), 42);
     CHECK(session.game.native("TomeIsLoaded") != nullptr);
+}
+
+// Once a map loads the fake has a game instance; what Tome reads of its
+// players (the selection API, names) is "none", not a jump into the zeroed
+// rest of CGameWar3::GetPlayer.
+TEST(host_fake_game_has_no_players) {
+    Home home;
+    Session session;
+    session.events = true;  // units::init
+    CHECK(session.start(home));
+    session.game.load_map();
+    CHECK(tome::units::read_selection().units.empty());
+    CHECK_EQ(tome::units::player_name(0), std::string());
+    CHECK(!tome::units::is_human(0));
 }
 
 TEST(host_disabled_native_returns_zero) {

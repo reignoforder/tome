@@ -96,7 +96,7 @@ add_executable(tome_host_tests
     host/test_mods.cpp
     host/test_wasm.cpp
 )
-target_link_libraries(tome_host_tests PRIVATE tome_runtime monocypher)  # monocypher: signs mods in tests
+target_link_libraries(tome_host_tests PRIVATE tome_testing tome_runtime monocypher)  # monocypher: signs mods in tests
 target_include_directories(tome_host_tests PRIVATE .)
 target_compile_definitions(tome_host_tests PRIVATE
     TOME_TEST_BUILD_DIR="${CMAKE_BINARY_DIR}"
@@ -147,7 +147,7 @@ add_executable(tome_game_tests
     host/harness.cpp
     game/test_game.cpp
 )
-target_link_libraries(tome_game_tests PRIVATE tome_runtime)
+target_link_libraries(tome_game_tests PRIVATE tome_testing tome_runtime)
 target_include_directories(tome_game_tests PRIVATE . host)
 target_compile_definitions(tome_game_tests PRIVATE
     TOME_TEST_BUILD_DIR="${CMAKE_BINARY_DIR}"
@@ -158,3 +158,32 @@ target_compile_options(tome_game_tests PRIVATE -Wall -Wextra -fno-exceptions -fn
 target_link_options(tome_game_tests PRIVATE -static)
 add_dependencies(tome_game_tests hook_a hook_b crash)
 add_test(NAME tome_game_tests COMMAND tome_game_tests)
+
+# Tome's tools for mod makers (loader/src/testing): tome_test.dll on mods of
+# every kind, and tome-check on broken fixtures (it checks every mod this
+# build makes as it builds them, sdk/TomeMod.cmake).
+set(mods_under_test crash)
+set(mods_test_defines TOME_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+if(TARGET hello_rs)
+    list(APPEND mods_under_test hello_rs)
+    list(APPEND mods_test_defines TOME_TEST_RUST_EXAMPLE=1)
+endif()
+if(TARGET hello_wasm)
+    list(APPEND mods_under_test hello_wasm)
+    list(APPEND mods_test_defines TOME_TEST_WASM_EXAMPLE=1)
+endif()
+tome_add_mod_test(tome_mod_tools_tests SOURCES tools/test_tome_test.c MODS ${mods_under_test})
+target_compile_definitions(tome_mod_tools_tests PRIVATE ${mods_test_defines})
+# tome-check on a broken fixture: its error, then the line it prints when it
+# exits with 1.
+function(tome_check_fails fixture expected)
+    # The error as it's printed: every regex special character escaped.
+    string(REGEX REPLACE "([][+.*()^$?|\\\\])" "\\\\\\1" expected "${expected}")
+    add_test(NAME tome_check_${fixture} COMMAND tome_check "${CMAKE_CURRENT_SOURCE_DIR}/e2e/mods/${fixture}")
+    set_tests_properties(tome_check_${fixture} PROPERTIES ENVIRONMENT "WINEDEBUG=-all"
+        PASS_REGULAR_EXPRESSION "error: ${expected}(.|\n)*: check failed")
+endfunction()
+tome_check_fails(broken-json "tome.mod.json: line 2, column 1: expected a string key")
+tome_check_fails(needs-ghost "doesn't start: error: needs \"ghost\"")
+tome_check_fails(needs-unmapped "tome.mod.json: needs \"CUnit.armor\", which isn't mapped for 1.27b")
+tome_check_fails(wrong-arch "tome.mod.json: entry DLL \"wrong-arch.dll\" not found")

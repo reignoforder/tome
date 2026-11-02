@@ -28,6 +28,10 @@ option(TOME_BUILD_DEV_TOOLS "Build development tools such as tome-mpq" OFF)
 
 enable_testing()
 
+# tome-check and tome_test.dll for the SDK's mods come from this build's
+# targets (loader/CMakeLists.txt), not from an SDK zip's bin/ (sdk/TomeMod.cmake).
+set(TOME_TOOLS_FROM_TARGETS ON)
+
 add_subdirectory(sdk)
 add_subdirectory(loader)
 add_subdirectory(tests)

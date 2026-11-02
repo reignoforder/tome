@@ -47,6 +47,9 @@ loader/
     keys.*                key names, declared keybinds, keybinds.json, conflicts
     popup.*               popup layout (rows, paged columns), keys, TomePopup.fdf
     crash_report.*        tome/startups, the crash loop popup, crash report text
+  src/testing/            the loader without the game, not in tome.mix: the fake game image
+                          (fake_game.*; tests/host too), tome_test.dll (tome_test.cpp, for
+                          mods' tests) and tome-check (tome_check.cpp); "Testing" below
   src/                    Windows side (tome.mix)
     dllmain.cpp           pins the module, calls start_bootstrap
     bootstrap.*           startup sequence (see below)
@@ -1495,8 +1498,9 @@ API version 10: `popup`, `popup_close`, `restart_game`.
   crash or a hang past 60 s is a failure): the loader keeps its state in
   globals. The harness (`harness.h`) gives a temporary `TOME_HOME` with the
   built fixture mods, the log kept in memory for checks, and a fake game
-  image: committed memory at the real 1.27b RVAs from `mappings/1.27b.json`,
-  zeroed, with `RCString::GetText` copied from its mapped bytes (the whole
+  image (`loader/src/testing/fake_game.h`, shared with the mod makers'
+  tools below): committed memory at the real 1.27b RVAs from the embedded
+  `mappings/1.27b.json`, zeroed, with `RCString::GetText` copied from its mapped bytes (the whole
   function), `InitNatives` and `BindNative` as jumps to recorders, and the
   three InitNatives call sites as real `call` instructions, so calling one
   is a map load and the bound thunks can be called like the JASS VM calls
@@ -1530,6 +1534,32 @@ API version 10: `popup`, `popup_close`, `restart_game`.
   game's own `RCString::GetText`. Not yet: the memhack guard on the real
   JASS compiler (`docs/reverse-engineering.md`, "Running the compiler
   outside a game").
+- Tools for mod makers (`loader/src/testing/`, in the SDK zip's `bin/` and
+  `lib/`; `sdk/README.md`, "Testing a mod"): the same fake game in programs
+  of their own, built from `tome_runtime` but not part of `tome.mix`.
+  `tome-check` installs a mod folder, allows, loads, enables, binds,
+  disables and unloads it, and reports `tome.mod.json` errors, a state other
+  than active, natives declared but never registered, an unsafe icon, and
+  every warning or error line Tome logged on the way (but the approval
+  notice every new mod gets); `TomeMod.cmake` runs it after each build of a
+  mod (`<target>_check`, with a stamp so it reruns when the mod changes).
+  `tome_test.dll` (`sdk/include/tome/tome_test.h`) is a C API over the same
+  session for mods' own tests: install, start (every mod allowed and turned
+  on), state and reason, the kept log, natives called like the VM calls
+  them, chat lines, events (`events::dispatch_for_test`), keybinds
+  (`keybinds::press_for_test`), settings, and a runner that starts each case
+  in a process of its own like `tome_host_tests`. For it the fake image also
+  has `CreateJassString` and the trigger natives Tome runs code values with
+  as fakes (string results kept, code runs counted), CGameWar3's instance
+  set from the first map load (so string results and code values work) with
+  `CGameWar3::GetPlayer` finding no players (the selection reads as none), a
+  fake Storm (`storm::use_fake_for_test`: archives open, nothing is read),
+  and the main thread set (`frames::set_main_thread`). Leftover homes (the
+  mods' DLLs, which Tome never unloads) are removed by the next run once
+  their process has ended; a failed run keeps its `tome.log` and stays.
+  Tested by `tome_mod_tools_tests` (the Rust and Wasm examples, crashes, a
+  missing dependency), `hello_tests` (`sdk/examples/hello/test_hello.c`)
+  and `tome_check_<fixture>` (broken e2e fixtures and the error each gives).
 - `tools/fuzz.sh [seconds] [target...]`: libFuzzer targets in `fuzz/`, one
   per untrusted input: lobby handshake lines and game-cache keys
   (`handshake`), chat commands (`chat`), packages (`zip`: directory,

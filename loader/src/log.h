@@ -12,6 +12,10 @@ enum class Level { Debug, Info, Warn, Error };
 // to OutputDebugString, which winedbg/DebugView can still show.
 bool open(const std::wstring& path);
 
+// Closes the log file (later lines only go to OutputDebugString), so its
+// folder can be removed: tome-check and tome_test.dll's temporary homes.
+void close();
+
 // From now on every line is also kept in memory, for find_kept
 // (TOME_DEBUG_CLICKS's wait steps), or no longer (and the kept lines
 // dropped). Off unless asked for. The input driver's own lines (messages

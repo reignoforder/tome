@@ -26,9 +26,36 @@ Fn by_ordinal(HMODULE storm, int ordinal) {
     return reinterpret_cast<Fn>(reinterpret_cast<void*>(GetProcAddress(storm, MAKEINTRESOURCEA(ordinal))));
 }
 
+bool g_fake = false;
+
+BOOL WINAPI fake_open_archive(const char*, DWORD, DWORD, HANDLE* archive) {
+    static char handles[64];
+    static unsigned next = 0;
+    *archive = &handles[next++ % sizeof(handles)];
+    return TRUE;
+}
+BOOL WINAPI fake_close_archive(HANDLE) {
+    return TRUE;
+}
+BOOL WINAPI fake_open_file_ex(HANDLE, const char*, DWORD, HANDLE* file) {
+    *file = nullptr;
+    SetLastError(ERROR_FILE_NOT_FOUND);
+    return FALSE;
+}
+
 } // namespace
 
+void use_fake_for_test() {
+    g_fake = true;
+}
+
 bool init() {
+    if (g_fake) {
+        g_open_archive = fake_open_archive;
+        g_close_archive = fake_close_archive;
+        g_open_file_ex = fake_open_file_ex;
+        return true;  // the rest is only used on a file that opened
+    }
     HMODULE storm = GetModuleHandleW(L"storm.dll");
     if (!storm) return false;
     g_open_archive = by_ordinal<SFileOpenArchiveFn>(storm, 266);

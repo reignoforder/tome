@@ -44,4 +44,8 @@ void set(const std::string& mod, const std::string& id, keys::Key key);
 // Every binding back to its mod's default.
 void reset_all();
 
+// Runs the callback of mod `mod`'s keybind `id` as a press of its key would,
+// for the fake game of tome_test.dll (no keyboard). False if none is registered.
+bool press_for_test(const std::string& mod, const std::string& id);
+
 } // namespace tome::keybinds

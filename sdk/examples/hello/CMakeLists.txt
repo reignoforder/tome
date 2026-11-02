@@ -17,3 +17,6 @@ endif()
 
 # The same mod as one file: <build>/packages/hello.tome.
 tome_package(hello FILES ${hello_icon})
+
+# Its tests, without the game (include/tome/tome_test.h): ctest runs them.
+tome_add_mod_test(hello_tests SOURCES test_hello.c MODS hello)

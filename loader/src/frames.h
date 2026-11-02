@@ -28,6 +28,9 @@ namespace tome::frames {
 void init(uintptr_t game_base, const BuildMappings& build, uint32_t main_thread_id);
 bool ready();
 bool on_main_thread();
+// Without init (the fake game of tome_test.dll and tome-check): the thread
+// the API's main-thread checks accept.
+void set_main_thread(uint32_t main_thread_id);
 
 // Fills the version 3 part of the API table (unavailable stubs if init didn't run).
 void fill_api(tome_api& api);

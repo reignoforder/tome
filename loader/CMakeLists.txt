@@ -249,3 +249,30 @@ add_custom_target(deploy
     DEPENDS tome_loader
     COMMENT "Copying tome.mix to ${TOME_GAME_DIR}"
 )
+
+# The loader without the game (src/testing/fake_game.h): a fake 1.27b image
+# and a temporary Tome folder, for Tome's host tests and for mod makers'
+# tools, which ship in the SDK zip (sdk/README.md, "Testing a mod"):
+#   tome_test.dll  sdk/include/tome/tome_test.h, for mods' own tests
+#   tome-check     checks a built mod as Tome would load it (tome_add_mod runs it)
+# Not part of tome.mix.
+add_library(tome_testing OBJECT src/testing/fake_game.cpp)
+# Linked together with tome_runtime (an object library's objects only go to
+# the targets that link it directly).
+target_link_libraries(tome_testing PUBLIC tome_runtime)
+target_compile_options(tome_testing PRIVATE ${TOME_CXX_OPTIONS})
+
+add_library(tome_test SHARED src/testing/tome_test.cpp)
+target_link_libraries(tome_test PRIVATE tome_testing tome_runtime)
+target_compile_options(tome_test PRIVATE ${TOME_CXX_OPTIONS})
+set_target_properties(tome_test PROPERTIES PREFIX "" RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
+# Only DLLs Windows provides; only the tome_test_* functions exported.
+target_link_options(tome_test PRIVATE -static -static-libgcc -static-libstdc++ -Wl,--exclude-all-symbols
+    $<$<CONFIG:Release>:-s>)
+
+add_executable(tome_check src/testing/tome_check.cpp)
+target_link_libraries(tome_check PRIVATE tome_testing tome_runtime shell32)  # shell32: CommandLineToArgvW
+target_compile_options(tome_check PRIVATE ${TOME_CXX_OPTIONS})
+set_target_properties(tome_check PROPERTIES OUTPUT_NAME "tome-check" RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+target_link_options(tome_check PRIVATE -static $<$<CONFIG:Release>:-s>)

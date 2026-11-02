@@ -94,6 +94,13 @@ const BuildMappings* find_build_by_sha256(const char* sha256) {
     return nullptr;
 }
 
+const BuildMappings* find_build_by_name(const char* name) {
+    for (const auto& build : database().builds) {
+        if (build->data.name == name) return &build->bound;
+    }
+    return nullptr;
+}
+
 bool verify_loaded_build(HMODULE game, const BuildMappings& build, std::vector<std::string>& errors) {
     return verify_loaded_module(game, *build.data, errors);
 }

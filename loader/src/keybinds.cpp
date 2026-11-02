@@ -241,6 +241,18 @@ void set(const std::string& mod, const std::string& id, keys::Key key) {
     TOME_INFO("Keybind %s/%s: %s", mod.c_str(), id.c_str(), keys::format(key).c_str());
 }
 
+bool press_for_test(const std::string& mod, const std::string& id) {
+    Handler h;
+    {
+        SharedLock hold(g_lock);
+        auto it = g_handlers.find({mod, id});
+        if (it == g_handlers.end()) return false;
+        h = it->second;
+    }
+    guard::run(h.mod, "keybind callback", id.c_str(), [&] { h.fn(h.mod, id.c_str(), h.user); });
+    return true;
+}
+
 void reset_all() {
     {
         ExclusiveLock hold(g_lock);

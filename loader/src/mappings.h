@@ -18,6 +18,10 @@ const BuildMappings* find_build_by_header(HMODULE game);
 
 const BuildMappings* find_build_by_sha256(const char* sha256);
 
+// By the build's community name ("1.27b"): for the fake game image of
+// tome_test.dll and tome-check (testing/fake_game.h), which has no file to hash.
+const BuildMappings* find_build_by_name(const char* name);
+
 // The mapping of a loaded blizzard.ax build (module "blizzard.ax"), by its
 // PE header; null if it isn't one.
 const BlizzardAxMappings* find_blizzard_ax_by_header(HMODULE ax);

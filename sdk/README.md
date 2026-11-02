@@ -10,6 +10,8 @@ helpers, examples and starting templates in C, C++ and Rust.
 | [`include/tome/utf8.h`](include/tome/utf8.h) | UTF-8 helpers (JASS strings are UTF-8). |
 | [`rust/`](rust/README.md) | Rust: raw bindings (`tome-sys`) and a safe API (`tome`). |
 | [`include/tome/tome_wasm.h`](include/tome/tome_wasm.h) | **Experimental:** sandboxed WebAssembly mods in C ([below](#webassembly-mods)). |
+| [`include/tome/tome_test.h`](include/tome/tome_test.h) | Tests for mods without the game: Tome against a fake game ([below](#testing-a-mod)). |
+| `bin/`, `lib/` | In the SDK zip: `tome-check.exe`, which checks each mod as it's built, and `tome_test.dll` for tests ([below](#testing-a-mod)). |
 | [`templates/`](templates) | The smallest useful mod in [C](templates/c), [C++](templates/cpp), [Rust](templates/rust) and WebAssembly ([C](templates/wasm), [Rust](templates/rust-wasm)): copy one to start. |
 | [`examples/`](examples) | The same full example in [C](examples/hello), [C++](examples/hello-cpp) and [Rust](rust/examples/hello-rs); a WebAssembly one in [C](examples/hello-wasm) and [Rust](rust/wasm/examples/hello-wasm-rs). |
 | [`docs/tome-mod-json.md`](docs/tome-mod-json.md) | `tome.mod.json` and settings, field by field. |
@@ -122,6 +124,76 @@ For your own test setups:
   `make` in Tome's repository); released builds ignore it.
 - `-tomesafe` on the command line, or Shift held at launch, starts with
   every mod off.
+
+## Testing a mod
+
+Two tools in the SDK zip run Tome itself (the code in `tome.mix`) against a
+fake Warcraft III 1.27b, so they find in seconds what would otherwise take a
+start of the game. Both are Windows programs: on Linux they run under Wine,
+which the toolchain file finds. Building without them works as before; set
+`TOME_CHECK=ON` to make them required, or `OFF` to skip the check.
+
+**Checks at build time.** `tome_add_mod`, `tome_add_rust_mod` and
+`tome_add_wasm_mod` run `tome-check` on the mod folder after each build
+that changed it. It installs the mod in a Tome folder of its own, allows it,
+loads and turns it on, binds its natives as a map load does, then turns it
+off and unloads it, and reports what Tome found on the way:
+
+```
+my-mod: error: tome.mod.json: needs "CUnit.armor", which isn't mapped for 1.27b
+my-mod 0.1.0: warning: native MyForgotten is in tome.mod.json, but the mod didn't register it (register_native in tome_mod_enable): it returns 0
+my-mod 0.1.0: ok (native, 2 natives)
+```
+
+An error fails the build: `tome.mod.json` or the settings schema, a
+`requires` name that isn't mapped, a missing DLL or one without
+`tome_mod_load`, a `tome_mod_load` that refuses, a crash in load, enable or
+disable, an unsafe icon. Every warning Tome logged (the mod's own included)
+is printed. A mod that needs others gets them with `CHECK_WITH <their
+targets or folders>`; `NO_CHECK` skips one. By hand: `tome-check [--strict]
+<mod folder or .tome> [<the mods it needs>...]` (`--strict` fails on
+warnings too).
+
+**Tests.** [`tome_test.h`](include/tome/tome_test.h) drives a built mod as
+the game would: it starts Tome with the mod installed and allowed, then a
+test calls its natives, sends chat commands, raises events, presses its
+keybinds and changes its settings, and checks what the mod did, mostly by
+its log lines. The test is a small C or C++ program; the mod can be in any
+language. `tome_add_mod_test` builds it and adds it to CTest:
+
+```cmake
+enable_testing()
+tome_add_mod_test(my_mod_tests SOURCES test_mod.c MODS my_mod)
+```
+
+```c
+static void adds(void) {
+    uint32_t args[2] = {2, 3}, result = 0;
+    TOME_EXPECT(tome_test_install(TOME_TEST_MODS_DIR "/my-mod"));
+    TOME_EXPECT(tome_test_start());
+    if (!TOME_EXPECT_STATE("my-mod", "active")) return;
+    tome_test_load_map();
+    TOME_EXPECT(tome_test_call("MyModAdd", args, 2, &result));
+    TOME_EXPECT(result == 5);
+}
+
+static const tome_test_case cases[] = {{"adds", adds}};
+int main(int argc, char** argv) { return TOME_TEST_MAIN(argc, argv, cases); }
+```
+
+`ctest --test-dir build` runs it; each case runs in a process of its own,
+and a failed one keeps its Tome folder (with `tome.log`) and prints where.
+The C template has one ([`templates/c/test_mod.c`](templates/c/test_mod.c)),
+and the hello example tests most of what it does
+([`examples/hello/test_hello.c`](examples/hello/test_hello.c)).
+
+The fake game has JASS natives (strings, reals and code values too), chat
+commands, events (the test fills in their fields), keybinds, settings,
+assets, hooks (they install; the game's functions never run) and the mod
+lifecycle with its crashes. It hasn't the game's own natives, frames and
+screens, popups, units or files: API functions that need them return an
+error, as in the game before a map loads. That part stays a test in the
+game.
 
 ## WebAssembly mods
 
