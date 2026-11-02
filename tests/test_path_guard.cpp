@@ -2,6 +2,8 @@
 #include "core/path_guard.h"
 #include "test.h"
 
+#include <string>
+
 using tome::path_guard::is_unsafe;
 
 TEST(path_guard_allows_plain_relative_names) {
@@ -21,6 +23,53 @@ TEST(path_guard_allows_plain_relative_names) {
 
 TEST(path_guard_rejects_empty) {
     CHECK(is_unsafe(""));
+}
+
+TEST(path_guard_rejects_overlong_names) {
+    using tome::path_guard::kMaxPathLen;
+    // MAX_PATH less its NUL: the longest name the game's MAX_PATH buffers keep
+    // whole. A name up to it is fine; a longer one, which the game would
+    // truncate, is refused.
+    CHECK(kMaxPathLen == 259);
+    CHECK(!is_unsafe(std::string(kMaxPathLen, 'a')));
+    CHECK(!is_unsafe(std::string(kMaxPathLen - 4, 'a') + ".txt"));
+    CHECK(is_unsafe(std::string(kMaxPathLen + 1, 'a')));
+    CHECK(is_unsafe(std::string(5000, 'a') + ".txt"));
+    // A long name built only of otherwise-safe components is still refused,
+    // e.g. one whose truncation would end in a ".." component.
+    CHECK(is_unsafe("Logs\\" + std::string(kMaxPathLen, 'b')));
+    CHECK(is_unsafe(std::string(kMaxPathLen - 3, 'a') + "\\..x"));
+}
+
+TEST(path_guard_max_name_after_a_prefix) {
+    using tome::path_guard::kMaxPathLen;
+    using tome::path_guard::max_name_after;
+    // PreloadGenEnd: "<game folder>\\CustomMapData\\" + name + maybe ".pld"
+    // must stay under 260, or the game leaves its buffers unterminated.
+    CHECK(max_name_after(41) == 214);  // the e2e game: Z:\tmp\tmp.XXXXXXXXXX\game\CustomMapData\ (41)
+    CHECK(41 + max_name_after(41) + 4 == kMaxPathLen);
+    CHECK(max_name_after(0) == kMaxPathLen - 4);
+    CHECK(max_name_after(254) == 1);
+    CHECK(max_name_after(255) == 0);  // no name fits
+    CHECK(max_name_after(1000) == 0);
+}
+
+TEST(path_guard_any_length_allows_long_data) {
+    using tome::path_guard::is_unsafe_any_length;
+    using tome::path_guard::kMaxPathLen;
+    // Preload's argument: a long save/load payload is fine...
+    CHECK(!is_unsafe_any_length(std::string(5000, 'a')));
+    CHECK(!is_unsafe_any_length("x"));
+    // ...but everything else is still checked, in the whole string...
+    CHECK(is_unsafe_any_length(""));
+    CHECK(is_unsafe_any_length(std::string(5000, 'a') + "\\..\\x"));
+    CHECK(is_unsafe_any_length("C" + std::string(5000, 'a') + ":"));
+    CHECK(is_unsafe_any_length("\\" + std::string(5000, 'a')));
+    // ...and in what a truncating copy would keep: "..x" cut to "..",
+    // "CONSOLE" cut to "CON".
+    CHECK(is_unsafe_any_length(std::string(kMaxPathLen - 3, 'a') + "\\..x" + std::string(100, 'b')));
+    CHECK(is_unsafe_any_length(std::string(kMaxPathLen - 4, 'a') + "\\CONSOLE"));
+    CHECK(!is_unsafe_any_length(std::string(kMaxPathLen - 5, 'a') + "\\CONSOLE"));
 }
 
 TEST(path_guard_rejects_parent_traversal) {

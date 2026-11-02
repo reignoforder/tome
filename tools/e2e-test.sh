@@ -430,6 +430,9 @@ if ((${#MAP_ARG[@]})); then
     check "path-sanitizer: refused AddSpecialEffect\(\"C:" "AddSpecialEffect refused an absolute path"
     check_absent "path-sanitizer: refused AddSpecialEffect\(\"\"" "an empty model name isn't refused"
     check "BlzLoadTOCFile: refused" "BlzLoadTOCFile refused a TOC outside the data folder"
+    check "path-sanitizer: refused PreloadGenEnd\(\"longpath\\\\a+\.\.\.\"\) -- too long" \
+        "a PreloadGenEnd name too long to fit after the game's folder is refused"
+    check_absent "path-sanitizer: refused Preload\(\"e2edata" "a long Preload argument (data) isn't refused"
     check "\[map\] TomeLogInteger\(9600\)" "a refused InitGameCache gives a null cache that reads 0"
     for n in 9601 9602 9603 9604 9605 9606 9607 9608; do
         check "\[map\] TomeLogInteger\($n\)" "refused call $n returned false or null"

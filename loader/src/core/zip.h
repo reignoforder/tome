@@ -40,7 +40,7 @@ struct Limits {
 // True if an entry name may be unpacked: relative, '/' separators only, no
 // empty, ".", ".." or reserved device components, no characters Windows
 // refuses or silently drops (control characters, <>:"|?*, a trailing space
-// or dot), and valid UTF-8.
+// or dot), valid UTF-8, and at most path_guard::kMaxPathLen (259) bytes.
 bool safe_name(std::string_view name);
 
 // A name as Windows compares it: every code point of the Basic Multilingual

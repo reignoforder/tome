@@ -265,6 +265,12 @@ function TomeE2EPaths takes nothing returns nothing
     if not BlzLoadTOCFile("..\\\\TomeE2E-escape.toc") then
         call TomeLogInteger(9608)
     endif
+    // A PreloadGenEnd name too long to fit after the game's folder is refused
+    // (the game would leave its path buffers unterminated, which can crash
+    // it), though it is under kMaxPathLen. Preload's argument may be any
+    // length: maps carry data in it.
+    call Preload("LONGDATA_300")
+    call PreloadGenEnd("LONGPATH_239")
     call TomeLogInteger(9609)
 endfunction
 
@@ -553,6 +559,13 @@ def main() -> int:
         print("no main function found", file=sys.stderr)
         return 1
     functions = FUNCTIONS + (WASM_FUNCTIONS if wasm else "")
+    # A 239-character name ("longpath\" and 230 'a's): under kMaxPathLen, but
+    # over PreloadGenEnd's limit (at most 238, with the shortest game folder,
+    # "C:\"), so the path sanitizer refuses it. And a 307-character Preload
+    # argument, which it lets through. (A string literal of ~4000 characters
+    # would crash the JASS compiler: docs/known-bugs.md.)
+    functions = functions.replace("LONGPATH_239", "longpath\\\\" + "a" * 230)
+    functions = functions.replace("LONGDATA_300", "e2edata" + "x" * 300)
     text = text[: main_at.start()] + functions.replace("\n", newline) + text[main_at.start():]
 
     init_call = re.search(r"^function main takes nothing returns nothing.*?^(\s*call InitBlizzard\(\s*\)[^\n]*\n)",

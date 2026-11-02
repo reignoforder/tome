@@ -36,7 +36,7 @@
       "kind": "function", "rva": "0x009249d0", "conv": "thiscall",
       "sig": "int(void* this)",
       "bytes": "55 8b ec 83 ec 0c 53 56 57 8b f9 c7 45 fc 00 00",
-      "doc": "Memhack fix: reads the next token; returns its type code in eax (endfunction is 0x115; keywords get codes ~0x120-0x12d; identifiers tail-call the scanner's intern+classify, 0x9253E0). The token text is left in [this+0x98] (len [this+0xC4]). The memhack-guard patch hooks this (AFTER) to restore shadowed globals at the endfunction token. See docs/reverse-engineering.md, JASS compiler."
+      "doc": "Memhack fix: reads the next token; returns its type code in eax (endfunction is 0x115; keywords get codes ~0x120-0x12d; identifiers tail-call the scanner's intern+classify, 0x9253E0). The token text is left in [this+0x98] (len [this+0xC4]). The memhack-guard patch hooks this (AFTER) to restore shadowed globals at the endfunction token. See docs/reverse-engineering.md, JASS compiler. Stores each character of a token at [[this+8]+n] with no bound: a ~4000-character string literal in war3map.j writes past that heap buffer while the map loads (access violation at 0x924AE4, seen in game; docs/known-bugs.md, Long string literal)."
     },
     "Jass::compile": {
       "kind": "function", "rva": "0x009146f0", "conv": "fastcall",
@@ -1134,6 +1134,16 @@
       "kind": "function", "rva": "0x0003b670", "conv": "cdecl", "sig": "void(void)",
       "bytes": "a1 ?? ?? ?? ?? 85 c0 74 11 50 ff 15 ?? ?? ?? ?? c7 05 ?? ?? ?? ??",
       "doc": "Puts back the filter CrashHandler::Install replaced (.data 0xD78524), if any. Plain ret."
+    },
+    "PreloadGen::End": {
+      "kind": "function", "rva": "0x00230170", "conv": "thiscall", "sig": "void(void* gen, const char* filename)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 81 ec 38 06 00 00 a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 89 8d",
+      "doc": "PreloadGenEnd's body (the native at 0x20FB30 passes the generator from 0x231DF0 and the name). Copies the name with SStrCopy(buf, name, 260), adds .pld if it has no extension, refuses \\..\\, \\.. and ..\\ itself, and builds <game.dll folder>\\CustomMapData\\<name> with strncpy into 260-byte stack buffers, which it leaves unterminated when the whole path reaches 260. Names up to 259 characters run (checked in game); one of ~4000 ends in __report_gsfailure (docs/known-bugs.md, Over-long path). Not hooked: the path sanitizer refuses such names at the native. ret 4."
+    },
+    "__report_gsfailure": {
+      "kind": "function", "rva": "0x0078f443", "conv": "cdecl", "sig": "void(void)",
+      "bytes": "55 8b ec 81 ec 24 03 00 00 6a 17 e8 7d d1 10 00",
+      "doc": "The CRT's /GS stack-cookie failure: if IsProcessorFeaturePresent(23) it fast-fails the process (int 0x29, ecx 2 = FAST_FAIL_STACK_COOKIE_CHECK_FAILURE). Never returns. Not hooked: PreloadGenEnd with a name of ~4000 characters ends here (docs/known-bugs.md, Over-long path; docs/reverse-engineering.md)."
     },
     "Options::Get": {
       "kind": "function", "rva": "0x00040ed0", "conv": "cdecl", "sig": "void*(void)",

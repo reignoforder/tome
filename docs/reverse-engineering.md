@@ -109,6 +109,24 @@ arguments of every native that takes a file path (all 38 are listed in
 above) and skips the call for a traversing/absolute name. Those natives' addresses are therefore deliberately **not** mapped;
 only `BindNative` and `RCString::GetText` are needed.
 
+The same wrapper also limits the path length (docs/known-bugs.md, "Over-long
+path"). `PreloadGenEnd`'s body, `PreloadGen::End` (`0x230170`, thiscall,
+`ret 4`, generator from `0x231DF0`), copies the name with Storm's `SStrCopy`
+(ordinal 501) into a 260-byte buffer and adds `.pld` with `SStrPack` (503)
+if it has no extension. It builds the folder from `GetModuleFileNameA(NULL)`
+cut after its last separator (`0x91C20`), runs it through `GetFullPathNameA`,
+and adds `CustomMapData\`. It refuses `\..\`, `\..` and `..\` in the
+result, creates the folder and writes through a writer object
+(`0x21EE10`, an unbounded `strcpy` of the path). The copies into its
+260-byte stack buffers are `strncpy`, so a path of 260 characters or more
+leaves them unterminated. `0x91F10` (cut after the last `\` or `/`) and the
+writer then run past their end. A 4009-character name once ended in
+`__report_gsfailure` (`0x78F443`, `int 0x29` fast fail). The sanitizer
+therefore limits a `PreloadGenEnd` name to what fits after that prefix
+(`path_guard::max_name_after`). Other path natives get `kMaxPathLen` (259),
+and `Preload` has no limit (its native at `0x20FA40` keeps the string in a
+heap string via `0x2407C0`).
+
 ### JASS compiler (Jass2), for the memhack guard
 
 The map script (`war3map.j`, textual JASS) is compiled at runtime by the
@@ -218,7 +236,10 @@ exploit by forcing a cross-type shadow's `desc+0x10` to the global's type-id.
   accepts `0xC` and `0x2B`. The list has no cap, or a function could declare
   that many harmless shadows before the one that matters.
 - `JassScanner::nextToken` `0x9249D0` (AFTER, the `endfunction` token
-  `0x115`): writes the saved descriptors back, newest first.
+  `0x115`): writes the saved descriptors back, newest first. It stores each
+  character of a token at `[[this+8]+n]` with no bound: a ~4000-character
+  string literal writes past that heap buffer (access violation at
+  `0x924AE4`, seen in game; docs/known-bugs.md, "Long string literal").
 - `Jass::compile` `0x9146F0` (BEFORE and AFTER): drops the list. A script
   that stops inside a function never reaches its `endfunction`, and the next
   compile's first one would write into the old compile's freed symbols. This

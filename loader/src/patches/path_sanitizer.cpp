@@ -7,8 +7,9 @@
  * PreloadGenEnd (writes the accumulated Preload buffer), InitGameCache
  * (opens/creates a cache file) and the save natives SaveGame, CopySaveGame and
  * Rename/RemoveSaveDirectory (which also move and delete). On 1.27b the write
- * is rooted in the game folder (Blizzard moved it to the user-data folder in
- * 1.28.1), so a traversing or absolute name -- "..\\..\\Start
+ * lands inside the game folder (PreloadGenEnd: CustomMapData\, saves:
+ * save\<profile>\; Blizzard moved it to the user-data folder in 1.28.1), so a
+ * traversing or absolute name -- "..\\..\\Start
  * Menu\\...\\x.bat", "C:\\...", a UNC share -- lets the map plant a file
  * anywhere the process can write: a persistence / code-execution primitive,
  * not just a cheat. The natives that read a file by name are covered too:
@@ -16,8 +17,12 @@
  * map, StartMeleeAI/StartCampaignAI load an AI script, and the model, texture,
  * movie and sound natives load assets, so none of them can reach outside the
  * data folder either (to run a planted file, probe for one, or open a device).
- * The fix refuses such a name; a plain relative name (the natives' intended
- * use, subdirectories included) is untouched.
+ * The fix refuses such a name, and one longer than path_guard::kMaxPathLen,
+ * which the game would truncate (for PreloadGenEnd, one too long to fit after
+ * the game's folder, which can crash the game); a plain relative name (the
+ * natives' intended use, subdirectories included) is untouched. Preload's
+ * argument may be any length: maps use it as a data channel
+ * (path_guard::is_unsafe_any_length).
  *
  * Mechanism (build-independent, no native addresses hardcoded): hook the
  * mapped BindNative(fn, name, signature), which the engine's InitNatives
@@ -42,10 +47,13 @@
 #include "log.h"
 #include "tome/tome.h"
 
+#include <windows.h>
+
 #include <array>
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <string_view>
 #include <utility>
 
 // GCC warns that __thiscall (TOME_CALL) is meant for class methods, but it
@@ -66,17 +74,23 @@ using StringTextFn = const char*(__thiscall*)(const void* string);
 //
 // Writes (create, overwrite, move or delete a file) also refuse an empty
 // name, which has no target. Reads allow one: maps pass "" on purpose, e.g. a
-// special effect with no model.
-enum class Access { Write, Read };
+// special effect with no model. Data (only Preload) is a read whose argument
+// may also be any length: Preload keeps its string as is, and maps use it to
+// carry data into the file PreloadGenEnd writes (codeless save/load).
+enum class Access { Write, Read, Data };
+// in_custom_map_data: the game puts the name after "<game folder>\\CustomMapData\\"
+// in a MAX_PATH buffer (PreloadGenEnd), so its limit is path_guard::
+// max_name_after that prefix, not kMaxPathLen.
 struct Spec {
     const char* name;
     int args;
     unsigned paths;
     Access access;
+    bool in_custom_map_data = false;
 };
 constexpr Spec kSpecs[] = {
     // Writes. 1.27b has no CreateSaveDirectory.
-    {"PreloadGenEnd", 1, 0b1, Access::Write},         // (filename): writes the Preload buffer
+    {"PreloadGenEnd", 1, 0b1, Access::Write, true},   // (filename): writes the Preload buffer
     {"InitGameCache", 1, 0b1, Access::Write},         // (campaignFile): opens/creates a cache file
     {"SaveGame", 1, 0b1, Access::Write},              // (saveFileName)
     {"CopySaveGame", 2, 0b11, Access::Write},         // (sourceSaveName, destSaveName)
@@ -90,7 +104,7 @@ constexpr Spec kSpecs[] = {
     {"StartMeleeAI", 2, 0b10, Access::Read},     // (player, script)
     {"StartCampaignAI", 2, 0b10, Access::Read},  // (player, aiscript)
     // Models, textures, movies and sounds.
-    {"Preload", 1, 0b1, Access::Read},                         // (filename)
+    {"Preload", 1, 0b1, Access::Data},                         // (filename): also a data channel
     {"SetDayNightModels", 2, 0b11, Access::Read},              // (terrainDNCFile, unitDNCFile)
     {"SetSkyModel", 1, 0b1, Access::Read},                     // (skyModelFile)
     {"SetIntroShotModel", 1, 0b1, Access::Read},               // (introModelPath)
@@ -130,22 +144,43 @@ StringTextFn g_string_text = nullptr;
 void* volatile g_orig[kCount] = {};
 unsigned long g_refused_total = 0;
 
+// The longest name PreloadGenEnd may take here (path_guard::max_name_after the
+// game's own "<game folder>\\CustomMapData\\"), set at install.
+size_t g_custom_map_data_max = path_guard::kMaxPathLen;
+
 // A map can call these natives in a loop with an arbitrary (long, multi-line)
 // name: log the first refusals in full, then only every kLogEvery-th, and
 // print at most kLogChars of the name with control characters replaced, so a
-// map can neither flood tome.log nor forge lines in it.
+// map can neither flood tome.log nor forge lines in it. The first refusal of
+// each native for each reason is logged too, whatever came before it (at most
+// 2 * kCount lines), so one is never lost behind other refusals.
 constexpr unsigned long kLogFirst = 20;
 constexpr unsigned long kLogEvery = 1000;
 constexpr size_t kLogChars = 160;
+enum Reason { kTooLong, kEscapes, kReasons };
+bool g_logged[kCount][kReasons] = {};
 
-// True if a path argument (an RCString*) of `spec` escapes the data folder
-// and the call must be skipped. A null string passes through: the engine
-// handles it, and there's nothing to sanitize.
-bool escapes(const Spec& spec, uint32_t jass_string) {
+// True if a path argument (an RCString*) of kSpecs[i] escapes the data
+// folder or is too long, and the call must be skipped. A null string passes
+// through: the engine handles it, and there's nothing to sanitize.
+bool escapes(size_t i, uint32_t jass_string) {
+    const Spec& spec = kSpecs[i];
     const char* path = jass_string ? g_string_text(reinterpret_cast<const void*>(jass_string)) : nullptr;
-    if (!path || (spec.access == Access::Read && !*path) || !path_guard::is_unsafe(path)) return false;
+    if (!path || (spec.access != Access::Write && !*path)) return false;
+    const std::string_view text(path);
+    const size_t max = spec.access == Access::Data  ? SIZE_MAX
+                       : spec.in_custom_map_data ? g_custom_map_data_max
+                                                 : path_guard::kMaxPathLen;
+    const bool too_long = text.size() > max;
+    if (!too_long && (spec.access == Access::Data ? !path_guard::is_unsafe_any_length(text)
+                                                  : !path_guard::is_unsafe(text))) {
+        return false;
+    }
     ++g_refused_total;
-    if (g_refused_total <= kLogFirst || g_refused_total % kLogEvery == 0) {
+    const Reason reason = too_long ? kTooLong : kEscapes;
+    const bool first_of_kind = !g_logged[i][reason];
+    g_logged[i][reason] = true;
+    if (first_of_kind || g_refused_total <= kLogFirst || g_refused_total % kLogEvery == 0) {
         char shown[kLogChars + 1];
         size_t n = 0;
         for (; n < kLogChars && path[n]; ++n) {
@@ -153,19 +188,19 @@ bool escapes(const Spec& spec, uint32_t jass_string) {
             shown[n] = (c < 0x20 || c == 0x7f) ? '?' : path[n];
         }
         shown[n] = '\0';
-        TOME_WARN("path-sanitizer: refused %s(\"%s%s\") -- escapes the data folder (total %lu)", spec.name, shown,
-                  path[n] ? "..." : "", g_refused_total);
+        TOME_WARN("path-sanitizer: refused %s(\"%s%s\") -- %s (total %lu)", spec.name, shown, path[n] ? "..." : "",
+                  reason == kTooLong ? "too long" : "escapes the data folder", g_refused_total);
     }
     return true;
 }
 
-// True if any path argument of kSpecs[i] escapes the data folder. Checks
-// (and logs) every path, so a refused CopySaveGame names both.
+// True if any path argument of kSpecs[i] must be refused. Checks (and logs)
+// every path, so a refused CopySaveGame names both.
 bool refuse(size_t i, const uint32_t* args) {
     const Spec& spec = kSpecs[i];
     bool refused = false;
     for (int a = 0; a < spec.args; ++a) {
-        if (spec.paths & (1u << a)) refused = escapes(spec, args[a]) || refused;
+        if (spec.paths & (1u << a)) refused = escapes(i, args[a]) || refused;
     }
     return refused;
 }
@@ -220,8 +255,35 @@ void TOME_CALL on_bind_native(tome_mod*, tome_hook_call* call, void*) {
     }
 }
 
+// The length of the folder PreloadGenEnd writes in, worked out as the game
+// does it (PreloadGen::End, docs/reverse-engineering.md): war3.exe's path cut
+// after its last separator, through GetFullPathNameA, then "CustomMapData\\".
+// 0 if it can't be known.
+size_t custom_map_data_prefix_len() {
+    char exe[MAX_PATH];
+    DWORD n = GetModuleFileNameA(nullptr, exe, MAX_PATH);
+    if (n == 0 || n >= MAX_PATH) return 0;
+    char* sep = nullptr;
+    for (char* c = exe; *c; ++c) {
+        if (*c == '\\' || *c == '/') sep = c;
+    }
+    if (!sep) return 0;
+    sep[1] = '\0';
+    char full[MAX_PATH];
+    n = GetFullPathNameA(exe, MAX_PATH, full, nullptr);
+    if (n == 0 || n >= MAX_PATH) return 0;
+    return n + std::strlen("CustomMapData\\");
+}
+
 bool install_path_sanitizer(uintptr_t game_base, const BuildMappings& build, std::string& report) {
     g_string_text = reinterpret_cast<StringTextFn>(game_base + build.jass.string_get_text);
+    if (size_t prefix = custom_map_data_prefix_len()) {
+        g_custom_map_data_max = path_guard::max_name_after(prefix);
+    } else {
+        TOME_WARN("path-sanitizer: can't tell the length of the game folder; PreloadGenEnd names over %zu refused",
+                  path_guard::max_name_after(MAX_PATH / 2));
+        g_custom_map_data_max = path_guard::max_name_after(MAX_PATH / 2);
+    }
     std::string error;
     hooks::Target* bind = hooks::find_or_install("BindNative", error);
     if (!bind) {
@@ -233,7 +295,8 @@ bool install_path_sanitizer(uintptr_t game_base, const BuildMappings& build, std
     before.priority = INT32_MIN;  // after mods' BEFORE handlers of higher priority (see on_bind_native)
     before.fn = on_bind_native;
     hooks::add(bind, before);
-    report = "sanitizes paths of " + std::to_string(kCount) + " file natives";
+    report = "sanitizes paths of " + std::to_string(kCount) + " file natives (PreloadGenEnd names up to " +
+             std::to_string(g_custom_map_data_max) + " characters)";
     return true;
 }
 

@@ -104,8 +104,10 @@ later function sees the `unit` global.
 file, `InitGameCache(string campaignFile)` opens/creates a cache file, and
 `SaveGame`, `CopySaveGame`, `RenameSaveDirectory` and `RemoveSaveDirectory`
 write, move and delete saves and save folders (1.27b has no
-`CreateSaveDirectory`). On 1.27b the write is rooted in the **game folder**
-(Blizzard moved it to the user-data folder in 1.28.1), so a map-controlled
+`CreateSaveDirectory`). On 1.27b the write lands inside the **game folder**
+(`PreloadGenEnd`: `<game folder>\CustomMapData\<name>`, saves:
+`save\<profile>\`; Blizzard moved it to the user-data folder in 1.28.1), so a
+map-controlled
 name that traverses (`..\..\...\Startup\x.bat`), is absolute (`C:\...`), or
 is a UNC/rooted path turns "write a file" into "plant a file anywhere the
 process can write" — a persistence / code-execution primitive, not just a
@@ -145,18 +147,75 @@ handle. The e2e test checks that the cache natives take a refused
 `GetStoredInteger` reads 0, `SaveGameCache` returns false). A plain relative
 name, subdirectories included (`Logs\\run.txt`), is untouched: that is these
 natives' intended use. `is_unsafe` rejects an empty name (for the writes;
-reads allow it, as maps pass `""` for an effect with no model), any `:` (drive
+reads allow it, as maps pass `""` for an effect with no model), a name longer
+than `kMaxPathLen` (259; see "Over-long path" below; not for `Preload`), any `:` (drive
 letter or NTFS alternate data stream), a leading separator (absolute,
 drive-relative or UNC), any `..` component, and a reserved DOS device name
 (`CON`, `PRN`, `AUX`, `NUL`, `CONIN$`, `CONOUT$`, `COM1`–`COM9`,
 `LPT1`–`LPT9`, and `COM`/`LPT` with a superscript 1–3). It is portable and
 unit-tested (`loader/src/core/path_guard.*`, `tests/test_path_guard.cpp`).
-Refused calls are logged (`path-sanitizer: refused ...`; the first 20 in
-full, then every 1000th, the name cut to 160 characters with control
-characters replaced). The `BindNative` hook is **not** reserved: the threat
+Refused calls are logged (`path-sanitizer: refused ... -- too long` or
+`-- escapes the data folder`; the first 20 in full, then every 1000th, plus
+the first of each native for each reason, the name cut to 160 characters with
+control characters replaced). The `BindNative` hook is **not** reserved: the threat
 is malicious maps, not mods, and a mod can bypass any API boundary anyway, so
 reserving it would only cost mods a useful hook. Content isn't touched — the
 escape vector is the path, not the bytes.
+
+#### Over-long path crashes `PreloadGenEnd`
+
+**Seen on 1.27b (Nov 2026, in game); cause read from the code.**
+`PreloadGen::End` (game.dll `0x230170`, `PreloadGenEnd`'s body) copies the
+name with `SStrCopy(buf, name, 260)`, adds `.pld` if it has no extension, and
+builds `<game folder>\CustomMapData\<name>` with `strncpy` into 260-byte
+stack buffers. When the whole path reaches 260 characters, `strncpy` leaves
+them unterminated, and the code after it reads them as strings past their
+end: it scans for the last `\` and writes a NUL after it (`0x91F10`), and
+copies the path with an unbounded `strcpy` into the file writer
+(`0x21EE10`). Whether that overwrites the stack cookie depends on the bytes
+next to the buffers, so the crash is random: one call with a 4009-character
+name (built by concatenation) fast-failed the game in `__report_gsfailure`
+(`c0000409`, no crash report, as `int 0x29` skips exception handlers). In
+two other games, 13 calls with names of 224 to 4002 characters did not. In the
+e2e game that works out to 215 characters
+(`Z:\tmp\tmp.XXXXXXXXXX\game\CustomMapData\` is 41, plus 4 for `.pld`). A deeper game folder lowers it. Any downloaded map
+can try this: a denial of service at least.
+
+**Fix implemented (length limits in the path sanitizer).** For
+`PreloadGenEnd` the sanitizer refuses a name too long to fit after the
+game's own prefix, worked out the way the game does it (`war3.exe`'s folder
+through `GetFullPathNameA`, plus `CustomMapData\`):
+`path_guard::max_name_after(prefix)` is 259 − 4 − the prefix's length. So
+every buffer stays terminated. The tome.log line `sanitizes paths of 38 file
+natives (PreloadGenEnd names up to N characters)` gives N. Every other path
+native refuses names over `kMaxPathLen` (259, `MAX_PATH` less its NUL). The
+game copies names into `MAX_PATH` buffers with truncating copies, and a cut
+can turn a checked-safe name into an unsafe one (`..x` into `..`, `CONSOLE`
+into `CON`). No legitimate name is that long, since the ANSI file APIs can't
+open one. `Preload` is exempt: it keeps its string as is (no fixed buffer),
+and maps use it as a data channel, because `PreloadGenEnd` writes it out word
+for word (File I/O, codeless save/load), so a long one is legitimate.
+`is_unsafe_any_length` still checks the whole string and its first 259 bytes
+for traversal, drives, roots and devices. Unit-tested
+(`tests/test_path_guard.cpp`). The e2e test map calls `PreloadGenEnd` with a
+239-character name and checks that it is refused (`-- too long`). It also
+checks that a 307-character `Preload` argument is not refused, and that the
+script carries on (9609).
+
+#### Long string literal overruns the JASS compiler's buffer
+
+**Seen on 1.27b (Nov 2026, in game), not fixed.** The JASS scanner
+(`JassScanner::nextToken`, game.dll `0x9249D0`) stores each character of a
+token in a heap buffer at `[this+8]` with no bound. A `war3map.j` with a
+string literal of ~4000 characters writes past that buffer while the map
+loads (access violation writing at `0x924AE4`; the e2e map with such a
+literal crashed this way). That is a heap overrun from map data, before any
+native runs. A string of the same length built by concatenation at run time
+is fine (4009 characters checked), so it is the scanner's token buffer, not
+JASS strings in general. Possible fix: Tome already hooks `nextToken` (memhack
+guard). It could check the token buffer's size, or refuse a map whose
+`war3map.j` has a literal over the limit before it compiles. The buffer's
+size is still to be read from the scanner's constructor (`0x9246A0`).
 
 ### BLP texture loader reads past the file (`CBLPFile::Open`)
 
@@ -465,6 +524,97 @@ MIDI device).
 4. **Raise the hashtable and game cache limits** as 1.29.1 did, if a
    mod needs them (it changes game behaviour, so every player needs
    the same mod).
+
+## Further hardening (surveyed Nov 2026, not yet done)
+
+A survey of the game's remaining attack surface for malicious maps,
+downloaded files, and (for private/Battle.net servers) the network. Roughly
+most-valuable first. Each needs reverse engineering on 1.27b before it can be
+built; none is implemented yet. The three built-in guards above (memhack,
+path, BLP) plus the path-length limits are what exists today.
+
+### Parsers of untrusted bytes with no guard yet
+
+1. **Redirect map writes to a dedicated subfolder (1.28.1's fix).** On this
+   1.27b build, `PreloadGenEnd`/`InitGameCache`/`SaveGame` already write under
+   `CustomMapData\` and `save\<profile>\` (confirmed in game, Nov 2026;
+   `PreloadGen::End` builds `<game.dll folder>\CustomMapData\<name>` and
+   refuses `\..\`, `\..` and `..\` in it itself), so the "inside the game
+   folder" worry is milder than feared, and the
+   path-sanitizer's `..`/rooted/device/length checks keep a write inside those
+   folders. Still worth doing for defence in depth: refuse writes to script or
+   executable extensions (`.j`, `.ai`, `.pld` aside from the intended preload,
+   `.bat`, `.vbs`, `.exe`, `.dll`), and never let a relative name reach
+   `tome\` or `TOME_HOME`. Also test 8.3 short names (`GAME~1.DLL`) and
+   trailing-dot/space tricks against the guard.
+2. **TGA image guard.** Browsing the Custom Game list parses each map's
+   minimap and preview images before a game ever starts. A `CBLPFile`-style
+   guard for TGA (and a check of the JPEG stream inside a JPEG BLP, which the
+   BLP guard doesn't look into — see #3) would cover that pre-game surface.
+3. **Outdated bundled libraries.** game.dll links **OpenSSL 1.0.1h** (Jun
+   2014) and **libcurl 7.37.0** (2014); Storm.dll uses **zlib 1.1.4** (2002)
+   for MPQ sectors; **ijl15.dll** is Intel JPEG Library 1.5 (~2001), which
+   decodes JPEG BLPs. All have known CVEs. Next step: find what reaches each
+   (OpenSSL/curl look tied to Battle.net/ads/news; zlib and IJL are on the
+   map/asset path). Tome's import hooks could wrap `ijlRead` to validate the
+   JPEG structure (markers, SOF dimensions against the BLP's, Huffman/quant
+   tables) the way the BLP guard validates the BLP header.
+4. **Other map data parsers:** MDX models (chunk sizes), `w3e`/`wpm`/`doo`
+   terrain, object data (`w3u`/`w3t`/`w3a`, modification counts), SLK/profile
+   text, and map-supplied fonts (which TrueType rasterizer the game uses, and
+   how old, is unknown — no FreeType strings found). `tests/game` loads
+   game.dll without running it, so it could host a direct fuzzer over these
+   parsers (slow under Wine, but it would find real bugs).
+5. **Replays (`.w3g`) and saves (`.w3z`), and LAN map downloads.** Files
+   players receive from others. For LAN downloads, check where the client
+   stores a downloaded map and whether the host-supplied name is cleaned
+   (path traversal by a malicious host is the classic bug). Replays feed the
+   same action parser as live network play (#6).
+6. **Network actions from other players.** A modified client can send
+   malformed action blocks (selection counts, slots, handle ids). Tome already
+   hooks the action dispatch for events, so a validation layer could sit there;
+   it's substantial work and needs research into which actions crash.
+
+### Server-pushed code (private/Battle.net servers only)
+
+7. **Warden and `CheckRevision`.** game.dll has a `WardenClient`: a server can
+   send code modules the client loads and runs — RCE by design, and BNCS
+   traffic can be tampered with in transit. Options: a hash allowlist of known
+   modules, a setting to refuse unknown ones, or at least logging + a popup
+   when one arrives. Only matters for players who connect to such servers.
+
+### JASS runtime crashes (forum-reported, unverified on 1.27b)
+
+8. `ExecuteFunc` with a missing/parameterized function; destroying a trigger
+   with waiting threads; `MultiboardSetRowCount` jumps; `CreateQuest` during
+   init; `SetItemPosition`; the JASS scanner's long string literal overrun
+   noted above; and the 1.28 command-card coordinate fix (item 3 in the list above).
+   The path sanitizer's `BindNative`-wrapper method covers the native ones
+   cheaply — one table line each.
+9. **Other typecasts.** Confirm the memhack guard is the only JASS→memory
+   gateway left: check the hashtable `Save*Handle`/`Load*Handle` + `Convert*`
+   tricks to see whether loading into a mismatched handle type is refused on
+   1.27b.
+
+### Tome's own surface
+
+10. **`TomeLogString`/`TomeLogInteger` flooding and log forgery.** A map can
+    call these in a loop with no cap, and the map's text is logged raw, so it
+    can fill the disk and forge `[ERROR]` lines (`tome.log` has no size cap in
+    `log.cpp`). Give the map-facing natives a `LogBudget` like the handshake's,
+    replace control characters, and cap `tome.log`. Grow `fuzz_jass` (or a new
+    target) to cover Tome-native arguments (`BlzFrame*`, huge strings, bad ids).
+
+### Process-level mitigations (weigh against the stability-first rule)
+
+11. game.dll/Storm.dll/war3.exe already have ASLR + NX (DEP on); **Mss32.dll,
+    ijl15.dll and blizzard.ax have neither**, and none has SafeSEH tables or
+    CFG (checked, Nov 2026). Cheap, low-risk additions Tome could set at
+    startup: `HeapSetInformation(HeapEnableTerminationOnCorruption)` and
+    `SetProcessMitigationPolicy` image-load policy (no remote/low-integrity
+    images). Not viable: ACG (would break Tome's own hooks and mod loading),
+    strict handles (may break the game). Each should be off-by-default or
+    individually tested, per the stability-first rule.
 
 ## Sources
 

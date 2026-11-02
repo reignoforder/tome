@@ -37,9 +37,8 @@ bool is_reserved_device(std::string_view comp) {
     return (d >= '1' && d <= '9') || d == 0xB9 || d == 0xB2 || d == 0xB3;
 }
 
-} // namespace
-
-bool is_unsafe(std::string_view path) {
+// Every check but the length.
+bool escapes(std::string_view path) {
     if (path.empty()) return true;
     // A drive letter ("C:...") or an NTFS alternate data stream ("x:y") is the
     // only legitimate use of ':' in a Windows path, and both escape the
@@ -57,6 +56,19 @@ bool is_unsafe(std::string_view path) {
         i = (j < path.size()) ? j + 1 : j;
     }
     return false;
+}
+
+} // namespace
+
+size_t max_name_after(size_t prefix_len) {
+    constexpr size_t kExt = 4;  // ".pld"
+    return prefix_len + kExt < kMaxPathLen ? kMaxPathLen - kExt - prefix_len : 0;
+}
+
+bool is_unsafe(std::string_view path) { return path.size() > kMaxPathLen || escapes(path); }
+
+bool is_unsafe_any_length(std::string_view path) {
+    return escapes(path) || (path.size() > kMaxPathLen && escapes(path.substr(0, kMaxPathLen)));
 }
 
 bool toc_is_unsafe(std::string_view toc) {

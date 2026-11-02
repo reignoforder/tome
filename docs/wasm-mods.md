@@ -97,7 +97,7 @@ outside memory; nothing is terminated.
 | `restart_game` | same | it only asks the player |
 | `selection` | same | an array of `tome_wasm_unit` |
 | `subscribe`, `publish` | same | messages up to 64 KiB, copied |
-| `map_script_shadows`, `read_game_file` | same | copied; names checked like the file natives' (`core/path_guard`: no `..`, drive, root or device), since with the game's "Allow Local Files" on Storm reads loose files first; `read_game_file` also refuses Tome's own folder (`tome\...`: state.json, other mods' config files) and files over 64 MiB |
+| `map_script_shadows`, `read_game_file` | same | copied; names checked like the file natives' (`core/path_guard`: no `..`, drive, root or device, at most 259 bytes), since with the game's "Allow Local Files" on Storm reads loose files first; `read_game_file` also refuses Tome's own folder (`tome\...`: state.json, other mods' config files) and files over 64 MiB |
 | `config_read`, `config_write` | instead of `config_dir` | the mod's own files in `tome/mods/config/<id>/`, plain names, up to 1 MiB |
 | `register_native` | same | below |
 | `jass_code_call`, `jass_code_execute` | same | Tome checks code values, as for DLLs |

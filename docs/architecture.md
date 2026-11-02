@@ -972,8 +972,11 @@ reason to make a fix a patch rather than ship it as a mod.
   reads each path through `RCString::GetText` (bound by the patch itself),
   and either calls the real native or, for a name that
   `path_guard::is_unsafe` rejects (absolute, drive or NTFS stream `:`,
-  UNC/rooted, any `..` component, a reserved DOS device name; empty, for the
-  writes), skips the call and returns 0 (nothing / false / 0 / a null
+  UNC/rooted, any `..` component, a reserved DOS device name, a name over
+  `kMaxPathLen` (259, `MAX_PATH` less its NUL: the game would truncate a
+  longer one, and one of ~4000 characters crashes `PreloadGenEnd`; not for
+  `Preload`, whose argument maps also use as data); empty,
+  for the writes), skips the call and returns 0 (nothing / false / 0 / a null
   handle). One template wrapper per entry of a table of name, argument count
   and path arguments, so covering another native is one table line.
   `BlzLoadTOCFile` checks its TOC path and the FDF paths listed in it
