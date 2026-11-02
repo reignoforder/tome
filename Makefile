@@ -9,6 +9,8 @@
 #               e2e test needs (ON); OFF for a release build (CI). Given on the
 #               command line, it also changes an existing build folder
 #   RELEASE_BUILD  build folder of `make dist` (build-release; always DEV=OFF)
+#   CMAKE_EXTRA more CMake flags for a new build folder (tools/coverage.sh's
+#               --coverage)
 #   INSTALL_DIR a Warcraft III 1.27b folder `make deploy` copies tome.mix
 #               into (no default; never input/)
 #   HEADLESS    e2e and game: 1 runs the game in its own X server (Xvfb),
@@ -30,10 +32,10 @@ RELEASE_BUILD ?= build-release
 E2E_KEEP   ?= 0
 
 CMAKE_FLAGS = -G "$(GENERATOR)" -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-i686-mingw.cmake \
-              -DCMAKE_BUILD_TYPE=$(BUILD_TYPE) -DTOME_BUILD_DEV_TOOLS=$(DEV_TOOLS) -DTOME_DEV=$(DEV)
+              -DCMAKE_BUILD_TYPE=$(BUILD_TYPE) -DTOME_BUILD_DEV_TOOLS=$(DEV_TOOLS) -DTOME_DEV=$(DEV) $(CMAKE_EXTRA)
 
-.PHONY: all configure build-folder build test e2e e2e-multiplayer game game-stop fuzz sdk dist bindings deploy clean \
-        container container-shell container-test container-sdk container-dist container-e2e help
+.PHONY: all configure build-folder build test e2e e2e-multiplayer coverage game game-stop fuzz sdk dist bindings deploy clean \
+        container container-shell container-test container-sdk container-dist container-fuzz container-e2e help
 
 all: build
 
@@ -43,6 +45,8 @@ help:
 	@echo "make e2e            end-to-end test in the real game (needs the game in input/; Xvfb, about 4 min):"
 	@echo "                    tools/e2e-test.sh, then tools/e2e-multiplayer.sh"
 	@echo "make e2e-multiplayer  only the two-instance LAN game test (about 1.5 min)"
+	@echo "make coverage       line coverage of the tests and e2e tests, by section (tools/coverage.sh; build-cov/,"
+	@echo "                    COVERAGE_MIN=90 fails below that)"
 	@echo "make game           start the build in the game (tools/game.sh start); make game-stop"
 	@echo "make fuzz           libFuzzer targets (tools/fuzz.sh; FUZZ_SECONDS=60)"
 	@echo "make sdk            the SDK zip for mod makers ($(BUILD)/tome-sdk-<version>.zip)"
@@ -52,6 +56,7 @@ help:
 	@echo "make container      build the $(IMAGE) image: the whole toolchain, Wine and Xvfb"
 	@echo "make container-test / container-e2e   build and test inside it (build-container/)"
 	@echo "make container-sdk  the SDK zip, built inside it"
+	@echo "make container-fuzz the fuzz targets, built and run inside it (build-container-fuzz/; FUZZ_SECONDS)"
 	@echo "make container-dist the player download, built inside it ($(CONTAINER_RELEASE_BUILD)/)"
 	@echo "make clean          remove $(BUILD)/"
 
@@ -81,6 +86,10 @@ e2e: build
 
 e2e-multiplayer: build
 	BUILD="$(abspath $(BUILD))" tools/e2e-multiplayer.sh "$(BUILD)"
+
+COVERAGE_MIN ?= 90
+coverage:
+	COVERAGE_MIN=$(COVERAGE_MIN) tools/coverage.sh
 
 game: build
 	BUILD="$(abspath $(BUILD))" tools/game.sh start
@@ -168,3 +177,7 @@ container-e2e: $(CONTAINER_IMAGE)
 container-dist: $(CONTAINER_IMAGE)
 	$(CONTAINER_PREPARE)
 	$(CONTAINER_RUN) make dist RELEASE_BUILD=$(CONTAINER_RELEASE_BUILD)
+
+container-fuzz: $(CONTAINER_IMAGE)
+	$(CONTAINER_PREPARE)
+	$(CONTAINER_RUN) env FUZZ_BUILD=$(CONTAINER_BUILD)-fuzz tools/fuzz.sh $(FUZZ_SECONDS)

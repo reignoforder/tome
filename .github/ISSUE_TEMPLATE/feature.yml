@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+name: Feature request
+description: Something mods or players need from Tome.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: What you want to do
+      description: The mod or the use you have in mind, and what's in the way today. docs/ROADMAP.md lists what's planned.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: How Tome could help
+      description: An API function, an event, a menu feature... Name the game function or behavior if you know it.

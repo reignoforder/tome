@@ -33,8 +33,10 @@ signed it and what it can do. A mod with code (a DLL) can do anything a
 program on your computer can: only turn on mods from people you trust.
 
 In a multiplayer game, every player needs the same version of each mod
-that the game requires; Tome compares them in the lobby, so the other
-players see those mods' names and versions.
+that the game requires; Tome compares them in the lobby and the game, so
+the other players see those mods' names and versions, and the game's
+replay records them. Nothing else is sent: Tome makes no connections of
+its own (DISCLAIMER.txt).
 
 IF SOMETHING GOES WRONG
 

@@ -51,6 +51,29 @@ private:
     F f_;
 };
 
+// Runs `f` when the scope ends: normally (the destructor) or when a crash
+// guard unwinds through it (where no destructor runs). For cleanups the
+// normal path needs too, such as a mark that must not outlive the call.
+template <typename F>
+class OnExit {
+public:
+    explicit OnExit(F f) : f_(std::move(f)) {
+        record_.fn = [](void* self) { static_cast<OnExit*>(self)->f_(); };
+        record_.context = this;
+        unwind::push(record_);
+    }
+    ~OnExit() {
+        unwind::pop(record_);
+        f_();
+    }
+    OnExit(const OnExit&) = delete;
+    OnExit& operator=(const OnExit&) = delete;
+
+private:
+    unwind::Record record_;
+    F f_;
+};
+
 // An SRW lock held for a scope. unlock() releases it early; a crash guard
 // unwinding through the scope releases it too.
 class ExclusiveLock {

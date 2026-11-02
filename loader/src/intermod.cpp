@@ -206,7 +206,8 @@ int32_t TOME_CALL api_publish(tome_mod* mod, const char* topic, const void* data
             if (s.topic == name && s.mod != mod) due.push_back(s);
         }
     }
-    OnUnwind done([&] {
+    // The topic is unmarked when this returns, or if a crash unwinds through here.
+    OnExit delivered([&] {
         ExclusiveLock hold(g_lock);
         std::erase(g_publishing, name);
     });

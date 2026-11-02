@@ -6,6 +6,7 @@
 #include <tome/tome_test.h>
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #ifdef TOME_TEST_RUST_EXAMPLE
@@ -82,7 +83,53 @@ static void missing_dependency(void) {
     TOME_EXPECT_STR(tome_test_state("nobody"), "missing");
 }
 
+/* The smaller helpers, on the crash fixture in a mode that doesn't crash. */
+static void helpers(void) {
+    uint32_t result = 0;
+    uint32_t args[1] = {1};
+    if (!install_crash("none")) return;
+    TOME_EXPECT(!tome_test_install(TOME_TEST_SOURCE_DIR "/tests/e2e/mods/needs-ghost")); /* after start */
+    TOME_EXPECT_STATE("crash", "active");
+    TOME_EXPECT(tome_test_log_count("Loaded crash") == 1);
+    TOME_EXPECT(tome_test_reload("crash"));
+    TOME_EXPECT(!tome_test_reload("nobody"));
+    TOME_EXPECT(!tome_test_reload(NULL));
+    TOME_EXPECT(tome_test_log_count("Loaded crash") == 2);
+    TOME_EXPECT(tome_test_log_count(NULL) == 0);
+    TOME_EXPECT(strstr(tome_test_log(), "Loaded crash") != NULL);
+    TOME_EXPECT(!tome_test_has_native("CrashNative")); /* bound at the map load */
+    tome_test_load_map();
+    TOME_EXPECT(tome_test_has_native("CrashNative"));
+    TOME_EXPECT(!tome_test_has_native("NoSuchNative"));
+    TOME_EXPECT(!tome_test_has_native(NULL));
+    TOME_EXPECT(tome_test_call("CrashNative", args, 1, &result) && result == 2);
+    TOME_EXPECT(tome_test_set_setting("crash", "key", "{not json") == TOME_ERR_INVALID_ARGUMENT);
+    TOME_EXPECT_LOGGED("tome_test_set_setting(crash, key): not JSON");
+}
+
+/* Only with TOME_TEST_SHOW_FAILURES set (the tome_test_failures test):
+ * each check fails, and says why. */
+static void shows_failures(void) {
+    if (!getenv("TOME_TEST_SHOW_FAILURES")) return;
+    TOME_EXPECT(tome_test_install(TOME_TEST_SOURCE_DIR "/tests/e2e/mods/needs-ghost"));
+    TOME_EXPECT(tome_test_start());
+    TOME_EXPECT_LOGGED("a line nobody logs");
+    TOME_EXPECT_STATE("needs-ghost", "active");
+    TOME_EXPECT_STR("got", "wanted");
+    TOME_EXPECT_STR(NULL, "wanted");
+}
+
+/* The same, before tome_test_start, and then a crash. */
+static void shows_a_crash(void) {
+    if (!getenv("TOME_TEST_SHOW_FAILURES")) return;
+    TOME_EXPECT(tome_test_install(TOME_TEST_SOURCE_DIR "/tests/e2e/mods/needs-ghost"));
+    *(volatile int*)0 = 1;
+}
+
 static const tome_test_case cases[] = {
+    {"helpers", helpers},
+    {"shows_failures", shows_failures},
+    {"shows_a_crash", shows_a_crash},
 #ifdef TOME_TEST_RUST_EXAMPLE
     {"rust_mod", rust_mod},
 #endif

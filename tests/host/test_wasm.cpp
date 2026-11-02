@@ -6,9 +6,13 @@
 #include "test.h"
 #include "wasm_builder.h"
 
+#include "core/wasm_abi.h"
+#include "core/wasm_imports.h"
+#include "frames.h"
 #include "mod_manager.h"
 
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 
 #include <windows.h>
@@ -664,4 +668,225 @@ TEST(host_wasm_bad_topics_are_explained) {
     CHECK(session.start(home));
     mod_manager().set_enabled("wasm-topics", true);
     CHECK_LOG("[wasm-topics] publish(my-mod/news): a topic is 1-64 of a-z 0-9 . - _");
+}
+
+// Imports no other fixture calls, each with arguments that work and ones
+// that don't. Without the game's UI (the fake game has none) the frame
+// imports refuse every handle. Each call whose result is the expected one
+// logs "okNN" (checked below); the rest show in Tome's log.
+TEST(host_wasm_imports_checked) {
+    Fixture f;
+    const uint32_t mod_id = f.b.import("tome", "mod_id", {I32, I32}, {I32});
+    const uint32_t mod_version = f.b.import("tome", "mod_version", {I32, I32}, {I32});
+    const uint32_t setting_bool = f.b.import("tome", "setting_bool", {I32, I32, I32}, {I32});
+    const uint32_t setting_number = f.b.import("tome", "setting_number", {I32, I32, F64}, {F64});
+    const uint32_t set_bool = f.b.import("tome", "set_setting_bool", {I32, I32, I32}, {I32});
+    const uint32_t set_number = f.b.import("tome", "set_setting_number", {I32, I32, F64}, {I32});
+    const uint32_t set_string = f.b.import("tome", "set_setting_string", {I32, I32, I32, I32}, {I32});
+    const uint32_t ui_root = f.b.import("tome", "ui_root", {I32}, {I32});
+    const uint32_t frame_create = f.b.import("tome", "frame_create", {I32, I32, I32, I32, I32}, {I32});
+    const uint32_t set_point = f.b.import("tome", "frame_set_point", {I32, I32, I32, I32, F32, F32}, {I32});
+    const uint32_t set_text = f.b.import("tome", "frame_set_text", {I32, I32, I32}, {I32});
+    const uint32_t set_visible = f.b.import("tome", "frame_set_visible", {I32, I32}, {I32});
+    const uint32_t set_animation = f.b.import("tome", "frame_set_animation", {I32, I32, I32}, {I32});
+    const uint32_t on_click = f.b.import("tome", "frame_on_click", {I32, I32}, {I32});
+    const uint32_t load_fdf = f.b.import("tome", "load_fdf", {I32, I32}, {I32});
+    const uint32_t load_toc = f.b.import("tome", "load_toc", {I32, I32}, {I32});
+    const uint32_t keybind_name = f.b.import("tome", "keybind_name", {I32, I32, I32, I32}, {I32});
+    const uint32_t popup = f.b.import("tome", "popup", {I32, I32, I32}, {I32});
+    const uint32_t popup_close = f.b.import("tome", "popup_close", {I32}, {I32});
+    const uint32_t restart_game = f.b.import("tome", "restart_game", {}, {I32});
+    const uint32_t selection = f.b.import("tome", "selection", {I32, I32, I32, I32}, {I32});
+    const uint32_t shadows = f.b.import("tome", "map_script_shadows", {I32, I32, I32}, {I32});
+    const uint32_t publish = f.b.import("tome", "publish", {I32, I32, I32, I32}, {I32});
+    const uint32_t register_native = f.b.import("tome", "register_native", {I32, I32, I32}, {I32});
+    const uint32_t code_execute = f.b.import("tome", "jass_code_execute", {I32}, {I32});
+    f.b.data(200, "flag");
+    f.b.data(210, "speed");
+    f.b.data(220, "name");
+    f.b.data(230, "Zed");
+    f.b.data(240, "Frame");
+    f.b.data(250, "x.fdf");
+    f.b.data(260, "x.toc");
+    f.b.data(270, "nokey");
+    f.b.data(280, "Title");
+    f.b.data(290, "Text");
+    f.b.data(300, "Yes");
+    f.b.data(400, "t.big");
+    f.b.data(420, "HelloX");
+    // The popup: options {300, 3} at 320, the spec at 340.
+    const std::string option{'\x2c', '\x01', 0, 0, 3, 0, 0, 0};
+    f.b.data(320, option);
+    std::string spec;
+    for (uint32_t v : {280u, 5u, 290u, 4u, 320u, 1u, 0u, 0u, 0u}) {
+        for (int i = 0; i < 4; ++i) spec.push_back(static_cast<char>((v >> (8 * i)) & 0xFF));
+    }
+    f.b.data(340, spec);
+    constexpr int32_t kOut = 2000, kCount = 2600, kLeader = 2604, kId = 2608, kOutside = 70000;
+
+    Bytes body;
+    int checks = 0;
+    auto add = [&](std::initializer_list<Bytes> parts) {
+        for (const Bytes& p : parts) body.insert(body.end(), p.begin(), p.end());
+    };
+    // `call` leaves an i32; logs "okNN" if it's `expected`.
+    auto expect = [&](std::initializer_list<Bytes> call, int32_t expected) {
+        char marker[8];
+        std::snprintf(marker, sizeof(marker), "ok%02d", ++checks);
+        const int32_t at = 1100 + 8 * checks;
+        f.b.data(static_cast<uint32_t>(at), marker);
+        add(call);
+        add({op::i32_const(expected), op::i32_eq(), op::if_(), f.log_at(at, 4), op::end()});
+    };
+    using namespace op;
+    expect({i32_const(kOut), i32_const(64), call(mod_id)}, 8);  // "wasm-api"
+    expect({i32_const(kOut), i32_const(64), call(mod_version)}, 5);
+    expect({i32_const(200), i32_const(4), i32_const(7), call(setting_bool)}, 0);
+    expect({i32_const(200), i32_const(4), i32_const(1), call(set_bool)}, TOME_OK);
+    expect({i32_const(200), i32_const(4), i32_const(7), call(setting_bool)}, 1);
+    expect({i32_const(kOutside), i32_const(4), i32_const(7), call(setting_bool)}, 7);  // key outside memory
+    expect({i32_const(kOutside), i32_const(4), i32_const(1), call(set_bool)}, TOME_ERR_INVALID_ARGUMENT);
+    expect({i32_const(210), i32_const(5), f64_const(3.5), call(set_number)}, TOME_OK);
+    expect({i32_const(kOutside), i32_const(5), f64_const(3.5), call(set_number)}, TOME_ERR_INVALID_ARGUMENT);
+    add({i32_const(210), i32_const(5), f64_const(1.0), call(setting_number), drop()});
+    add({i32_const(kOutside), i32_const(5), f64_const(1.0), call(setting_number), drop()});
+    expect({i32_const(220), i32_const(4), i32_const(230), i32_const(3), call(set_string)}, TOME_OK);
+    expect({i32_const(220), i32_const(4), i32_const(kOutside), i32_const(3), call(set_string)},
+           TOME_ERR_INVALID_ARGUMENT);
+    expect({i32_const(TOME_UI_MAIN_MENU), call(ui_root)}, 0);  // no main menu without the game
+    expect({i32_const(240), i32_const(5), i32_const(99), i32_const(0), i32_const(0), call(frame_create)}, 0);
+    expect({i32_const(kOutside), i32_const(5), i32_const(99), i32_const(0), i32_const(0), call(frame_create)}, 0);
+    expect({i32_const(99), i32_const(0), i32_const(99), i32_const(0), f32_const(0), f32_const(0), call(set_point)},
+           TOME_ERR_INVALID_ARGUMENT);
+    expect({i32_const(99), i32_const(290), i32_const(4), call(set_text)}, TOME_ERR_INVALID_ARGUMENT);
+    expect({i32_const(99), i32_const(1), call(set_visible)}, TOME_ERR_INVALID_ARGUMENT);
+    expect({i32_const(99), i32_const(kOut), i32_const(1), call(set_animation)}, TOME_ERR_INVALID_ARGUMENT);
+    expect({i32_const(99), i32_const(9), call(on_click)}, TOME_ERR_INVALID_ARGUMENT);
+    add({i32_const(250), i32_const(5), call(load_fdf), drop()});
+    expect({i32_const(kOutside), i32_const(5), call(load_fdf)}, TOME_ERR_INVALID_ARGUMENT);
+    add({i32_const(260), i32_const(5), call(load_toc), drop()});
+    expect({i32_const(270), i32_const(5), i32_const(kOut), i32_const(64), call(keybind_name)}, 0);
+    expect({i32_const(kOutside), i32_const(5), i32_const(kOut), i32_const(64), call(keybind_name)}, -1);
+    add({i32_const(340), i32_const(11), i32_const(kId), call(popup), drop()});
+    add({i32_const(kId), i32_load(), call(popup_close), drop()});
+    expect({i32_const(kOutside), i32_const(11), i32_const(kId), call(popup)}, TOME_ERR_INVALID_ARGUMENT);
+    add({call(restart_game), drop()});
+    expect({i32_const(kOut), i32_const(512), i32_const(kCount), i32_const(kLeader), call(selection)}, 0);
+    expect({i32_const(kOut), i32_const(512), i32_const(kOutside), i32_const(kLeader), call(selection)}, -1);
+    expect({i32_const(kOut), i32_const(512), i32_const(kCount), call(shadows)}, 0);
+    expect({i32_const(kOut), i32_const(512), i32_const(kOutside), call(shadows)}, -1);
+    expect({i32_const(400), i32_const(5), i32_const(0), i32_const(kOutside), call(publish)}, -1);
+    expect({i32_const(420), i32_const(6), i32_const(1), call(register_native)}, TOME_ERR_INVALID_ARGUMENT);
+    add({i32_const(0), call(code_execute), drop()});
+
+    f.load({i32_const(0)});
+    f.b.export_func("tome_mod_enable", f.b.func({}, {}, {body}));
+    f.callbacks();
+    Home home;
+    CHECK(install_wasm(home, "wasm-api", f.b.bytes(), R"({"type": "object", "properties": {
+        "flag": {"type": "boolean", "default": false},
+        "speed": {"type": "number", "default": 1.5},
+        "name": {"type": "string", "default": "Ann"}}})"));
+    Session session;
+    CHECK(session.start(home));
+    tome::frames::set_main_thread(GetCurrentThreadId());
+    mod_manager().set_enabled("wasm-api", true);
+    CHECK(running("wasm-api"));
+    for (int i = 1; i <= checks; ++i) {
+        char marker[16];
+        std::snprintf(marker, sizeof(marker), "[wasm-api] ok%02d", i);
+        CHECK_LOG(marker);
+    }
+    CHECK_LOG("[wasm-api] frame_create: frame handle 99 isn't a frame that exists now");
+    CHECK_LOG("[wasm-api] publish: the message is outside the module's memory or larger than");
+    CHECK_LOG("[wasm-api] register_native(HelloX): the module doesn't export tome_native and tome_buffer");
+    std::string config;
+    CHECK(home.read(L"tome\\mods\\config\\wasm-api.json", config));
+    CHECK(config.find("\"Zed\"") != std::string::npos);
+    CHECK(config.find("3.5") != std::string::npos);
+}
+
+// More of what Tome refuses a module: callbacks without the exports they
+// need, config files too large or outside its memory, natives that aren't
+// its own, a string result that isn't one, and a module file too large.
+TEST(host_wasm_more_refusals) {
+    Fixture f;  // no tome_buffer/tome_callback
+    const uint32_t on_setting = f.b.import("tome", "on_setting_changed", {I32}, {I32});
+    const uint32_t on_event = f.b.import("tome", "on_event", {I32, I32}, {I32});
+    const uint32_t on_ui = f.b.import("tome", "on_ui", {I32, I32}, {I32});
+    const uint32_t write = f.b.import("tome", "config_write", {I32, I32, I32, I32}, {I32});
+    const uint32_t read = f.b.import("tome", "config_read", {I32, I32, I32, I32}, {I32});
+    f.b.data(300, "big.bin");
+    f.b.data(320, "out.bin");
+    f.enable({op::i32_const(1), op::call(on_setting), op::drop(),
+              op::i32_const(TOME_EVENT_TICK), op::i32_const(2), op::call(on_event), op::drop(),
+              op::i32_const(TOME_UI_MAIN_MENU), op::i32_const(3), op::call(on_ui), op::drop(),
+              op::i32_const(320), op::i32_const(7), op::i32_const(70000), op::i32_const(8), op::call(write), op::drop(),
+              op::i32_const(300), op::i32_const(7), op::i32_const(500), op::i32_const(64), op::call(read), op::drop()});
+    f.load({op::i32_const(0)});
+    Home home;
+    CHECK(install_wasm(home, "wasm-refused", f.b.bytes()));
+    CreateDirectoryW(home.paths().mod_config_dir.c_str(), nullptr);
+    CreateDirectoryW((home.paths().mod_config_dir + L"\\wasm-refused").c_str(), nullptr);
+    CHECK(home.write(L"tome\\mods\\config\\wasm-refused\\big.bin", std::string(tome::wasm::kMaxFileSize + 1, 'x')));
+    // A module file over the limit: refused by its size, before it's read.
+    {
+        Builder b;
+        b.export_func("tome_mod_load", b.func({}, {I32}, {op::i32_const(0)}));
+        std::string huge = b.bytes();
+        huge.resize(tome::wasm::kMaxModuleSize + 1);
+        CHECK(install_wasm(home, "wasm-huge", huge));
+    }
+    Session session;
+    CHECK(session.start(home));
+    mod_manager().set_enabled("wasm-refused", true);
+    for (const char* import : {"on_setting_changed", "on_event", "on_ui"}) {
+        CHECK_LOG(std::string("[wasm-refused] ") + import + ": the module doesn't export tome_buffer and tome_callback");
+    }
+    CHECK_LOG("[wasm-refused] config_write: the data is outside the module's memory or larger than 1 MiB");
+    CHECK_LOG("[wasm-refused] config_read: the file is larger than 1 MiB");
+    mod_manager().set_enabled("wasm-huge", true);
+    CHECK_LOG("the module is larger than 16 MiB");
+}
+
+TEST(host_wasm_natives_not_its_own_and_bad_results) {
+    Fixture f;
+    const uint32_t reg = f.b.import("tome", "register_native", {I32, I32, I32}, {I32});
+    f.b.data(400, "WasmUndeclared");
+    f.b.data(420, "HelloLog");
+    f.b.data(440, "WasmVoid");
+    f.b.data(460, "WasmBadString");
+    f.load({op::i32_const(0)});
+    f.enable({op::i32_const(400), op::i32_const(14), op::i32_const(1), op::call(reg), op::drop(),
+              op::i32_const(420), op::i32_const(8), op::i32_const(2), op::call(reg), op::drop(),
+              op::i32_const(440), op::i32_const(8), op::i32_const(3), op::call(reg), op::drop(),
+              op::i32_const(460), op::i32_const(13), op::i32_const(4), op::call(reg), op::drop()});
+    f.callbacks();
+    // tome_native: a string result outside the module's memory for id 4.
+    f.b.export_func("tome_native", f.b.func({I32, I32, I32}, {I32}, {op::i32_const(70000)}));
+    Home home;
+    CHECK(home.install_mod("hello"));
+    CreateDirectoryW((home.paths().home_dir + L"\\tome\\mods\\wasm-others").c_str(), nullptr);
+    CHECK(home.write(L"tome\\mods\\wasm-others\\tome.mod.json",
+                     R"({"schema": 1, "id": "wasm-others", "version": "1.0.0", "game": "1.27b", "tome": "*",
+                         "sync": "client", "wasm": "mod.wasm", "natives": [
+                         "native WasmVoid takes nothing returns nothing",
+                         "native WasmBadString takes nothing returns string"]})"));
+    CHECK(home.write(L"tome\\mods\\wasm-others\\mod.wasm", f.b.bytes()));
+    Session session;
+    CHECK(session.start(home));
+    mod_manager().set_enabled("hello", true);
+    mod_manager().set_enabled("wasm-others", true);
+    CHECK_LOG("[wasm-others] register_native(WasmUndeclared): not declared in tome.mod.json \"natives\"");
+    CHECK_LOG("[wasm-others] register_native(HelloLog): declared by another mod");
+    session.game.load_map();
+    using Fn = uint32_t (*)();
+    auto void_native = reinterpret_cast<Fn>(session.game.native("WasmVoid"));
+    auto bad_string = reinterpret_cast<Fn>(session.game.native("WasmBadString"));
+    CHECK(void_native && bad_string);
+    if (!void_native || !bad_string) return;
+    void_native();
+    CHECK_EQ(bad_string(), 0u);
+    CHECK_LOG("[wasm-others] native WasmBadString: the string it returned isn't a NUL-terminated UTF-8 string");
+    CHECK(running("wasm-others"));
 }

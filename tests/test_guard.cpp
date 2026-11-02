@@ -341,3 +341,23 @@ TEST(unwind_cleanups_stay_quiet_on_normal_returns) {
     ReleaseSRWLockExclusive(&lock);
     CHECK(fs0() == before);
 }
+
+// OnExit: once on a normal return, once when a guard abandons the call.
+TEST(unwind_on_exit_runs_on_both_paths) {
+    Setup setup;
+    int runs = 0;
+    void* before = fs0();
+    {
+        OnExit cleanup([&] { ++runs; });
+        CHECK(fs0() != before);
+    }
+    CHECK(fs0() == before);
+    CHECK_EQ(runs, 1);
+    tome_mod mod;
+    CHECK(!guard::run(&mod, "test", nullptr, [&] {
+        OnExit cleanup([&] { ++runs; });
+        crash_now();
+    }));
+    CHECK(fs0() == before);
+    CHECK_EQ(runs, 2);
+}

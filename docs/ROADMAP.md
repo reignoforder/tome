@@ -74,14 +74,16 @@ Rust mods need Windows 10 (`WaitOnAddress`; Rust's own minimum).
    `DISCLAIMER.txt`, `licenses/` and an empty `mods/`; Windows line endings.
    The license texts come from one place for both zips
    (`loader/third_party/licenses.cmake`). No example mod in it.
-4. **CI** (mostly done): `.github/workflows/ci.yml` builds a release build
+4. ~~**CI**~~ Done: `.github/workflows/ci.yml` builds a release build
    in the container, runs `make test` (the Rust bindings check included),
    and makes both zips on every push; a `v*` tag also makes a draft release
    with both zips, `SHA256SUMS` and the WAMR archive the build used (part of
    the GPL's corresponding source; `loader/third_party/NOTICES.md`), after
-   checking the tag against the project version; publish it by hand. Left: a
-   short `tools/fuzz.sh` run, and pinning the actions to commit SHAs. The
-   e2e test needs game files and stays local (say so in `CONTRIBUTING.md`).
+   checking the tag against the project version; publish it by hand. Every
+   push also runs the fuzz targets for 30 s each (`make container-fuzz`).
+   Actions are pinned to commits, with Dependabot (`.github/dependabot.yml`)
+   proposing updates. The e2e test needs game files and stays local
+   (`CONTRIBUTING.md`).
 5. **Real Windows:** everything so far ran under Wine with Mesa. One manual
    pass on Windows 10/11 with Direct3D and Defender on: install, Mods menu,
    approving a DLL mod, settings, keybinds, a LAN game, safe mode, uninstall.
@@ -125,12 +127,11 @@ Rust mods need Windows 10 (`WaitOnAddress`; Rust's own minimum).
    - README: player install first (download, copy, uninstall), building
      later; a screenshot of the Mods menu; "1.27b only, idle on other
      builds" up front; status pointing at this file, not `research.md`;
-   - `CHANGELOG.md`, and how the API version relates to the release version
-     (`tests/test_abi.cpp` pins released fields);
-   - `CONTRIBUTING.md` (the rules in `CLAUDE.md`, the local-only e2e test),
-     issue templates asking for `tome/tome.log` and the game build
-     (`SECURITY.md` is written: the threat model and where to report; turn
-     on private vulnerability reporting in the GitHub settings);
+   - ~~`CHANGELOG.md`~~ (with "Versions": release, API and mapping
+     schema), ~~`CONTRIBUTING.md`~~, ~~issue templates~~
+     (`.github/ISSUE_TEMPLATE/`), ~~a privacy section~~ (README,
+     `DISCLAIMER.md`) done; left: turn on private vulnerability reporting
+     in the GitHub settings (`SECURITY.md` and the templates point there);
    - `sdk/README.md`: check the C, C++ and Rust examples it promises all
      exist; a "first mod in ten minutes" walkthrough.
 11. **Antivirus and anti-cheat:** a DLL loaded by the sound library that

@@ -60,6 +60,14 @@ WINE_PID=""
 
 stop_game() {
     [[ -z "$WINE_PID" ]] && return
+    # E2E_COVERAGE=1: the game exits by itself first (TOME_DEBUG_EXIT), so a
+    # coverage build writes its counters (tools/coverage.sh).
+    if [[ "${E2E_COVERAGE:-0}" == 1 ]] && kill -0 "$WINE_PID" 2>/dev/null; then
+        touch "$HOME_DIR/tome/debug-exit"
+        for _ in $(seq 1 60); do kill -0 "$WINE_PID" 2>/dev/null || break; sleep 0.5; done
+        kill -0 "$WINE_PID" 2>/dev/null && echo "e2e: the game didn't exit by itself (launch $((LAUNCHES + 1))); its coverage is lost" >&2
+        rm -f "$HOME_DIR/tome/debug-exit"
+    fi
     env_stop
     wait "$WINE_PID" 2>/dev/null
     WINE_PID=""
@@ -195,7 +203,7 @@ launch() {
     env_registry_load "$WORK/user.reg.e2e"
     (cd "$GAME" && DISPLAY="$(env_display)" TOME_HOME="$TOME_HOME_WIN" TOME_DEBUG_CLICKS="${TOME_DEBUG_CLICKS:-}" \
         TOME_DEBUG_ASSET="$PROBE" TOME_DEBUG_APPROVE="$APPROVED" \
-        WINEDEBUG=err+module exec wine war3.exe -window -opengl "${MAP_ARG[@]}" >"$WORK/wine.log" 2>&1) &
+        TOME_DEBUG_SKIP_MOVIES=1 TOME_DEBUG_EXIT="${E2E_COVERAGE:-0}" WINEDEBUG=err+module exec wine war3.exe -window -opengl "${MAP_ARG[@]}" >"$WORK/wine.log" 2>&1) &
     WINE_PID=$!
     # Without Tome's log there's nothing to check: say why instead of
     # timing out every check.
@@ -743,7 +751,12 @@ if ((${#MAP_ARG[@]})); then
     echo "disabled mod's natives (second launch)"
     set_enabled hello false
     set_enabled crash false
-    launch
+    # Once the loaded game runs, a movie queued with "-movie" plays as the
+    # mission is quit, skipped with Esc (TOME_DEBUG_SKIP_MOVIES: no frames
+    # are presented during a movie, so the script can't).
+    TOME_DEBUG_CLICKS="wait:TomeLogInteger(8604);settle;type:-movie;wait:e2e: movie queued;\
+key:F10;settle;click:EndGameButton;settle;click:QuitButton;wait:skipping the movie;wait:Screen: score screen" \
+        launch
     check "hello +1\.0\.0 +disabled" "hello starts disabled" 30
     check "\[map\] TomeLogInteger\(0\)" "map still loads; disabled native returned 0" 45
     check_absent "HelloLog\(" "disabled natives don't reach the mod"
@@ -757,6 +770,9 @@ if ((${#MAP_ARG[@]})); then
     check "\[hello\] loaded a saved game: Save\\\\.+\\\\TomeE2E\.w3z" "loaded event with the saved game's path" 30
     check_count "Game started: " 2 "the loaded game started" 30
     check "\[map\] TomeLogInteger\(8604\)" "the loaded game's timers run (and don't load again)" 15
+    check "movie-frame-length: blizzard\.ax patched" "a movie (queued by the map, played as it ends): blizzard.ax patched" 30
+    check "Debug: skipping the movie" "the movie played, and was skipped" 15
+    check "Screen: score screen" "the game goes on after the movie" 20
     stop_game
 fi
 
@@ -801,6 +817,11 @@ TOME_DEBUG_CLICKS="wait:Screen ready: main menu;click:TomeModsButton;until:Mod m
 click:TomeModsRow0Button;until:Mod menu: disabling hello;wait:[hello] disabled;\
 click:TomeModsRow0Button;until:Mod menu: enabling hello;wait:[hello] enabled (2 times;\
 click:TomeModsFooter3;until:Mod menu closed;settle;click:HelloButton;until:[hello] Hello button clicked (1);\
+key:Ctrl+Shift+P;wait:shown: \"Hello Tome\";settle;key:Enter;wait:[hello] popup: Hello, world.;\
+key:Ctrl+Shift+P;wait:shown: \"Hello Tome\";settle;click:TomePopupButton,11;wait:shown: \"Pick a Number\";settle;\
+key:Right;frames:5;key:Right;frames:5;key:Left;frames:5;click:TomePopupButton,10;wait:popup 3: 6;\
+key:Ctrl+Shift+P;wait:shown: \"Hello Tome\";settle;click:TomePopupButton,12;wait:shown: \"Restart Required\";settle;\
+key:Esc;wait:popup 5: 1;key:Ctrl+Shift+P;wait:shown: \"Hello Tome\";settle;key:Esc;wait:popup 6: 3;\
 click:TomeModsButton;until:Mod menu opened;settle;click:TomeModsRow0Small;until:Mod menu page: details hello;\
 click:TomeModsFooter1;until:Mod menu page: settings hello;click:TomeModsRow2Button;until:hello: setting shout = On;\
 focus:TomeModsRow0Edit;key:End;key:Backspace;key:Backspace;key:Backspace;key:Backspace;key:Backspace;\
@@ -826,6 +847,12 @@ check "\[hello\] enabled \(2 times" "mod re-enabled live"
 check "Mod menu closed" "Done closes the panel" 10
 check_count "\[hello\] added a Hello button" 2 "re-enabling recreated the mod's button right away"
 check "\[hello\] Hello button clicked \(1\)" "the mod's click callback ran" 10
+check "Popup 1 shown: \"Hello Tome\", 4 options" "a mod's popup shows on the main menu (its keybind)" 10
+check "\[hello\] popup: Hello, world\." "Enter picks the popup's default option" 10
+check "Popup 3 shown: \"Pick a Number\", 14 options" "a button opens the next popup, which pages its options" 10
+check "\[hello\] popup 3: 6" "a page turned with the arrow keys, then a click picks an option there" 10
+check "\[hello\] popup 5: 1" "Esc picks the cancel option" 10
+check "\[hello\] popup 6: 3" "Esc again, from a popup reused on the same screen" 10
 if python3 -I -c "import json,sys; sys.exit(0 if json.load(open('$STATE'))['mods']['hello']['enabled'] else 1)"; then
     pass "state.json saved by the menu"
 else

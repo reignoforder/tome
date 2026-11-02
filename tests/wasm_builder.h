@@ -60,6 +60,12 @@ inline Bytes f32_const(float v) {
     b.insert(b.end(), p, p + 4);
     return b;
 }
+inline Bytes f64_const(double v) {
+    Bytes b{0x44};
+    const uint8_t* p = reinterpret_cast<const uint8_t*>(&v);
+    b.insert(b.end(), p, p + 8);
+    return b;
+}
 inline Bytes local_get(uint32_t i) {
     Bytes b{0x20};
     uleb(b, i);

@@ -7,7 +7,8 @@
 # download and the SDK zip come from it. A v* tag also makes a draft
 # release with both zips, their SHA-256s and the WAMR source archive the
 # build used (the GPL's corresponding source: loader/third_party/NOTICES.md);
-# publish it by hand after a look.
+# publish it by hand after a look. Actions are pinned to commits (the
+# version in a comment); Dependabot proposes updates (.github/dependabot.yml).
 name: CI
 
 on:
@@ -29,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
 
       # The image (~5.5 GB, twice: in the buildx builder and once loaded into
       # docker) and the build (~3 GB, two Wine prefixes) don't fit in the
@@ -43,9 +44,9 @@ jobs:
 
       # The image changes only with the Containerfile, so its layers come
       # from the Actions cache.
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3.12.0
       - name: Build the container image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6.19.2
         with:
           context: tools/container
           file: tools/container/Containerfile
@@ -77,11 +78,24 @@ jobs:
       - name: WAMR source archive
         run: cp build-container/_deps/WAMR-*.tar.gz build-container/
 
+      # The parsers of untrusted bytes (fuzz/), 30 s each: a regression
+      # check, not a search (tools/fuzz.sh runs them longer by hand).
+      - name: Fuzz
+        run: make container-fuzz ENGINE=docker IMAGE_READY=1 FUZZ_SECONDS=30
+
       - name: Test log
         if: failure()
         run: cat build-container/Testing/Temporary/LastTest.log || true
 
-      - uses: actions/upload-artifact@v4
+      - name: Fuzz crashes
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: fuzz-crashes
+          path: build-container-fuzz/crashes/
+          if-no-files-found: ignore
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: tome-build
           path: |
@@ -98,7 +112,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
 
       - name: Tag matches the version
         run: |
@@ -109,7 +123,7 @@ jobs:
           fi
           echo "VERSION=$version" >> "$GITHUB_ENV"
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
         with:
           name: tome-build
           path: dist

@@ -91,9 +91,11 @@ add_test(NAME tome_hook_runtime_tests COMMAND tome_hook_runtime_tests)
 add_executable(tome_host_tests
     host/host_main.cpp
     host/harness.cpp
+    host/test_api.cpp
     host/test_chat.cpp
     host/test_crash.cpp
     host/test_lifecycle.cpp
+    host/test_manager.cpp
     host/test_mods.cpp
     host/test_wasm.cpp
 )
@@ -114,7 +116,8 @@ if(TARGET hello_wasm_rs)
     add_dependencies(tome_host_tests hello_wasm_rs)
     target_compile_definitions(tome_host_tests PRIVATE TOME_TEST_WASM_RUST_EXAMPLE=1)
 endif()
-# Signed by sdk/support/tome_sign.py with a test key (host/test-signing.key),
+# Signed by sdk/support/tome_sign.py with a public test-only key
+# (host/test-signing.key; host/test-signing.key.md),
 # so host tests check Tome and the signer agree on what's signed:
 # crash-signed, a folder with files in subfolders and non-ASCII names, and
 # packages/crash.tome from tome_package(SIGN_KEY).
@@ -184,6 +187,16 @@ if(TARGET hello_wasm)
 endif()
 tome_add_mod_test(tome_mod_tools_tests SOURCES tools/test_tome_test.c MODS ${mods_under_test})
 target_compile_definitions(tome_mod_tools_tests PRIVATE ${mods_test_defines})
+# Its failure reports: cases that fail on purpose with TOME_TEST_SHOW_FAILURES
+# (each message checked), and a case name that doesn't exist.
+add_test(NAME tome_test_failures COMMAND ${CMAKE_COMMAND}
+    "-DCOMMAND=${CMAKE_CROSSCOMPILING_EMULATOR};$<TARGET_FILE:tome_mod_tools_tests>;shows_"
+    "-DEXPECT=no log line with \"a line nobody logs\";needs-ghost is \"error\", not \"active\": ;is \"got\", not \"wanted\";is NULL, not \"wanted\";Tome folder kept: ;unhandled exception 0xc0000005;shows_a_crash crashed;2 tests, 2 failed"
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/tools/expect_output.cmake)
+set_tests_properties(tome_test_failures PROPERTIES ENVIRONMENT "TOME_TEST_SHOW_FAILURES=1;WINEDEBUG=-all")
+add_test(NAME tome_test_unknown_case COMMAND tome_mod_tools_tests --run no-such-case)
+set_tests_properties(tome_test_unknown_case PROPERTIES ENVIRONMENT "WINEDEBUG=-all"
+    PASS_REGULAR_EXPRESSION "no test case named no-such-case")
 # tome-check on a broken fixture: its error, then the line it prints when it
 # exits with 1.
 function(tome_check_fails fixture expected)
@@ -197,3 +210,24 @@ tome_check_fails(broken-json "tome.mod.json: line 2, column 1: expected a string
 tome_check_fails(needs-ghost "doesn't start: error: needs \"ghost\"")
 tome_check_fails(needs-unmapped "tome.mod.json: needs \"CUnit.armor\", which isn't mapped for 1.27b")
 tome_check_fails(wrong-arch "tome.mod.json: entry DLL \"wrong-arch.dll\" not found")
+# ...and where it passes or only warns: the C example and an assets-only
+# mod pass (--strict: warnings would fail them); a mod whose icon is
+# missing; a folder that isn't there; no arguments.
+function(tome_check_prints name expected)
+    add_test(NAME tome_check_${name} COMMAND tome_check ${ARGN})
+    set_tests_properties(tome_check_${name} PROPERTIES ENVIRONMENT "WINEDEBUG=-all" PASS_REGULAR_EXPRESSION "${expected}")
+endfunction()
+tome_check_prints(hello "hello 1\\.0\\.0: ok \\(native, 7 natives\\)" --strict "${CMAKE_BINARY_DIR}/mods/hello")
+tome_check_prints(assets "asset-demo 1\\.0\\.0: ok \\(assets, 0 natives\\)" --strict "${CMAKE_CURRENT_SOURCE_DIR}/e2e/mods/asset-demo")
+tome_check_prints(icon "warning: icon icon\\.blp isn't in the mod folder" "${CMAKE_CURRENT_SOURCE_DIR}/e2e/mods/zz-bad-icon")
+tome_check_prints(missing "tome-check: can't read" "${CMAKE_CURRENT_BINARY_DIR}/no-such-mod")
+tome_check_prints(usage "usage: tome-check")
+
+# tome-mpq (TOME_BUILD_DEV_TOOLS) on a copy of one of the game's maps;
+# skipped without the game.
+if(TOME_BUILD_DEV_TOOLS)
+    add_test(NAME tome_mpq COMMAND ${CMAKE_COMMAND} -DMPQ=$<TARGET_FILE:tome-mpq>
+        "-DWINE=${CMAKE_CROSSCOMPILING_EMULATOR}" "-DGAME=${TOME_GAME_DIR}" -DWORK=${CMAKE_CURRENT_BINARY_DIR}/mpq-test
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_mpq.cmake)
+    set_tests_properties(tome_mpq PROPERTIES ENVIRONMENT "WINEDEBUG=-all" SKIP_REGULAR_EXPRESSION "skipped: no melee map")
+endif()

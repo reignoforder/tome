@@ -50,6 +50,7 @@ GLOBALS = """\
     boolean tome_e2e_input_done = false
     trigger tome_e2e_arrow_trigger = null
     trigger tome_e2e_menu_trigger = null
+    trigger tome_e2e_movie_trigger = null
     unit tome_e2e_shadow = null
 """
 
@@ -150,6 +151,11 @@ CALLS = """\
     call TriggerRegisterPlayerChatEvent(tome_e2e_menu_trigger, Player(0), "-build", true)
     call TriggerRegisterPlayerChatEvent(tome_e2e_menu_trigger, Player(0), "-skill", true)
     call TriggerAddAction(tome_e2e_menu_trigger, function TomeE2EMenuUnit)
+    // "-movie" queues a movie, which plays when the map ends (Tome's movie
+    // patches; TOME_DEBUG_SKIP_MOVIES skips it).
+    set tome_e2e_movie_trigger = CreateTrigger()
+    call TriggerRegisterPlayerChatEvent(tome_e2e_movie_trigger, Player(0), "-movie", true)
+    call TriggerAddAction(tome_e2e_movie_trigger, function TomeE2EMovie)
     // Code that waits: HelloRun returns at the wait, twice on one trigger.
     call HelloRun(function TomeE2EWaits)
     call HelloRun(function TomeE2EWaits)
@@ -386,6 +392,11 @@ function TomeE2EMenuUnit takes nothing returns nothing
     else
         call TomeLogString("e2e: selected the hero")
     endif
+endfunction
+
+function TomeE2EMovie takes nothing returns nothing
+    call PlayCinematic("TutorialOp")
+    call TomeLogString("e2e: movie queued")
 endfunction
 
 function TomeE2EDialog takes nothing returns nothing

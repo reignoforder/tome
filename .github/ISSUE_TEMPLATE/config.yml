@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+blank_issues_enabled: true
+contact_links:
+  - name: Security problem
+    url: https://github.com/reignoforder/tome/security/advisories/new
+    about: Report security problems privately (SECURITY.md), not in a public issue.

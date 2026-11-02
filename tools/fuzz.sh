@@ -11,10 +11,11 @@
 # fuzz/make_seeds.py. A crashing input lands in build-fuzz/crashes/<target>/;
 # after fixing it, copy it to fuzz/regressions/<target>/ so later runs start
 # from it. FUZZ_JOBS=n runs n processes per target (libFuzzer -fork).
+# FUZZ_BUILD moves build-fuzz/ (the container's: make container-fuzz).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BUILD="$ROOT/build-fuzz"
+BUILD="$(realpath -m "${FUZZ_BUILD:-$ROOT/build-fuzz}")"
 SECONDS_EACH="${1:-60}"
 shift || true
 TARGETS=("$@")

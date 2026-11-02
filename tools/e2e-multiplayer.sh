@@ -105,12 +105,26 @@ fi
 # This namespace is the host's; the client's is a child's (sleep), reached
 # with nsenter. 10.77.0.1 and .2, each the other's default route, so LAN
 # broadcasts cross.
-CLIENT_NS="" IN_CLIENT=()
+CLIENT_NS="" IN_CLIENT=() GAME_PIDS=()
 stop_games() {
+    # E2E_COVERAGE=1: both games exit by themselves first (tools/e2e-test.sh's stop_game).
+    if [[ "${E2E_COVERAGE:-0}" == 1 ]]; then
+        local who
+        for who in host client; do touch "$WORK/$who/home/tome/debug-exit"; done
+        local pid alive
+        for _ in $(seq 1 60); do
+            alive=0
+            for pid in "${GAME_PIDS[@]}"; do kill -0 "$pid" 2>/dev/null && alive=1; done
+            ((alive)) || break
+            sleep 0.5
+        done
+        for who in host client; do rm -f "$WORK/$who/home/tome/debug-exit"; done
+    fi
     WINEPREFIX="$HOST_PREFIX" wineserver -k 2>/dev/null
     WINEPREFIX="$CLIENT_PREFIX" "${IN_CLIENT[@]}" wineserver -k 2>/dev/null
     WINEPREFIX="$HOST_PREFIX" wineserver -w 2>/dev/null
     WINEPREFIX="$CLIENT_PREFIX" "${IN_CLIENT[@]}" wineserver -w 2>/dev/null
+    GAME_PIDS=()  # gone: their PIDs may be reused
 }
 # Before the client's namespace exists, so a failed setup doesn't leave its
 # sleep running (holding the namespace and this script's output).
@@ -168,8 +182,10 @@ launch() {
     home="$(WINEPREFIX="$prefix" "${in_ns[@]}" winepath -w "$WORK/$who/home" 2>/dev/null)"
     [[ -n "$home" ]] || die "winepath couldn't convert $WORK/$who/home"
     (cd "$WORK/$who/game" && WINEPREFIX="$prefix" DISPLAY="$display" TOME_HOME="$home" \
-        TOME_DEBUG_CLICKS="$clicks" TOME_DEBUG_APPROVE=sync-test WINEDEBUG=err+module \
+        TOME_DEBUG_CLICKS="$clicks" TOME_DEBUG_APPROVE=sync-test \
+        TOME_DEBUG_EXIT="${E2E_COVERAGE:-0}" WINEDEBUG=err+module \
         exec "${in_ns[@]}" wine war3.exe -window -opengl "$@" >"$WORK/$who/wine.log" 2>&1) &
+    GAME_PIDS+=($!)
 }
 
 # mark <log>: its lines so far, for a check of what comes after them.

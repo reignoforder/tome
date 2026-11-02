@@ -5,6 +5,7 @@
 #include "core/keys.h"
 #include "events.h"
 #include "frames.h"
+#include "hooks.h"
 #include "main_thread.h"
 #include "log.h"
 
@@ -305,6 +306,60 @@ std::string script_spec() {
     return spec;
 }
 
+// TOME_DEBUG_SKIP_MOVIES=1: a movie (Movie::Play) takes over the main
+// thread, so no frame is presented and the script's frame-paced steps can't
+// press Esc to skip it. Movie::Play calls Movie::SetDisplayMode before each
+// movie, and its caller calls it again after (the movie's window is gone by
+// then). After each call a thread waits for a movie's window, another
+// visible top-level window of this process, and skips the movie with Esc
+// there; after a movie it finds none and gives up. Not counting the calls:
+// a hook installed during a movie would have counted them the wrong way round.
+HWND g_game_window = nullptr;
+constexpr DWORD kMovieWindowWaitMs = 10000;  // a watchdog
+
+BOOL CALLBACK find_movie_window(HWND w, LPARAM out) {
+    DWORD pid = 0;
+    GetWindowThreadProcessId(w, &pid);
+    if (pid != GetCurrentProcessId() || w == g_game_window || !IsWindowVisible(w)) return TRUE;
+    *reinterpret_cast<HWND*>(out) = w;
+    return FALSE;
+}
+
+DWORD WINAPI skip_movie_thread(LPVOID) {
+    for (DWORD waited = 0; waited < kMovieWindowWaitMs; waited += 50) {
+        HWND movie = nullptr;
+        EnumWindows(find_movie_window, reinterpret_cast<LPARAM>(&movie));
+        if (movie) {
+            TOME_INFO("Debug: skipping the movie (Esc)");
+            PostMessageW(movie, WM_KEYDOWN, VK_ESCAPE, 0);
+            return 0;
+        }
+        Sleep(50);
+    }
+    return 0;
+}
+
+void TOME_CALL after_movie_display_mode(tome_mod*, tome_hook_call*, void*) {
+    HANDLE thread = CreateThread(nullptr, 0, skip_movie_thread, nullptr, 0, nullptr);
+    if (thread) CloseHandle(thread);
+}
+
+void start_movie_skipping(HWND game_window) {
+    char env[8] = {};
+    if (!TOME_DEV || !GetEnvironmentVariableA("TOME_DEBUG_SKIP_MOVIES", env, sizeof(env)) || env[0] != '1') return;
+    g_game_window = game_window;
+    std::string error;
+    hooks::Target* target = hooks::find_or_install("Movie::SetDisplayMode", error);
+    if (!target) {
+        TOME_WARN("TOME_DEBUG_SKIP_MOVIES: %s", error.c_str());
+        return;
+    }
+    hooks::Handler after;
+    after.phase = TOME_HOOK_AFTER;
+    after.fn = after_movie_display_mode;
+    hooks::add(target, after);
+}
+
 } // namespace
 
 void prepare() {
@@ -318,6 +373,7 @@ void prepare() {
 }
 
 void start(HWND game_window) {
+    start_movie_skipping(game_window);
     if (g_steps.empty()) return;
     auto script = new Script{game_window, std::move(g_steps)};
     g_steps.clear();

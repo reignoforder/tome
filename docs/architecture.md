@@ -52,7 +52,7 @@ loader/
                           mods' tests) and tome-check (tome_check.cpp); "Testing" below
   src/                    Windows side (tome.mix)
     dllmain.cpp           pins the module, calls start_bootstrap
-    bootstrap.*           startup sequence (see below)
+    bootstrap.*           startup sequence (see below); TOME_DEBUG_EXIT: exits once tome/debug-exit appears (coverage runs)
     mappings.*            loads the embedded mapping files, finds the build
     game_build.*, sha256.*  build identification
     patch.*               call-site and pointer patching, verified before writing
@@ -83,7 +83,8 @@ loader/
     keybinds.*            keybinds: the keyboard hook, tome/keybinds.json, the API
     popups.*              the popup queue and its frames on the current screen; the API
     restart.*             restarting the game (WM_CLOSE, then a rundll32 helper)
-    debug_input.*         TOME_DEBUG_CLICKS: clicks, keys, typed text and chat lines (tests)
+    debug_input.*         TOME_DEBUG_CLICKS: clicks, keys, typed text and chat lines (tests);
+                          TOME_DEBUG_SKIP_MOVIES: Esc into each movie's window
     log.*, paths.*        tome.log, game/tome/mods folders (TOME_HOME), moving the old layout
     wasm_mods.*           WebAssembly mods (wasm-mods.md): WAMR, Tome's imports, callbacks, natives, traps
   third_party/monocypher/ Ed25519 checks for core/signature (BSD-2 or CC0, 4.0.3, unmodified)

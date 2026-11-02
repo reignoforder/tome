@@ -13,8 +13,10 @@ make                                     # configure (once: Ninja, mingw toolcha
 make test                                # unit tests + loader tests without the game (tests/host) and on game.dll (tests/game)
 make e2e                                 # real game, 6 launches (~2.5 min), off screen in Xvfb, then:
 make e2e-multiplayer                     # two instances in a LAN game (tools/e2e-multiplayer.sh, network namespaces)
+make coverage                            # line coverage of make test + make e2e by section (tools/coverage.sh, build-cov/; fails below 90%)
 tools/game.sh start [VAR=val] / wait <regex> / shot <png> / stop / log / dir
 tools/fuzz.sh [seconds] [target...]      # libFuzzer + ASan/UBSan on the core parsers (host clang, build-fuzz/)
+make container-fuzz FUZZ_SECONDS=30       # the same in the container (build-container-fuzz/; CI runs it)
 tools/gen-rust-bindings.sh               # after changing tome.h: regenerate sdk/rust/tome-sys (bindgen)
 tools/gen-wasm-consts.py                 # after changing tome.h's enums: regenerate the Wasm SDKs' constants (C and Rust)
 make sdk                                 # build/tome-sdk-<version>.zip, the SDK for mod makers

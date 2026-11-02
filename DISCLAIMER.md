@@ -31,6 +31,19 @@ detect a modified game and act on it, up to closing your account, and
 neither Tome nor its authors can do anything about that. Tome isn't a cheat
 and isn't built to hide from anything.
 
+**What other players see.** Tome makes no connections of its own and
+sends nothing anywhere but to the other players of a game you're in. There,
+it shows them your *required* mods (those marked `"sync": "required"`, which
+every player of a game needs), each as its id, version and a hash of its
+files. In a lobby, a host running Tome with required mods sends its list to
+each player, and a player with Tome answers whoever sent one (host or not)
+with theirs; nothing is sent otherwise. In a game, every player with required mods sends the list to the
+others as game actions, so it's also recorded in the game's replay, which
+anyone you share it with can read.
+Mods only for you (`"sync": "client"`) aren't sent. Tome's log
+(`tome/tome.log`) and crash reports (`tome/crashes/`, which can contain
+parts of the game's memory) stay on your computer unless you share them.
+
 **Mods are other people's code.** A mod with a DLL runs with the same access
 to your computer as the game: it can read and change your files and do
 anything else a program can. Tome asks before it runs a new mod's code, and

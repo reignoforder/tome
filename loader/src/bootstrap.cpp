@@ -23,6 +23,7 @@
 #include "tome_settings.h"
 #include "watcher.h"
 
+#include <atomic>
 #include <string>
 #include <vector>
 
@@ -138,6 +139,42 @@ void log_dep() {
     }
     if (flags & PROCESS_DEP_ENABLE) TOME_INFO("DEP: on%s", permanent ? " (permanent)" : "");
     else TOME_WARN("DEP: off (the system's DEP policy or a compatibility setting turned it off for war3.exe)");
+}
+
+// TOME_DEBUG_EXIT=1 (developer builds): once <home>/tome/debug-exit appears,
+// the game exits the way it does from its menu (mods disabled and unloaded,
+// then ExitProcess). Tests use it where they'd otherwise kill the game: a
+// coverage build's counters are only written when each module detaches.
+std::atomic<bool> g_exit_started{false};
+
+DWORD WINAPI exit_watch_thread(LPVOID) {
+    const std::wstring file = g_paths.tome_dir + L"\\debug-exit";
+    while (GetFileAttributesW(file.c_str()) == INVALID_FILE_ATTRIBUTES) Sleep(200);
+    DeleteFileW(file.c_str());
+    TOME_INFO("debug-exit: exiting");
+    // Whichever thread starts the exit first does it: the other one never
+    // ends it midway (ExitProcess on one thread ends the others where they are).
+    main_thread::post([] {
+        if (g_exit_started.exchange(true)) return;
+        mod_manager().shutdown();
+        ExitProcess(0);
+    });
+    // Seen once after a movie: the posted call never ran. Exit from here
+    // then, without the mods' shutdown; the counters are still written.
+    Sleep(5000);
+    if (g_exit_started.exchange(true)) {
+        TOME_WARN("debug-exit: the mods' shutdown is still running after 5 s");
+        return 0;
+    }
+    TOME_WARN("debug-exit: the main thread didn't run the exit within 5 s; exiting from the watcher thread");
+    ExitProcess(0);
+}
+
+void start_exit_watch() {
+    char env[8] = {};
+    if (!TOME_DEV || !GetEnvironmentVariableA("TOME_DEBUG_EXIT", env, sizeof(env)) || env[0] != '1') return;
+    HANDLE thread = CreateThread(nullptr, 0, exit_watch_thread, nullptr, 0, nullptr);
+    if (thread) CloseHandle(thread);
 }
 
 DWORD bootstrap() {
@@ -283,6 +320,7 @@ DWORD bootstrap() {
         announce_in_window_title(window);
         keybinds::init(g_paths);
         debug_input::start(window);
+        start_exit_watch();
         // Mods enabled above may have asked for a main menu that already exists.
         main_thread::post(frames::catch_up);
         main_thread::post([] { patches::background_mute_start(g_paths.tome_dir); });
