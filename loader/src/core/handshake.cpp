@@ -238,6 +238,8 @@ void Lobby::update(bool host, const ModSet& local, const std::vector<LobbyPlayer
 
     if (changed) {
         for (const auto& [id, set] : claims_) send(id, LineKind::Reply, local_);
+        // Our player saw how the old set compared: say how the new one does.
+        if (claims_.size() == 1) note_claim(claims_.begin()->first, claims_.begin()->second, true);
     }
     if (claims_.empty() && !local_.empty() && !warned_no_host_ && now - joined_at_ >= kHostWait) {
         warned_no_host_ = true;
@@ -269,6 +271,11 @@ void Lobby::receive(int from, std::string_view text) {
     if (line.kind != LineKind::Required) return;
     bool first = claims_.empty() || (claims_.size() == 1 && claims_.count(from));
     claims_[from] = set;
+    note_claim(from, set, first);
+    send(from, LineKind::Reply, local_);
+}
+
+void Lobby::note_claim(int from, const ModSet& set, bool first) {
     Difference d = compare(set, local_);
     if (!first) {
         // Only the host's set counts; this client can't tell which one that is.
@@ -282,7 +289,6 @@ void Lobby::receive(int from, std::string_view text) {
         note("Your required mods differ from the host's: " + explain(d, "host") +
              ". The host can't start the game until they match.");
     }
-    send(from, LineKind::Reply, local_);
 }
 
 bool Lobby::can_start(std::vector<std::string>& problems) const {

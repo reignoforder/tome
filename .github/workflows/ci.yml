@@ -3,12 +3,17 @@
 # toolchain, Wine and Rust targets as `make container-test`. Without the game
 # the tests on game.dll skip themselves; the e2e test needs the game (and a
 # developer build) and doesn't run here. The build is a release one
-# (DEV=OFF: tome.mix ignores the TOME_DEBUG_* variables).
+# (DEV=OFF: tome.mix ignores the TOME_DEBUG_* variables), so the player
+# download and the SDK zip come from it. A v* tag also makes a draft
+# release with both zips, their SHA-256s and the WAMR source archive the
+# build used (the GPL's corresponding source: loader/third_party/NOTICES.md);
+# publish it by hand after a look.
 name: CI
 
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
@@ -26,6 +31,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The image (~5.5 GB, twice: in the buildx builder and once loaded into
+      # docker) and the build (~3 GB, two Wine prefixes) don't fit in the
+      # runner's free space: drop the preinstalled SDKs nothing here uses.
+      - name: Free disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+            /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/share/swift
+          df -h /
+
       # The image changes only with the Containerfile, so its layers come
       # from the Actions cache.
       - uses: docker/setup-buildx-action@v3
@@ -39,6 +54,13 @@ jobs:
           cache-from: type=gha,scope=tome-dev
           cache-to: type=gha,mode=max,scope=tome-dev
 
+      # The image is in docker and its layers in the Actions cache now: the
+      # builder's copy is only taking space.
+      - name: Empty the buildx builder
+        run: |
+          docker buildx prune --all --force
+          df -h /
+
       - name: Build and test
         run: make container-test ENGINE=docker IMAGE_READY=1 DEV=OFF
 
@@ -47,6 +69,13 @@ jobs:
 
       - name: SDK zip
         run: make container-sdk ENGINE=docker IMAGE_READY=1 DEV=OFF
+
+      - name: Player download
+        run: make container-dist ENGINE=docker IMAGE_READY=1 CONTAINER_RELEASE_BUILD=build-container
+
+      # What the build downloaded and checked against wamr.cmake's SHA-256.
+      - name: WAMR source archive
+        run: cp build-container/_deps/WAMR-*.tar.gz build-container/
 
       - name: Test log
         if: failure()
@@ -57,5 +86,55 @@ jobs:
           name: tome-build
           path: |
             build-container/loader/tome.mix
-            build-container/tome-sdk-*.zip
+            build-container/tome-*.zip
+            build-container/WAMR-*.tar.gz
           if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tag matches the version
+        run: |
+          version=$(sed -n 's/^project(tome VERSION \([0-9.]*\) .*/\1/p' CMakeLists.txt)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "tag $GITHUB_REF_NAME, but CMakeLists.txt says $version" >&2
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: tome-build
+          path: dist
+
+      - name: Draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          cd dist
+          wamr=$(echo WAMR-*.tar.gz)
+          files=(tome-"$VERSION".zip tome-sdk-"$VERSION".zip "$wamr")
+          sha256sum "${files[@]}" > SHA256SUMS
+          {
+            echo "Unofficial, not affiliated with Blizzard Entertainment: read DISCLAIMER.md."
+            echo
+            echo "- **tome-$VERSION.zip**: for players. Unpack it into your Warcraft III 1.27b folder (next to war3.exe); tome/README.txt inside says the rest."
+            echo "- **tome-sdk-$VERSION.zip**: for mod makers (sdk/README.md)."
+            echo "- **$wamr**: the WebAssembly runtime's source, as the build used it (with loader/third_party/wamr/patch.cmake)."
+            echo
+            echo "SHA-256:"
+            echo
+            echo '```'
+            cat SHA256SUMS
+            echo '```'
+          } > notes.md
+          gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
+            --title "Tome $VERSION" --notes-file notes.md "${files[@]}" SHA256SUMS

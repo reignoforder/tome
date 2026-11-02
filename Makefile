@@ -8,6 +8,7 @@
 #   DEV         developer build: tome.mix reads the TOME_DEBUG_* variables the
 #               e2e test needs (ON); OFF for a release build (CI). Given on the
 #               command line, it also changes an existing build folder
+#   RELEASE_BUILD  build folder of `make dist` (build-release; always DEV=OFF)
 #   INSTALL_DIR a Warcraft III 1.27b folder `make deploy` copies tome.mix
 #               into (no default; never input/)
 #   HEADLESS    e2e and game: 1 runs the game in its own X server (Xvfb),
@@ -25,28 +26,33 @@ DEV        ?= ON
 GENERATOR  ?= $(if $(shell command -v ninja),Ninja,Unix Makefiles)
 ENGINE     ?= $(firstword $(foreach e,podman docker,$(if $(shell command -v $(e)),$(e))))
 IMAGE      ?= tome-dev
+RELEASE_BUILD ?= build-release
 E2E_KEEP   ?= 0
 
 CMAKE_FLAGS = -G "$(GENERATOR)" -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-i686-mingw.cmake \
               -DCMAKE_BUILD_TYPE=$(BUILD_TYPE) -DTOME_BUILD_DEV_TOOLS=$(DEV_TOOLS) -DTOME_DEV=$(DEV)
 
-.PHONY: all configure build test e2e game game-stop fuzz sdk bindings deploy clean \
-        container container-shell container-test container-sdk container-e2e help
+.PHONY: all configure build-folder build test e2e e2e-multiplayer game game-stop fuzz sdk dist bindings deploy clean \
+        container container-shell container-test container-sdk container-dist container-e2e help
 
 all: build
 
 help:
 	@echo "make build          configure (first time) and build into $(BUILD)/"
 	@echo "make test           unit tests (ctest, under Wine)"
-	@echo "make e2e            end-to-end test in the real game (needs the game in input/; Xvfb, about 6 min)"
+	@echo "make e2e            end-to-end test in the real game (needs the game in input/; Xvfb, about 4 min):"
+	@echo "                    tools/e2e-test.sh, then tools/e2e-multiplayer.sh"
+	@echo "make e2e-multiplayer  only the two-instance LAN game test (about 1.5 min)"
 	@echo "make game           start the build in the game (tools/game.sh start); make game-stop"
 	@echo "make fuzz           libFuzzer targets (tools/fuzz.sh; FUZZ_SECONDS=60)"
 	@echo "make sdk            the SDK zip for mod makers ($(BUILD)/tome-sdk-<version>.zip)"
+	@echo "make dist           the player download, a release build ($(RELEASE_BUILD)/tome-<version>.zip and .sha256)"
 	@echo "make bindings       regenerate the Rust bindings after changing tome.h"
 	@echo "make deploy INSTALL_DIR=<game folder>   copy tome.mix there (nothing else writes into a game folder)"
 	@echo "make container      build the $(IMAGE) image: the whole toolchain, Wine and Xvfb"
 	@echo "make container-test / container-e2e   build and test inside it (build-container/)"
 	@echo "make container-sdk  the SDK zip, built inside it"
+	@echo "make container-dist the player download, built inside it ($(CONTAINER_RELEASE_BUILD)/)"
 	@echo "make clean          remove $(BUILD)/"
 
 $(BUILD)/CMakeCache.txt:
@@ -58,16 +64,23 @@ configure:
 # DEV given (make DEV=..., or the environment) sets it in the build folder;
 # otherwise only a folder configured before TOME_DEV existed gets it, once.
 DEV_GIVEN = $(filter command line environment,$(origin DEV))
-build: $(BUILD)/CMakeCache.txt
+build-folder: $(BUILD)/CMakeCache.txt
 	@grep -q$(if $(DEV_GIVEN),ix 'TOME_DEV:BOOL=$(DEV)', '^TOME_DEV:') $(BUILD)/CMakeCache.txt \
 	    || cmake -S . -B $(BUILD) -DTOME_DEV=$(DEV)
+
+build: build-folder
 	cmake --build $(BUILD)
 
 test: build
 	cd $(BUILD) && ctest --output-on-failure
 
+# The multiplayer test runs even when the first one failed (both report).
 e2e: build
-	BUILD="$(abspath $(BUILD))" tools/e2e-test.sh "$(BUILD)"
+	BUILD="$(abspath $(BUILD))" tools/e2e-test.sh "$(BUILD)"; first=$$?; \
+	BUILD="$(abspath $(BUILD))" tools/e2e-multiplayer.sh "$(BUILD)" && exit $$first
+
+e2e-multiplayer: build
+	BUILD="$(abspath $(BUILD))" tools/e2e-multiplayer.sh "$(BUILD)"
 
 game: build
 	BUILD="$(abspath $(BUILD))" tools/game.sh start
@@ -81,6 +94,12 @@ fuzz:
 
 sdk: $(BUILD)/CMakeCache.txt
 	cmake --build $(BUILD) --target sdk-dist
+
+# A release build of its own, so the developer build in $(BUILD) stays as it is.
+# Only what the download needs (tome.mix): not the tests and tools.
+dist:
+	$(MAKE) build-folder BUILD=$(RELEASE_BUILD) DEV=OFF
+	cmake --build $(RELEASE_BUILD) --target dist
 
 bindings:
 	tools/gen-rust-bindings.sh
@@ -105,6 +124,9 @@ clean:
 # TMPDIR, so files E2E_KEEP=1 keeps outlive the container, and the runtime
 # folder for the sound server (tools/test-env.sh).
 CONTAINER_BUILD = build-container
+# container-dist's: a folder of its own, or $(CONTAINER_BUILD) when that's
+# already a release build (CI: DEV=OFF), so it isn't built twice.
+CONTAINER_RELEASE_BUILD ?= $(CONTAINER_BUILD)-release
 HAVE_GAME     = $(shell test -f input/war3.exe && echo yes)
 CONTAINER_RUN = $(ENGINE) run --rm -i $(if $(shell test -t 0 && echo yes),-t) \
                 --security-opt label=disable -v "$(CURDIR):/src" -w /src -e HOME=/src/$(CONTAINER_BUILD)/home -e TMPDIR=/src/$(CONTAINER_BUILD)/tmp \
@@ -142,3 +164,7 @@ container-sdk: $(CONTAINER_IMAGE)
 container-e2e: $(CONTAINER_IMAGE)
 	$(CONTAINER_PREPARE)
 	$(CONTAINER_RUN) env E2E_KEEP=$(E2E_KEEP) make e2e BUILD=$(CONTAINER_BUILD)
+
+container-dist: $(CONTAINER_IMAGE)
+	$(CONTAINER_PREPARE)
+	$(CONTAINER_RUN) make dist RELEASE_BUILD=$(CONTAINER_RELEASE_BUILD)

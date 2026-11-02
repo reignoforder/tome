@@ -6,15 +6,36 @@
 #
 # Offline: download the archive once and pass it, still checked:
 #   -DTOME_WAMR_ARCHIVE=/path/to/WAMR-2.4.5.tar.gz
+# A URL is downloaded to <build>/_deps/WAMR-2.4.5.tar.gz (once), where CI
+# picks it up for a release's source archive.
 include_guard(GLOBAL)
 include(FetchContent)
 
+set(TOME_WAMR_SHA256 1ab09d51099f276ca4a1d6629f6b589aab2bd0caa01445e05031a4bed22c199b)
 set(TOME_WAMR_ARCHIVE
     "https://github.com/bytecodealliance/wasm-micro-runtime/archive/refs/tags/WAMR-2.4.5.tar.gz"
     CACHE STRING "WAMR 2.4.5's source archive (a URL or a file); checked against its SHA-256")
+set(wamr_archive "${TOME_WAMR_ARCHIVE}")
+if(wamr_archive MATCHES "^[a-z]+://" AND NOT FETCHCONTENT_SOURCE_DIR_WAMR)
+    set(wamr_archive "${CMAKE_BINARY_DIR}/_deps/WAMR-2.4.5.tar.gz")
+    set(wamr_have "")
+    if(EXISTS "${wamr_archive}")
+        file(SHA256 "${wamr_archive}" wamr_have)
+    endif()
+    if(NOT wamr_have STREQUAL TOME_WAMR_SHA256)
+        file(DOWNLOAD "${TOME_WAMR_ARCHIVE}" "${wamr_archive}.part"
+            EXPECTED_HASH SHA256=${TOME_WAMR_SHA256} STATUS wamr_status)
+        list(GET wamr_status 0 wamr_code)
+        if(NOT wamr_code EQUAL 0)
+            file(REMOVE "${wamr_archive}.part")
+            message(FATAL_ERROR "WAMR: couldn't download ${TOME_WAMR_ARCHIVE}: ${wamr_status} (offline: -DTOME_WAMR_ARCHIVE=<file>)")
+        endif()
+        file(RENAME "${wamr_archive}.part" "${wamr_archive}")
+    endif()
+endif()
 FetchContent_Declare(wamr
-    URL "${TOME_WAMR_ARCHIVE}"
-    URL_HASH SHA256=1ab09d51099f276ca4a1d6629f6b589aab2bd0caa01445e05031a4bed22c199b
+    URL "${wamr_archive}"
+    URL_HASH SHA256=${TOME_WAMR_SHA256}
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     # Only the sources: Tome builds them with its own list, not WAMR's CMake.
     SOURCE_SUBDIR tome-no-cmake

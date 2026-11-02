@@ -171,6 +171,9 @@ private:
 
     void send(int to, LineKind kind, const ModSet& set);
     void note(std::string text) { notes_.push_back(std::move(text)); }
+    // Client: how our set compares with the one `from` sent. `first`: the
+    // only sender so far (normally the host).
+    void note_claim(int from, const ModSet& set, bool first);
     std::string name_of(int id) const;
 
     bool host_ = false;

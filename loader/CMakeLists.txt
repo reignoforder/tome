@@ -263,6 +263,25 @@ else()
     )
 endif()
 
+# The player download, build/tome-<version>.zip (cmake/dist.cmake): only
+# from a release build, since a developer build's TOME_DEBUG_APPROVE lets
+# mods' code run without asking (`make dist` makes one in build-release/).
+if(TOME_DEV)
+    add_custom_target(dist
+        COMMAND ${CMAKE_COMMAND} -E echo "dist: this is a developer build (TOME_DEV=ON); the download needs a release one (make dist)"
+        COMMAND ${CMAKE_COMMAND} -E false
+        VERBATIM
+    )
+else()
+    add_custom_target(dist
+        COMMAND ${CMAKE_COMMAND} -DMIX=$<TARGET_FILE:tome_loader> -DOUT=${CMAKE_BINARY_DIR}/tome-${PROJECT_VERSION}.zip
+            -DVERSION=${PROJECT_VERSION} -DSOURCE=${CMAKE_SOURCE_DIR} -P ${CMAKE_SOURCE_DIR}/cmake/dist.cmake
+        DEPENDS tome_loader
+        COMMENT "Packing the player download"
+        VERBATIM
+    )
+endif()
+
 # The loader without the game (src/testing/fake_game.h): a fake 1.27b image
 # and a temporary Tome folder, for Tome's host tests and for mod makers'
 # tools, which ship in the SDK zip (sdk/README.md, "Testing a mod"):

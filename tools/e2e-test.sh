@@ -28,6 +28,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD="$(realpath "${1:-${BUILD:-$ROOT/build}}")"
 HEADLESS="${HEADLESS:-1}"
 source "$ROOT/tools/test-env.sh"
+source "$ROOT/tools/e2e-lib.sh"
 FIXTURES="$ROOT/tests/e2e/mods"
 MPQ_TOOL="$BUILD/tools/mpq/tome-mpq.exe"
 
@@ -211,28 +212,16 @@ launch() {
 
 set_enabled() {
     mark
-    python3 -I - "$STATE" "$1" "$2" <<'PY'
-import json, sys
-path, mod, enabled = sys.argv[1], sys.argv[2], sys.argv[3] == "true"
-state = json.load(open(path))
-state["mods"][mod]["enabled"] = enabled
-open(path, "w").write(json.dumps(state, indent=2))
-PY
+    e2e_set_enabled "$STATE" "$1" "$2"
 }
 
-FAILED=0
 # The checks wait for log lines; this only bounds how long a failing one
 # waits (a hung game), it doesn't pace anything: a passing check returns as
 # soon as its line is there.
 WATCHDOG="${E2E_WATCHDOG:-120}"
 deadline() { echo $((SECONDS + WATCHDOG)); }
-pass() { echo "  ok    $1"; }
-fail() { echo "  FAIL  $1"; FAILED=1; }
-# The log as checks see it: never the input driver's own lines ("Debug
-# click ...", "Debug typing ..."), which repeat what the test sent; from
-# line n+1 with an argument.
-# grep -a throughout: one stray byte must not make the log a "binary file".
-log_from() { tail -n +$(( ${1:-0} + 1 )) "$LOG" 2>/dev/null | grep -av '\] Debug '; }
+# The log as checks see it (e2e_log), from line n+1 with an argument.
+log_from() { e2e_log "$LOG" "${1:-0}"; }
 count() { log_from | grep -acE "$1" || true; }
 # mark: what the script does itself (state.json, files) is checked with
 # check_new, which only looks at lines logged after it, so an earlier line
@@ -244,7 +233,7 @@ mark() { MARK=$(wc -l <"$LOG" 2>/dev/null || echo 0); }
 check() {
     local deadline; deadline=$(deadline)
     while ((SECONDS < deadline)); do
-        log_from | grep -aqE "$1" && { pass "$2"; return; }
+        log_from | e2e_has "$1" && { pass "$2"; return; }
         sleep 0.2
     done
     fail "$2 (expected log line matching: $1)"
@@ -254,7 +243,7 @@ check() {
 check_new() {
     local deadline; deadline=$(deadline)
     while ((SECONDS < deadline)); do
-        log_from "$MARK" | grep -aqE "$1" && { pass "$2"; return; }
+        log_from "$MARK" | e2e_has "$1" && { pass "$2"; return; }
         sleep 0.2
     done
     fail "$2 (expected a new log line matching: $1)"
@@ -314,7 +303,7 @@ check_probe() {
 }
 
 check_absent() {
-    if log_from | grep -aqE "$1"; then fail "$2 (unexpected log line matching: $1)"; else pass "$2"; fi
+    if log_from | e2e_has "$1"; then fail "$2 (unexpected log line matching: $1)"; else pass "$2"; fi
 }
 
 # --- run 1: everything enabled -----------------------------------------------

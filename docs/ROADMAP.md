@@ -23,7 +23,7 @@ Status as of 2026-10-30. Design rationale: `research.md`. How it works:
 | 8. Mod menu, part 2 | API version 7. A Details page per mod (metadata, status, every problem in full: metadata errors, a crash's log line and "called from" line, schema errors, warnings); per-mod Settings pages generated from `config.schema.json` (boolean, integer, number with range and step, choices, free text in a text box), saved in `<mod>/config/settings.json`, read and changed through `setting_*`/`set_setting_*`, `on_setting_changed`; Keybinds from `tome.mod.json` `"keybinds"`, one page for all mods with conflicts (each other and the game's known keys), saved in `tome/keybinds.json`, `on_keybind` (not while typing in chat), checked against `CustomKeys.txt` too; mod icons (`.blp`/`.tga`) on the list; Esc goes back a page; Tome's own keybind (Ctrl+F10) opens the menu, in games the Esc menu with Mods; a Tome page with versions, mods folder and a live safe-mode switch; the same pages in the in-game Esc menu (a Mods button beside Options, the panel in the Help panel's place). e2e: a setting, a typed text setting, a keybind set with simulated keys and run, the icon, Esc navigation, Ctrl+F10 on the main menu and in a game, the Esc menu's Mods and Done |
 | More events | API version 8: `TOME_EVENT_SELECTION` (the local player's selection, compared each frame: every unit's type id, name, owner, building/hero/dead flags and its existing JASS handle id, which Tome looks up without ever making one, and the active unit), `TOME_EVENT_CHAT`, `TOME_EVENT_PAUSE`/`RESUME`; unit events for every unit whether or not the map listens (death with the killer, trained with the building, construction, upgrade, research, hero level, summon, item pickup/drop/use, attacked, rescued, construction/upgrade/training/research started and cancelled, hero skill, revivable and revival, orders of every kind with their target, loaded into a transport, units and items sold, items pawned, owner change), player victory/defeat/left, game save and saved game loaded with the path; `map_description`; `selection()`. e2e: a map script selects, pauses, levels a hero, uses items, kills, trains and cancels, orders, attacks, loads a transport, gives a unit away, revives, builds, upgrades, saves and loads, wins; the Esc menu's pause, LAN chat |
 | Multiplayer handshake (§4) | API unchanged. Required mods are identified by `id version #hash` (tome.mod.json, DLL, assets). Lobby: the host sends its set to each joining player as hidden chat lines, Tome clients answer, the host refuses Start while a set differs or is missing, and each side gets notes in the lobby chat. Games: each player sends its set as SyncStoredInteger actions, so replays carry it; after 2 s every client (and a replay viewer) says who differs. Unit tests for the protocol, comparisons and lobby state; verified by hand in LAN games between two instances (matching, a refused Start, the in-game report, a replay) |
-| Game lock (§5.7) | API unchanged. In a game with more than one person playing, or a replay, the running required mods and their dependencies stay as they were (no toggles, hot reloads or asset changes; only a crash stops one) and other required mods wait; toggles go into `state.json` and apply when the game ends. Notes in the mod list and `/tome` replies. Unit tests for the locked set, the notes and frozen assets; verified by hand in a replay (toggles wait, then apply on leaving); not yet in a two-instance game (part of next step 1) |
+| Game lock (§5.7) | API unchanged. In a game with more than one person playing, or a replay, the running required mods and their dependencies stay as they were (no toggles, hot reloads or asset changes; only a crash stops one) and other required mods wait; toggles go into `state.json` and apply when the game ends. Notes in the mod list and `/tome` replies. Unit tests for the locked set, the notes and frozen assets; verified by hand in a replay (toggles wait, then apply on leaving) and in the two-instance LAN game of `tools/e2e-multiplayer.sh` (the host's toggle waits for the game to end) |
 | Import hooks; FPS Unlock | API version 9: `import` symbols (an import address table slot of game.dll, checked against its import directory) can be hooked like functions. `fps-unlock`, a mod in its own repository next to Tome: a finer GetTickCount for game.dll (Windows' 15.6 ms steps held frames near 64), the frame limit through the game's own scheduler, vsync off for OpenGL and Direct3D, an FPS counter in a chosen corner; switching it on and off mid-game keeps the game's clock monotonic (checked: game speed stays 1.00) |
 | Popups and restarting | API version 10: `popup` (title, message, any number of buttons; Enter/Esc options), `popup_close`, `restart_game`. One at a time on any screen (main menu, menu screens, games), queued, moved to the next screen; three short options in a row, more in pages of six. Restart: the game closes as usual (in a game, through the Esc menu's own Exit), a rundll32 helper starts it again once it has exited. The mod menu offers a restart when a toggle leaves changes waiting for one. The hello example's Ctrl+Shift+P shows them. Unit tests for layout, keys, FDF and the prompt; verified by hand on the main menu, over the mod menu, in a game, and a full restart |
 | Inter-mod communication (§5.9 item 5) | API version 11: `service_register`/`service_get`/`on_service` (a mod offers a table of functions under a name and a version; others look it up, and hear when it appears or goes away in any load order; withdrawn on disable) and `subscribe`/`publish` (synchronous messages on named topics from the main thread; a subscriber that crashes is disabled and skipped; no loops on one topic). Registry in `core/intermod.*` with unit tests. Not yet in the e2e test or an example mod |
@@ -66,16 +66,22 @@ Rust mods need Windows 10 (`WaitOnAddress`; Rust's own minimum).
    write theirs. The SDK zip has `licenses/` (the GPL for its tools and the
    third-party licenses); the Rust crates are `publish = false` (`tome` is
    taken on crates.io).
-3. **A player download:** a `dist` target making `tome-<version>.zip` with
-   `tome.mix`, a short install/uninstall readme, `DISCLAIMER.md`,
-   `licenses/` as in the SDK zip (`sdk/cmake/dist.cmake`) and an empty
-   `tome/mods/` (maybe `hello.tome`), next to the SDK zip.
-4. **CI:** GitHub Actions running `make container-test`, a short
-   `tools/fuzz.sh` run and the Rust bindings check on every push; on a
-   `v*` tag, build both zips (release builds, `TOME_DEV` off) and attach
-   them to a release with their SHA-256s, and the WAMR archive the build
-   used (part of the GPL's corresponding source; `loader/third_party/NOTICES.md`). The e2e test needs game files and stays local (say so in
-   `CONTRIBUTING.md`).
+3. ~~**A player download**~~ Done: `make dist` (a release build of its
+   own in `build-release/`; the `dist` target refuses a `TOME_DEV` one)
+   makes `tome-<version>.zip` and its `.sha256` (`cmake/dist.cmake`): laid
+   out for the game folder, `tome.mix` and `tome/` with `README.txt`
+   (`loader/dist/README.txt`: install, mods, safe mode, uninstall),
+   `DISCLAIMER.txt`, `licenses/` and an empty `mods/`; Windows line endings.
+   The license texts come from one place for both zips
+   (`loader/third_party/licenses.cmake`). No example mod in it.
+4. **CI** (mostly done): `.github/workflows/ci.yml` builds a release build
+   in the container, runs `make test` (the Rust bindings check included),
+   and makes both zips on every push; a `v*` tag also makes a draft release
+   with both zips, `SHA256SUMS` and the WAMR archive the build used (part of
+   the GPL's corresponding source; `loader/third_party/NOTICES.md`), after
+   checking the tag against the project version; publish it by hand. Left: a
+   short `tools/fuzz.sh` run, and pinning the actions to commit SHAs. The
+   e2e test needs game files and stays local (say so in `CONTRIBUTING.md`).
 5. **Real Windows:** everything so far ran under Wine with Mesa. One manual
    pass on Windows 10/11 with Direct3D and Defender on: install, Mods menu,
    approving a DLL mod, settings, keybinds, a LAN game, safe mode, uninstall.
@@ -87,12 +93,15 @@ Rust mods need Windows 10 (`WaitOnAddress`; Rust's own minimum).
    mods, the log's tail) and a minidump, from a filter in front of
    game.dll's own, which still runs. Later: guard threads mods start
    through the API.
-7. **The handshake in `tools/e2e-test.sh`:** a two-instance run (own Wine
-   prefix and network namespace for the second, `architecture.md`, "Testing
-   with two instances") with matching and mismatching `sync-test` mods, a
-   refused Start, the game report and the replay, and the game lock (a
-   toggle that waits, applied when the game ends). Find the host's net id.
-   Joining another host's game and private servers need a manual test.
+7. ~~**The handshake in the e2e test**~~ Done: `tools/e2e-multiplayer.sh`
+   (in `make e2e`; `architecture.md`, "Testing with two instances"): a host
+   and a client in their own Wine prefixes and network namespaces play a LAN
+   game with `sync-test`: a lobby where the versions differ (both say so,
+   Start refused), the client's mod fixed by a live reload (both say they
+   match; this found that the client didn't say so, fixed), the game's
+   report on both sides, the game lock (the host's toggle waits for the game
+   to end), and the replay watched without the mod. Still manual: joining
+   another host's game, private servers; the host's net id is still unknown.
 8. **Deterministic tests instead of e2e checks** (started): `tome_host_tests`
    (the loader against a fake game image, no game files) and
    `tome_game_tests` (against the real `game.dll`, loaded but never run)
@@ -105,11 +114,13 @@ Rust mods need Windows 10 (`WaitOnAddress`; Rust's own minimum).
    settings and keybinds, the memhack guard on the real compiler
    (`reverse-engineering.md`, "Running the compiler outside a game"), and
    then trimming `tools/e2e-test.sh` to what needs the game running.
-9. **Known flaky spots** fixed or listed under "Known issues" in the README:
-   the popup that stayed hidden (1 in 13), the Options screen's left panel
-   after the Mods panel was used. The e2e test is no longer timed
-   (2026-10-30: event-driven input, headless and silent by default, about
-   2 minutes); watch whether its occasional flaky check is gone.
+9. ~~**Known flaky spots**~~ Done (2026-11-02): the popup that stayed hidden
+   can't any more (shown again every 250 ms; 45 tries in a row showed it);
+   the Options screen's left panel opens as usual after the Mods panel,
+   also with Options clicked right after closing it (screenshots); the e2e
+   test passed 3 runs in a row with no failed check (135 s each), the
+   multiplayer test 4. What users may meet is under "Known issues" in the
+   README.
 10. **Docs and repository files:**
    - README: player install first (download, copy, uninstall), building
      later; a screenshot of the Mods menu; "1.27b only, idle on other
@@ -156,9 +167,8 @@ See `research.md` §13. The most relevant now:
   Storm's order among equal priorities (unknown) or one priority per mod;
 - the second native table (`0x713450`);
 - handle arguments: resolving handle ids to game objects (the handle table);
-- the e2e test's occasional flaky check;
+- the e2e test's occasional flaky check: none in 3 full runs on 2026-11-02; keep watching;
 - the host's net id as a client sees it (the handshake answers every player who sends a set instead);
-- whether the Options screen's own left panel still animates correctly after the Mods panel was used (not yet tested);
 - `framehandle` for the Blz frame natives: 1.27b has no such type, so they
   use integer ids. Matching 1.31 sources exactly needs a handle type and
   handle-table entries;
@@ -174,7 +184,9 @@ See `research.md` §13. The most relevant now:
   detected and hidden, defeat, leaving, research, rescue, sales, most
   cancels and the menus' save/load are mapped but not yet seen in a test;
 - popups: once, a frame set made right after a mod menu click stayed hidden
-  (1 in 13 tries, cause unknown); a shown popup is shown again every 250 ms.
-  Popups and restarting aren't in `tools/e2e-test.sh` yet;
+  (1 in 13 tries, cause unknown). A showing popup is shown again every 250 ms,
+  so it can't stay hidden: the mod menu's restart prompt right after its
+  click showed 45 times in 45 (2026-11-02, screenshots). Popups and
+  restarting aren't in `tools/e2e-test.sh` yet;
 - destroying frames (vtable `+0xD8` looks like a deleting destructor); for now
   a disabled mod's frames are hidden and go away with their screen.

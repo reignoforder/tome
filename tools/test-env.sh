@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Sourced by tools/game.sh and tools/e2e-test.sh: the place the game runs
-# in for testing, kept apart from your own install and desktop.
+# Sourced by tools/game.sh, tools/e2e-test.sh and tools/e2e-multiplayer.sh:
+# the place the game runs in for testing, kept apart from your own install
+# and desktop.
 #
 # - Game folder: a folder of links to the game's files in input/ (which is
 #   only ever read; input/README.md), with its own tome.mix, tome/, Maps/,
@@ -114,19 +115,26 @@ env_game() {
 XVFB_PID=""
 XVFB_DISPLAY=""
 
-# env_display_start: starts Xvfb on a free display (HEADLESS=1 only).
-env_display_start() {
-    [[ "$HEADLESS" == 1 && -z "$XVFB_PID" ]] || return 0
-    local fifo
+# env_xvfb: starts an Xvfb on a free display, whatever HEADLESS says; sets
+# NEW_XVFB_PID and NEW_XVFB_DISPLAY (tools/e2e-multiplayer.sh starts two).
+env_xvfb() {
+    local fifo display=""
     fifo="$(mktemp -u)"
     mkfifo "$fifo"
     Xvfb -displayfd 3 -screen 0 "$((TEST_WIDTH + 224))x$((TEST_HEIGHT + 168))x24" -nolisten tcp \
         3>"$fifo" >/dev/null 2>&1 &
-    XVFB_PID=$!
-    read -r -t 10 XVFB_DISPLAY <"$fifo"
+    NEW_XVFB_PID=$!
+    read -r -t 10 display <"$fifo"
     rm -f "$fifo"
-    [[ -n "$XVFB_DISPLAY" ]] || env_die "Xvfb didn't start"
-    XVFB_DISPLAY=":$XVFB_DISPLAY"
+    [[ -n "$display" ]] || env_die "Xvfb didn't start"
+    NEW_XVFB_DISPLAY=":$display"
+}
+
+# env_display_start: starts Xvfb on a free display (HEADLESS=1 only).
+env_display_start() {
+    [[ "$HEADLESS" == 1 && -z "$XVFB_PID" ]] || return 0
+    env_xvfb
+    XVFB_PID="$NEW_XVFB_PID" XVFB_DISPLAY="$NEW_XVFB_DISPLAY"
 }
 
 env_display_stop() {

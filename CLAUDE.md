@@ -11,7 +11,8 @@ design document.
 ```sh
 make                                     # configure (once: Ninja, mingw toolchain, dev tools) and build
 make test                                # unit tests + loader tests without the game (tests/host) and on game.dll (tests/game)
-make e2e                                 # real game, 6 launches (~5 min), off screen in Xvfb
+make e2e                                 # real game, 6 launches (~2.5 min), off screen in Xvfb, then:
+make e2e-multiplayer                     # two instances in a LAN game (tools/e2e-multiplayer.sh, network namespaces)
 tools/game.sh start [VAR=val] / wait <regex> / shot <png> / stop / log / dir
 tools/fuzz.sh [seconds] [target...]      # libFuzzer + ASan/UBSan on the core parsers (host clang, build-fuzz/)
 tools/gen-rust-bindings.sh               # after changing tome.h: regenerate sdk/rust/tome-sys (bindgen)
@@ -149,6 +150,12 @@ default) puts it in its own Xvfb; `tools/game.sh` shows it on screen unless
 - **Chat in tests:** `TOME_DEBUG_CLICKS` items `type:/text` type a chat
   line. Tome takes the focus back from mods' in-game buttons after a click;
   other buttons that keep it take the next Enter instead of the chat box.
+- **Two instances (`tools/e2e-multiplayer.sh`):** start Xvfb *outside* a
+  network namespace. Inside one it can't see the desktop's abstract X
+  socket, takes `:0` and deletes `/tmp/.X11-unix/X0` when it ends (the
+  desktop's X apps that use the file break until the next login). And run
+  every Wine command of the client (`winepath` too) inside the client's
+  namespace: Wine's sockets live in the wineserver, wherever it started.
 - **LAN games need an opponent:** set the second slot to a computer
   (clicks in `tools/e2e-test.sh` run 5).
 - **The e2e test map has no opponents:** melee would declare victory at

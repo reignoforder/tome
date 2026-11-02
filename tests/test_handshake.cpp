@@ -167,8 +167,12 @@ TEST(handshake_lobby_mismatch_and_change) {
     CHECK(contains(problems[0], "Bob: different hello 1.1.0"));
     CHECK(contains(host.take_notes()[0], "can't start"));
 
-    // Bob updates the mod: his new set goes to the host on its own.
+    // Bob updates the mod: his new set goes to the host on its own, and he's
+    // told it matches now.
     client.update(false, {mod("hello")}, {{1, "Alice"}}, 1);
+    notes = client.take_notes();
+    CHECK_EQ(notes.size(), size_t(1));
+    CHECK(contains(notes[0], "Your required mods match the host's (hello 1.0.0 #0123abcd)"));
     deliver(host, 2, lines_to(client.take_outgoing(), 1));
     CHECK(host.can_start(problems));
 
@@ -293,8 +297,10 @@ TEST(handshake_lobby_two_senders) {
     CHECK_EQ(lines_to(out, 1).size(), size_t(1));
     CHECK_EQ(lines_to(out, 3).size(), size_t(1));
 
-    // A change of mods goes to both; once Carol leaves, only to Alice.
+    // A change of mods goes to both; once Carol leaves, only to Alice. With
+    // two senders there's no telling which is the host: no note.
     client.update(false, {}, {{1, "Alice"}, {3, "Carol"}}, 1);
+    CHECK(client.take_notes().empty());
     out = client.take_outgoing();
     CHECK_EQ(lines_to(out, 1).size(), size_t(1));
     CHECK_EQ(lines_to(out, 3).size(), size_t(1));

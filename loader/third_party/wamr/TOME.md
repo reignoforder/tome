@@ -21,7 +21,9 @@ call (`core/iwasm/common/arch/invokeNative_em64.s`).
 
 Offline, download the archive once and configure with
 `-DTOME_WAMR_ARCHIVE=/path/to/WAMR-2.4.5.tar.gz` (still checked against the
-hash). A different archive is refused.
+hash). A different archive is refused. Downloaded from its URL, the
+archive is kept as `<build>/_deps/WAMR-2.4.5.tar.gz` (`wamr.cmake`; CI
+attaches it to a release as the source of the WAMR in it).
 
 ## Configuration
 

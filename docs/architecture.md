@@ -991,8 +991,8 @@ reason to make a fix a patch rather than ship it as a mod.
 Every player of a game needs the same `"sync": "required"` mods, or the game
 desyncs (`research.md` §4). **Verified** in LAN games between two instances
 on one machine (2026-10-26): matching sets, a refused Start, the in-game
-report on both sides and in a replay. Not in `tools/e2e-test.sh` yet; see
-"Testing with two instances" below.
+report on both sides and in a replay; in `make e2e` since 2026-11-02
+(`tools/e2e-multiplayer.sh`, "Testing with two instances" below).
 
 - **Identity:** a running required mod is `id version #hash`; the hash
   (`ModManager::sync_hash`, `ModStatus.sync_hash`) is FNV-1a over
@@ -1073,23 +1073,39 @@ report on both sides and in a replay. Not in `tools/e2e-test.sh` yet; see
   stops a locked mod (logged: the game may desync). A single player game,
   alone or against computers, isn't locked. Unit-tested; verified in a replay
   (2026-10-27: a locked dependency, a toggle that waits, a required mod
-  waiting, both applied on leaving through End Game, Quit Mission); not yet
-  in a two-instance game.
+  waiting, both applied on leaving through End Game, Quit Mission), and in
+  a two-instance LAN game (`tools/e2e-multiplayer.sh`: the host's toggle
+  waits for the game to end).
 - **Not done:** saved games; the host's net id (see `reverse-engineering.md`).
 
 ### Testing with two instances
 
-Two copies of war3.exe in one Wine prefix shut each other down (its
-single-instance check), and LAN needs UDP/TCP 6112 for each (`netgameport`
-doesn't move the LAN port). What worked: the second instance in its own
-Wine prefix, and each instance in its own network namespace, joined by a
-veth pair inside one unprivileged user namespace (`unshare -rn`, then a
-nested `unshare -n`; 10.77.0.1 and .2, a default route on each side so
-broadcasts cross). `nsenter -U` can't join that user namespace (setgroups is
-denied), so the process holding the namespaces starts the games itself. The
-second prefix has no profile, so the client types a name on the LAN screen
-(`TOME_DEBUG_CLICKS` `text:`). Both instances share the game folder, so only
-one should leave a game (`replay\LastReplay.w3g`).
+`tools/e2e-multiplayer.sh` (in `make e2e`). Two copies of war3.exe in one
+Wine prefix shut each other down (its single-instance check), and LAN needs
+UDP/TCP 6112 for each (`netgameport` doesn't move the LAN port). So the
+client runs in a Wine prefix of its own (`build/test-env/wine-client`), and
+each instance in its own network namespace, joined by a veth pair inside one
+unprivileged user namespace (`unshare -rn`, then a nested `unshare -n`;
+10.77.0.1 and .2, a default route on each side so broadcasts cross).
+`nsenter -U` can't join that user namespace (setgroups is denied), so the
+script runs itself again inside it and starts the games from there; the
+client's with `nsenter -n`. What it took:
+
+- **Every Wine command of the client in the client's namespace**, `winepath`
+  included. Wine creates sockets in its wineserver, so a wineserver started
+  in the host's namespace puts the client's sockets there too: both want
+  6112 and the client's LAN screen says "Could not connect to the network".
+- **Xvfb outside the namespaces.** Inside a network namespace the desktop's
+  abstract X socket isn't visible, so `-displayfd` picks `:0`, replaces the
+  desktop's `/tmp/.X11-unix/X0` and deletes it on exit (X apps that use the
+  file, such as Flatpak's, can't connect until the next login). Started
+  outside, it picks a free display, and the games reach it through the
+  socket file, which every namespace sees.
+- **Separate game folders,** so each instance writes its own
+  `replay\LastReplay.w3g`. Both prefixes have the profile Tome; the client
+  types "Guest" over it on the LAN screen (`focus:PlayerNameEditBox`,
+  `text:`). The game list's rows have no names: the client clicks the
+  first at its position.
 
 ## Hooks
 

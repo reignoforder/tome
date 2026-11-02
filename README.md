@@ -84,7 +84,11 @@ replace, used by the end-to-end test). It downloads StormLib at configure time.
 
 ## Installing
 
-Copy `tome.mix` into the Warcraft III folder (next to `war3.exe`) and put mods
+From a release: unpack `tome-<version>.zip` into the Warcraft III folder
+(next to `war3.exe`); its `tome/README.txt` says the rest. `make dist`
+builds that zip (`build-release/`).
+
+From a build: copy `tome.mix` into the Warcraft III folder (next to `war3.exe`) and put mods
 in `tome/mods/` there (Tome creates the folders on its first start). To
 remove Tome, delete `tome.mix`.
 
@@ -189,8 +193,9 @@ the log's `Tome <version> starting` line says when it's one.
 
 ```sh
 make test                          # unit tests, the loader without the game, and against game.dll (ctest, Wine)
-make e2e                           # end-to-end in the real game (tools/e2e-test.sh)
-HEADLESS=0 make e2e                # the same, on your screen
+make e2e                           # end-to-end in the real game (tools/e2e-test.sh, then tools/e2e-multiplayer.sh)
+HEADLESS=0 make e2e                # the same, on your screen (the multiplayer part stays off screen)
+make e2e-multiplayer               # only the two-instance LAN game
 make game                          # the build in the game, to try things (tools/game.sh)
 ```
 
@@ -222,9 +227,36 @@ game's frames and waits for the UI to stop moving, and the checks wait for
 their log lines, so a slow machine only makes the test slower. The test
 launches the game six times.
 
+`tools/e2e-multiplayer.sh` then plays a LAN game between two instances of
+the game, a host and a client, to test the multiplayer handshake: a lobby
+whose required mods differ (Start refused), the client's mod fixed while it
+waits, the game, the game lock, and the replay. The client gets a Wine
+prefix of its own (`build/test-env/wine-client`), and each instance a
+network namespace of its own inside an unprivileged user namespace
+(`unshare -rn`): no root, and your own network and LAN games aren't
+touched. Without unprivileged user namespaces (some containers) it says
+it's skipped.
+
 `make game` (`tools/game.sh start`) runs the build the same way, on your
 screen, from `build/test-env/game/`; put mods to try in its `tome/mods/`.
 `tools/game.sh shot file.png` takes a screenshot of the game's display.
+
+## Known issues
+
+- **Only 1.27b** (game.dll 1.27.1.7085). On any other build Tome logs it and
+  stays idle; the game runs unmodified.
+- **Tested under Wine so far.** Everything ran under Wine with Mesa's
+  OpenGL; a pass on Windows 10/11 with Direct3D is still to come.
+- **Online play:** LAN games, hosting and replays are tested (two instances
+  in `make e2e`; saved games only in single player); multiplayer saved
+  games, joining another host's game over a real network, Battle.net and
+  private servers aren't yet.
+- **Chat commands** (a mod's, `/tome ...`) work in games only, not in lobby
+  or Battle.net chat.
+- **A disabled mod's UI frames** are hidden, not destroyed; they go away
+  with their screen.
+- **Rust mods need Windows 10** (Rust's own minimum); Tome and C/C++ mods run
+  on Windows 7 or later.
 
 ## License
 
