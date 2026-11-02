@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /* Tests of the hello example without the game (include/tome/tome_test.h):
  * Tome itself loads the built mod against a fake game, and each case drives
  * it and checks what it did, mostly through its log lines. */

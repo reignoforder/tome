@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Writes the fuzz targets' seed inputs: make_seeds.py <out dir>.
 
 Creates <out>/<target>/ for every target in fuzz/. Inputs that once crashed

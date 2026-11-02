@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // tome-check: checks a built mod the way Tome would load it, without the
 // game (sdk/README.md, "Testing a mod"). Runs the real loader
 // against the fake game of testing/fake_game.h: discovers the mod, reads

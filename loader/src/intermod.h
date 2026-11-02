@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // The inter-mod part of the mod API (tome.h, API version 11): services other

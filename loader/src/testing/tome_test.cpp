@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // tome_test.dll: sdk/include/tome/tome_test.h, the real loader against the
 // fake game of testing/fake_game.h, for mods' own tests.
 #define TOME_TEST_BUILDING

@@ -4,6 +4,12 @@ A mod loader for Warcraft III: The Frozen Throne, in the spirit of Fabric for
 Minecraft. Mods are built against Tome's stable API instead of each one
 reverse-engineering the game.
 
+> **Unofficial.** Tome is a fan project, not affiliated with or endorsed by
+> Blizzard Entertainment. It includes no game files: you need your own copy
+> of Warcraft III 1.27b. It changes the game in memory, which online
+> services may not allow, and mods run with full access to your computer.
+> Use it at your own risk: read [`DISCLAIMER.md`](DISCLAIMER.md).
+
 Status: early development. Target build: **1.27b** (game.dll 1.27.1.7085).
 See [`docs/ROADMAP.md`](docs/ROADMAP.md) for what's next and
 [`docs/research.md`](docs/research.md) for the design.
@@ -222,9 +228,16 @@ screen, from `build/test-env/game/`; put mods to try in its `tome/mods/`.
 
 ## License
 
-Tome itself is under the GNU GPL v3 (`LICENSE`). The SDK in `sdk/` (the mod
-API headers, CMake helpers, templates, examples and Rust crates) is under the
-MIT license (`sdk/LICENSE`), so mods built against it may use any license.
+Tome itself is under the GNU GPL v3 or later (`LICENSE`). The SDK in `sdk/`
+is under the MIT license (`sdk/LICENSE`), and what mods are built from (the
+templates, the mod API headers, the Rust crates) under MIT No Attribution
+(`sdk/LICENSE-MIT-0`), so mods may use any license and owe it no notice.
+Each source file names its license in an `SPDX-License-Identifier` line.
+Tome's binaries also contain WAMR, Monocypher, MinGW's and GCC's runtimes
+and code after zlib's puff.c, under their own licenses:
+`loader/third_party/NOTICES.md`.
 
-Tome is not affiliated with or endorsed by Blizzard Entertainment. It
-includes no game files; you need your own copy of Warcraft III.
+Tome is not affiliated with or endorsed by Blizzard Entertainment.
+Warcraft is a trademark of Blizzard Entertainment, Inc. Tome includes no
+game files; you need your own copy of Warcraft III. What that means for
+you, online play, mods and warranty: [`DISCLAIMER.md`](DISCLAIMER.md).

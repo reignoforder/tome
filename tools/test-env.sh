@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Sourced by tools/game.sh and tools/e2e-test.sh: the place the game runs
 # in for testing, kept apart from your own install and desktop.
 #

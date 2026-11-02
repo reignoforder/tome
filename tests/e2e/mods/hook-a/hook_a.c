@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
 /*
  * e2e fixture: hooks RCString::GetText before and after the game's function,
  * at the default priority. Before, it swaps the probe's string for its own,

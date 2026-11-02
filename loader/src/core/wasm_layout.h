@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // What Tome copies into a WebAssembly mod's memory (docs/wasm-mods.md): its

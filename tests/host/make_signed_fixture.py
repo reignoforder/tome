@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
 """make_signed_fixture.py <built crash mod> <out folder> <key file>: a copy of
 the crash fixture with files in subfolders and non-ASCII names, signed by
 sdk/support/tome_sign.py with the key (tests/host/test-signing.key, for tests

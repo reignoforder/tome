@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT-0 */
 /*
  * UTF-8 helpers for Tome mods. Plain C, header-only, no CRT objects.
  *

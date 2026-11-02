@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // A WebAssembly module, as a Wasm mod ships it (docs/wasm-mods.md): WAMR's
 // loader, Tome's import check, instantiation with Tome's limits, then every
 // exported function the way Tome calls one (its own exec env, an

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // Crash loops (docs/research.md §9 item 1): a start that never gets to the

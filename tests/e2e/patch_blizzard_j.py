@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Makes a copy of the game's Blizzard.j that the asset-demo mod ships, to
 check that mods can override the game's scripts.
 

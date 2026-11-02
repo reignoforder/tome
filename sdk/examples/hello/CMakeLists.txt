@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 tome_add_mod(hello
     SOURCES hello.c
     METADATA tome.mod.json

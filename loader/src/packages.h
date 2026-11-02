@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // .tome packages (core/package.h): unpacking into tome/packages and removing

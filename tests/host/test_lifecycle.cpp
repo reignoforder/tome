@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Discovery, metadata problems, state.json, hot reload, packages, safe mode
 // and shutdown, with the hello examples (C, C++, Rust) and the e2e fixtures.
 #include "harness.h"

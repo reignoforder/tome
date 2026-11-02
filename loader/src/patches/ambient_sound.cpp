@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 /*
  * Ambient sound (docs/known-bugs.md, "Ambient sound"; docs/reverse-engineering.md,
  * "Sound").

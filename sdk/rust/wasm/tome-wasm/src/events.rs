@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT-0
 //! Game events (`on_event`) and units, as Tome writes them into the
 //! module's memory (`tome_wasm_event`, `tome_wasm_unit` in
 //! `sdk/include/tome/tome_wasm.h`; `loader/src/core/wasm_layout.cpp`).

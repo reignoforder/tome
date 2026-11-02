@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // File names a map passes to natives, TOC files, mods' FDF paths, and
 // names of files in a package.
 #include "core/frames.h"

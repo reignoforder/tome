@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT-0
 //! Services and messages between mods (API version 11): see tome.h. A
 //! service is a table of functions with a C layout, so mods in C and Rust
 //! can use each other's:

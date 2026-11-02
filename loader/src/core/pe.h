@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // Lays out a PE32 file the way the Windows loader maps it, without applying

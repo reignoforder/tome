@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Builds the libFuzzer targets in fuzz/ (clang, ASan + UBSan, a host build in
 # build-fuzz/) and runs each for a while.
 #

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Minimal PE32 reader shared by the reverse-engineering helpers.
 
 Reads section headers from the file itself, so the helpers work on any build

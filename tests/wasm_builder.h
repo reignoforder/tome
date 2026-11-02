@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // A WebAssembly binary built by hand, for tests: fixture modules without a

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # Rust support for Tome mods: raw bindings (tome-sys), a safe layer (tome)
 # and examples. Mods are 32-bit Windows DLLs: .cargo/config.toml builds for
 # i686-pc-windows-gnu with MinGW's linker.

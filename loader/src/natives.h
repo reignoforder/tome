@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // Custom JASS natives (docs/research.md §3.3, §5.5).

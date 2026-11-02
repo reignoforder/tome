@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Chat commands through Tome's hook on CGameUI::HandleSlashCommand (the
 // fake game image carries every mapped function, so events::install hooks
 // them all): /tome, a mod's own command, and what goes on to the game.

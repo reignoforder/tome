@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // The files in mappings/, compiled into tome.mix so it stays a single file.

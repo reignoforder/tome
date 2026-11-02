@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // The handle passed to mods (tome_mod in tome.h). Kept apart from the mod

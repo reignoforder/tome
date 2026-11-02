@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #include "core/main_menu_fdf.h"
 #include "core/mod_menu_model.h"
 #include "test.h"

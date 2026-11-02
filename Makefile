@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Shortcuts for the CMake build and the test scripts. `make help` lists them.
 #
 # Settings (make VAR=value, or in the environment):

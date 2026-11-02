@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT-0 */
 /*
  * Tome for WebAssembly mods (experimental): C for clang --target=wasm32,
  * no libc. A Wasm mod runs sandboxed: it can only call these functions, and

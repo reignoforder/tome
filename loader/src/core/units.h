@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // Units, the selection, chat and pause as mods see them (tome.h, API version

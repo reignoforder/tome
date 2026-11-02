@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
 /*
  * e2e fixture: writes to address 0 on purpose, in the place the first word
  * of mode.txt (in the mod's folder, read on every load and enable) names:

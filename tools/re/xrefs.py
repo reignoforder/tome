@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Find where a string is referenced in game.dll.
 
 usage: python3 -I tools/re/xrefs.py <game.dll> <string> [<string> ...]

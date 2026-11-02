@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # The Rust crates and examples (sdk/rust/README.md), when cargo and its
 # i686-pc-windows-gnu target are installed: rustup target add i686-pc-windows-gnu.
 tome_add_rust_mod(hello_rs

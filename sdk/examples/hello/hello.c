@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * The smallest useful Tome mod: logs each lifecycle step, looks up a mapped
  * game function, provides JASS natives a map can call (numbers, strings

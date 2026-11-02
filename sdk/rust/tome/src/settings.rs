@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT-0
 //! Settings and keybinds (API version 7): the mod's config.schema.json and
 //! tome.mod.json "keybinds"; see "Settings and keybinds" in tome.h.
 

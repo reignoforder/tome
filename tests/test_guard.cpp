@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // The crash guard (loader/src/guard.cpp) on real faults in this process.
 
 #include "guard.h"

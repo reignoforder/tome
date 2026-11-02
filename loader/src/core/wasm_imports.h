@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // What a WebAssembly mod gets (docs/wasm-mods.md): its limits, and the
 // functions Tome gives it (module "tome") with WAMR's signature strings: i i32, f f32, F f64,
 // "(params)result". Pointers and lengths are raw i32s, checked by

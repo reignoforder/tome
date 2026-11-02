@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // WAMR's own allocations (its loader's and instances' structures, exec

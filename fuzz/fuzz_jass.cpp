@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // A map script (war3map.j, from a downloaded map) through the shadow
 // scanner, and native declarations (from tome.mod.json) through parse_native.
 #include "core/jass.h"

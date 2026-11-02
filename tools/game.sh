@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Developer helper: runs the build's tome.mix in the game under Wine, in a
 # test game folder (tools/test-env.sh), never in input/ itself.
 #

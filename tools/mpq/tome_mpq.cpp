@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // tome-mpq: list, extract and replace files in MPQ archives (maps).
 //
 //   tome-mpq list    <archive>

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // SHA-256 of files, remembered across starts (tome/cache/file-hashes.json)

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // tome.sig: a mod author's Ed25519 signature over a mod's files, at the top of

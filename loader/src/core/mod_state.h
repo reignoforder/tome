@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // tome/state.json: what the user chose for each mod (on or off) and which

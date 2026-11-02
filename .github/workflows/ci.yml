@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Builds Tome and runs `make test` in the tools/container image: the same
 # toolchain, Wine and Rust targets as `make container-test`. Without the game
 # the tests on game.dll skip themselves; the e2e test needs the game (and a

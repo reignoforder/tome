@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * The example mod as a WebAssembly module (include/tome/tome_wasm.h): it
  * runs sandboxed, so it can only do what Tome's imports let it, and Tome

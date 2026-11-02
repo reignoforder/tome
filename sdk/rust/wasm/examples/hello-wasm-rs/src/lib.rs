@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! The WebAssembly example in Rust (the tome-wasm crate): it runs
 //! sandboxed, so it can only do what Tome's imports let it, and Tome
 //! doesn't ask players to trust it with their computer. Every line it logs

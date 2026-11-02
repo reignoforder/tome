@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // Keybinds (docs/research.md §8.3): key names like "Ctrl+Shift+H", the

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // Popups on the game's screens (core/popup.h has the layout): a queue of

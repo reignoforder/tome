@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT-0
 //! JASS values for natives, in the engine's ABI (tome.h, "JASS native ABI"):
 //! one 32-bit argument per JASS parameter, results in eax.
 //!

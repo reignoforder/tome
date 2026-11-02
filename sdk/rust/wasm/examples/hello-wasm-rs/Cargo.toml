@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 [package]
 name = "hello-wasm-rs"
 version.workspace = true

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // sdk/include/tome/tome.hpp against a mock API table: Mod::call's argument
 // binding, version checks, callbacks and their lifetime, the helpers.
 // Built like Tome itself (no exceptions), so this is also the header's

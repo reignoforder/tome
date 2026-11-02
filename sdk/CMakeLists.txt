@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # The SDK: headers, build helpers, examples and templates (README.md).
 # Part of Tome's build, or a project of its own, e.g. from the sdk-dist zip:
 #   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-i686-mingw.cmake
@@ -92,12 +93,14 @@ endif()
 
 # The SDK as one zip for mod makers, without Tome's sources:
 # cmake --build build --target sdk-dist (sdk/README.md, "Without Tome's repository").
-# With this build's tome-check and tome_test.dll in bin/ and lib/ (TomeMod.cmake).
+# With this build's tome-check and tome_test.dll in bin/ and lib/ (TomeMod.cmake),
+# and their licenses in licenses/.
 add_custom_target(sdk-dist
     COMMAND ${CMAKE_COMMAND} -DSDK=${CMAKE_CURRENT_SOURCE_DIR}
         -DOUT=${CMAKE_BINARY_DIR}/tome-sdk-${PROJECT_VERSION}.zip -DNAME=tome-sdk-${PROJECT_VERSION}
         -DCHECK_EXE=$<TARGET_FILE:tome_check> -DTEST_DLL=$<TARGET_FILE:tome_test>
         -DTEST_IMPLIB=$<TARGET_LINKER_FILE:tome_test>
+        -DGPL=${CMAKE_SOURCE_DIR}/LICENSE -DTHIRD_PARTY=${CMAKE_SOURCE_DIR}/loader/third_party
         -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/dist.cmake
     COMMENT "Packing the SDK"
     VERBATIM

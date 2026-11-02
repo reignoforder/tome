@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // BLP1 textures (downloaded maps, mods' assets): the guard that keeps the
 // game's loader from reading past a crafted file (core/blp.*).
 #include "core/blp.h"

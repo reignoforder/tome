@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT-0
 //! Screens and frames (API version 3; every screen since 5): the game's UI
 //! objects, the ones 1.31's Blz*Frame* natives use. A [`Frame`] stays valid
 //! while its screen exists: look frames up again in each [`Tome::on_ui`]

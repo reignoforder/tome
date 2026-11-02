@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // The checks between a WebAssembly mod and Tome (docs/wasm-mods.md): what an

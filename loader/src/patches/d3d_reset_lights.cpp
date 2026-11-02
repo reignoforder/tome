@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 /*
  * Direct3D lights across a device reset (docs/known-bugs.md, "Scene darker
  * after Alt+Tab (Direct3D, Wine)"; docs/reverse-engineering.md).

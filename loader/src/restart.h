@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // Restarting the game (the mod API's restart_game, and the mod menu's

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
 """make_wasm_mod.py <folder>: writes the e2e test's WebAssembly mod (wasm-e2e)
 into <folder>: tome.mod.json and mod.wasm, assembled here (no Wasm toolchain
 needed). tests/wasm_builder.h does the same for the host tests.

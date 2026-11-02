@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // Portable parts of the frame API for mods (loader/src/frames.cpp): the table

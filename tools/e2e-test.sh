@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 # End-to-end test: runs the real game under Wine with Tome and a set of test
 # mods, changes things while it runs, and checks tome.log for the expected
 # behavior.

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT-0
 //! The mod's side of the lifecycle: the API table Tome handed over, the
 //! panic guard every callback runs under, and the closures registered with
 //! Tome.

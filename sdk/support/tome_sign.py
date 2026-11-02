@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """Signs Tome mods: writes tome.sig, the mod author's Ed25519 signature over a
 mod's files (loader/src/core/signature.h in Tome's repository).
 

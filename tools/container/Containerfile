@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Everything Tome's build and tests need, so they don't depend on the host:
 # the 32-bit MinGW toolchain, CMake and Ninja, Wine (unit tests, the e2e
 # test), Xvfb and Mesa's software OpenGL (the game off screen, no GPU),

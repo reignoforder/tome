@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // tome.sig (from mods, read before the mod is allowed): parse, verify, and
 // a base64 round trip of what it decoded.
 #include "core/signature.h"

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // Tome's mod menu as an FDF file (UI\FrameDef\Glue\TomeModMenu.fdf). Kept

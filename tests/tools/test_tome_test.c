@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
 /* tome_test.dll on mods of every kind (sdk/include/tome/tome_test.h): the
  * Rust and WebAssembly examples (when this build makes them:
  * TOME_TEST_RUST_EXAMPLE, TOME_TEST_WASM_EXAMPLE) and the crash fixture. The

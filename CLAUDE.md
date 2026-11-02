@@ -49,6 +49,12 @@ default) puts it in its own Xvfb; `tools/game.sh` shows it on screen unless
 - A `core/` parser of untrusted bytes (other players, maps, packages,
   `tome.mod.json`) gets a target in `fuzz/`; a crashing input goes into
   `fuzz/regressions/<target>/` with a unit test.
+- Every source file starts with an `SPDX-License-Identifier` line
+  (`GPL-3.0-or-later`; `MIT` in `sdk/`, `MIT-0` in what mods compile in
+  (`MIT0` in `tools/spdx.py`), none in `sdk/templates/`; after a shebang
+  it's the second line): `tools/spdx.py` adds them, a test checks. Third-party code linked into
+  the binaries gets its license text in `loader/third_party/` and a row in
+  its `NOTICES.md` (packed into the zips' `licenses/`).
 - Code style: C++20, no exceptions/RTTI, `TOME_INFO`/`WARN`/`ERROR` logging.
   The mod API in `sdk/include/tome/tome.h` is plain C and append-only.
   After changing it, run `tools/gen-rust-bindings.sh` (a test checks). The

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Lobby chat lines and game cache keys from other players (remote input):
 // decode them, reassemble sets, and run them through a lobby on both sides.
 #include "core/handshake.h"

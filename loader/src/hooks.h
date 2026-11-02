@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // Inline hooks on mapped game functions, shared by every mod (tome.h,

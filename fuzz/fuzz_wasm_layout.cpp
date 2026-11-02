@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // JASS signatures (from tome.mod.json "natives", through the declaration
 // parser), the native arguments Tome encodes for a Wasm mod by them, and the
 // result check: the first line is a signature, the rest argument words and

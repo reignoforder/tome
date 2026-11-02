@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # Cross-compile for 32-bit Windows. Warcraft III (all versions Tome targets) is a
 # 32-bit process, so the loader and every mod must be PE32/i386.
 set(CMAKE_SYSTEM_NAME Windows)

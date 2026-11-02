@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // Reader for zip archives, the container of `.tome` mod packages. Supports

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #include "popup.h"
 
 #include <tome/utf8.h>

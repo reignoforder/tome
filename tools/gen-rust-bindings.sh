@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Regenerates sdk/rust/tome-sys/src/bindings.rs from sdk/include/tome/tome.h
 # with bindgen (cargo install bindgen-cli; needs libclang and the MinGW
 # headers). The output is committed, so building a Rust mod needs neither.
@@ -16,6 +17,8 @@ generate() {
     # Only Tome's own names; enums as newtypes, since a newer Tome may
     # return values this version doesn't know. The layout assertions bindgen
     # adds are checked when building for i686, the only target mods have.
+    # The license line first (tools/spdx.py), before bindgen's own header.
+    echo '// SPDX-License-Identifier: MIT-0'
     "$BINDGEN" "$ROOT/sdk/include/tome/tome.h" \
         --rust-edition 2024 --rust-target 1.85 \
         --use-core \

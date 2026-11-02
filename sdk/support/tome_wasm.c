@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT-0 */
 /*
  * The runtime of a WebAssembly mod (tome_wasm.h), compiled into it by
  * tome_add_wasm_mod(): the exports Tome calls back through (tome_buffer,

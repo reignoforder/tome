@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # The example as a WebAssembly mod: needs clang and wasm-ld (or a Rust
 # toolchain's rust-lld); see sdk/CMakeLists.txt.
 tome_add_wasm_mod(hello_wasm

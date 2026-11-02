@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT-0
 //! Game events (API version 5; more in 8 and 12): see `tome_event` in
 //! tome.h for when each one fires and which fields of [`EventInfo`] it fills.
 

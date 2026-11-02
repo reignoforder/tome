@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 /*
  * BLP texture guard (docs/known-bugs.md, "BLP texture loader";
  * docs/reverse-engineering.md).

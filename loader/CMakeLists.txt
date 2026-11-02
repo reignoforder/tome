@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 include(${CMAKE_SOURCE_DIR}/cmake/embed_mappings.cmake)
 tome_embed_mappings("${CMAKE_CURRENT_BINARY_DIR}/generated/embedded_mappings.cpp" "${CMAKE_SOURCE_DIR}/mappings")
 

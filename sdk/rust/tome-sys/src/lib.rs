@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT-0
 //! Raw bindings to Tome's mod API, generated from `sdk/include/tome/tome.h`
 //! by `tools/gen-rust-bindings.sh`. The header is the documentation; the
 //! `tome` crate wraps these in a safe API.

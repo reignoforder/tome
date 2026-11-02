@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT-0
 //! The safe layer against a mock API table (cargo test, under Wine).
 
 use core::ffi::{CStr, c_char, c_void};

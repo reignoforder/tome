@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // Cleanups that also run when a crash guard abandons a call (guard.h).

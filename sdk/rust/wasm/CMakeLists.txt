@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # The Rust crate for WebAssembly mods (tome-wasm) and its example, when cargo
 # and its wasm32-unknown-unknown target are installed: rustup target add
 # wasm32-unknown-unknown (sdk/CMakeLists.txt).

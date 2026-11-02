@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // Keybinds (tome.h, API version 7; core/keys.h): every installed mod's

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 /*
  * Widescreen 3D view (docs/known-bugs.md, "Stretched picture on widescreen";
  * docs/reverse-engineering.md, "Camera projection").

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Adds the e2e test's native declarations and calls to a map's war3map.j.
 
 usage: python3 patch_map_script.py <war3map.j in> <war3map.j out> [--cpp] [--rust] [--wasm]

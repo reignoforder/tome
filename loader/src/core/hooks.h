@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // The portable half of Tome's hook manager (loader/src/hooks.cpp patches

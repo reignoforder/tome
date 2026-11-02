@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // Per-mod settings (docs/research.md §8.3): the schema a mod ships as

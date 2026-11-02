@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // WebAssembly mods (docs/wasm-mods.md): a module run by WAMR's interpreter

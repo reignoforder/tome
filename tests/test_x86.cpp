@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #include "core/embedded_mappings.h"
 #include "core/mappings.h"
 #include "core/x86.h"

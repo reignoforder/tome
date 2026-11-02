@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // The game's UI frames, for Tome's own menu and for mods (the frame part of

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Chat lines the player types (and /tome's arguments).
 #include "core/chat.h"
 

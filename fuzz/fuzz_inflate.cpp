@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // The deflate decoder alone: the first 2 bytes give the expected size.
 #include "core/zip.h"
 

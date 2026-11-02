@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // Reads MSVC RTTI (32-bit layout) from game.dll's memory, so Tome can check an

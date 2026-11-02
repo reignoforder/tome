@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 /*
  * Path sanitizer for JASS natives that take a file path (docs/known-bugs.md,
  * "PreloadGenEnd file writes"; docs/reverse-engineering.md).

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // Minimal MPQ (format version 1) writer for Tome's overlay archive: files are

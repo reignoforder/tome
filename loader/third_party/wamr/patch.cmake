@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Tome's patches to WAMR 2.4.5 (TOME.md, "Patches"), run in WAMR's source
 # folder: cmake -P patch.cmake. Each replaces one exact piece of text, and
 # fails if it isn't there (a different WAMR); a file already patched is left

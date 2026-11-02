@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Generate or check the "bytes" signatures in a mapping file.
 
 usage: python3 -I tools/re/signatures.py <game.dll> <mappings/build.json> [--write]

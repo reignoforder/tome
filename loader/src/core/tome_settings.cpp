@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #include "core/tome_settings.h"
 
 namespace tome::tome_settings {

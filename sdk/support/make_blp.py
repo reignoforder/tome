@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Writes a solid-color texture in the BLP1 format the game's UI uses.
 
 usage: python3 make_blp.py <out.blp> <size> <rrggbb>

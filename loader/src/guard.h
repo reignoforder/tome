@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // Crash isolation for calls into mods (docs/research.md §5.7).

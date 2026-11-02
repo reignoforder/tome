@@ -46,8 +46,10 @@ Status as of 2026-10-30. Design rationale: `research.md`. How it works:
 
 ## Next: public release (0.1.0), in order
 
-Licensing is settled: GPL v3 for Tome (`LICENSE`), MIT for `sdk/`
-(`sdk/LICENSE`) so mods may use any license.
+Licensing is settled: GPL v3 or later for Tome (`LICENSE`), MIT for `sdk/`
+(`sdk/LICENSE`) and MIT-0 for what mods compile in (`sdk/LICENSE-MIT-0`),
+so mods may use any license and owe no notice. Third-party code in the
+binaries and its licenses: `loader/third_party/NOTICES.md`.
 
 Stability comes first: no compiler or link setting changes (LTO would cut
 `tome.mix` from 2.3 MB to 1.4 MB, but `-O3` without it is what the tests
@@ -58,15 +60,21 @@ Rust mods need Windows 10 (`WaitOnAddress`; Rust's own minimum).
 1. ~~**Debug switches out of release builds**~~ Done: the `TOME_DEV` CMake
    option (off by default, on in the Makefile's `DEV`) gates every
    `TOME_DEBUG_*` read; `tools/e2e-test.sh` refuses a build without it.
-2. **SPDX headers:** `GPL-3.0-or-later` (or `-only`, decide) on every source
-   file outside `sdk/`, `MIT` in `sdk/`; none have one yet.
+2. ~~**SPDX headers**~~ Done: `GPL-3.0-or-later` outside `sdk/`, `MIT` in
+   it (not `sdk/templates/`, which become mod makers' own), added and
+   checked by `tools/spdx.py` (test `tome_spdx_headers`); the generators
+   write theirs. The SDK zip has `licenses/` (the GPL for its tools and the
+   third-party licenses); the Rust crates are `publish = false` (`tome` is
+   taken on crates.io).
 3. **A player download:** a `dist` target making `tome-<version>.zip` with
-   `tome.mix`, a short install/uninstall readme, the licenses and an empty
+   `tome.mix`, a short install/uninstall readme, `DISCLAIMER.md`,
+   `licenses/` as in the SDK zip (`sdk/cmake/dist.cmake`) and an empty
    `tome/mods/` (maybe `hello.tome`), next to the SDK zip.
 4. **CI:** GitHub Actions running `make container-test`, a short
    `tools/fuzz.sh` run and the Rust bindings check on every push; on a
-   `v*` tag, build both zips and attach them to a release with their
-   SHA-256s. The e2e test needs game files and stays local (say so in
+   `v*` tag, build both zips (release builds, `TOME_DEV` off) and attach
+   them to a release with their SHA-256s, and the WAMR archive the build
+   used (part of the GPL's corresponding source; `loader/third_party/NOTICES.md`). The e2e test needs game files and stays local (say so in
    `CONTRIBUTING.md`).
 5. **Real Windows:** everything so far ran under Wine with Mesa. One manual
    pass on Windows 10/11 with Direct3D and Defender on: install, Mods menu,

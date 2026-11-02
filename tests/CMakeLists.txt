@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 add_executable(tome_tests
     main.cpp
     test_abi.cpp
@@ -135,6 +136,15 @@ if(Python3_FOUND)
     target_compile_definitions(tome_host_tests PRIVATE TOME_TEST_SIGNED=1)
     add_test(NAME tome_sign_selftest
         COMMAND ${Python3_EXECUTABLE} -I "${CMAKE_SOURCE_DIR}/sdk/support/tome_sign.py" selftest)
+    # Every source file says its license (tools/spdx.py lists them with git).
+    find_package(Git QUIET)
+    if(Git_FOUND AND EXISTS "${CMAKE_SOURCE_DIR}/.git")
+        add_test(NAME tome_spdx_headers
+            COMMAND ${Python3_EXECUTABLE} -I "${CMAKE_SOURCE_DIR}/tools/spdx.py" --check)
+        # Skipped (77) when git can't read the checkout, e.g. a worktree in the container.
+        set_tests_properties(tome_spdx_headers PROPERTIES
+            ENVIRONMENT "GIT=${GIT_EXECUTABLE}" SKIP_RETURN_CODE 77)
+    endif()
 endif()
 add_test(NAME tome_host_tests COMMAND tome_host_tests)
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #include "crash_loop.h"
 
 #include "core/crash_report.h"

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT-0 */
 /* Linked into every mod built with tome_add_mod under MinGW.
  *
  * MinGW's CRT calls _fpreset (fninit) from a TLS callback in every thread

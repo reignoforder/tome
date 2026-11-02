@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // Path sanitizer for file-writing JASS natives (docs/known-bugs.md,

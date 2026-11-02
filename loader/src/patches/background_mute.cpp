@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 /*
  * Audio in the background (docs/known-bugs.md, "Sound in the background").
  *

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // What every name zip::safe_name accepts must satisfy: it stays inside the

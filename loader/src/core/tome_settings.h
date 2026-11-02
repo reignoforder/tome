@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // Tome's own settings: the mod menu's Tome > Settings page, saved in

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! The hello example in Rust: logs each lifecycle step, looks up a mapped
 //! game function, provides JASS natives (numbers, strings and a callback),
 //! adds a "Hello (Rust)" button to the main menu (from its own

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Print a Warcraft III model's (MDX) animation sequences and textures.
 
 usage: python3 -I tools/re/mdx_info.py <model.mdx> [...]

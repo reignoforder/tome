@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // The mod menu (docs/research.md §8), built from the game's own UI frames so

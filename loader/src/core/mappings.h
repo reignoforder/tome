@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // The mapping database: one JSON file per game build (mappings/<build>.json)

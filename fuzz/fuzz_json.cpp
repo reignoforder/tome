@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // tome.mod.json and a settings schema (from mods): parse, then every reader
 // that takes the parsed value, and a round trip through serialize.
 #include "core/json.h"

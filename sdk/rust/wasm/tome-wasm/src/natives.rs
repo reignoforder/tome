@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT-0
 //! JASS natives (`tome.mod.json` "natives", [`register_native`]): Tome
 //! converts the arguments before the module sees them and checks the
 //! result (`docs/wasm-mods.md`, "Natives").

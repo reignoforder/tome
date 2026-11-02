@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT-0
 //! Tome's imports (module `tome`) as Tome provides them, the same list as
 //! `sdk/include/tome/tome_wasm.h` (`docs/wasm-mods.md` explains each).
 //! Strings are (pointer, length), UTF-8 without NUL bytes; out-parameters

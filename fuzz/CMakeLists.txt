@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # libFuzzer targets for the core parsers that read untrusted bytes (lobby
 # chat lines, packages, tome.mod.json, map scripts and paths). Host build
 # with clang, separate from the mingw build:

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // One row of the mod list, as the mod manager reports it: for the log, the

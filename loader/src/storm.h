@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // The game's Storm.dll file API. Storm exports by ordinal only; these are the

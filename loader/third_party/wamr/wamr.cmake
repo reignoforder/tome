@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # WAMR 2.4.5 (Bytecode Alliance, Apache-2.0 WITH LLVM-exception; TOME.md):
 # downloaded when the build is configured, checked against its SHA-256 and
 # patched (patch.cmake), into <build>/_deps/wamr-src. Sets WAMR to its core/

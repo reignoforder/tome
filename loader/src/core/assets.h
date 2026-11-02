@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // Portable parts of the asset overlay (loader/src/assets.cpp): where a mod's

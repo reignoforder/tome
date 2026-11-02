@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // Small ASCII text helpers shared by core and Windows code. ASCII only on

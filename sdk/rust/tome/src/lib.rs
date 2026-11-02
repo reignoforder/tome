@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT-0
 //! Safe Rust API for [Tome](../../README.md) mods, on top of the raw
 //! bindings in [`sys`] (`sdk/include/tome/tome.h`, which documents every
 //! function in full).

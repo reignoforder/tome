@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 /*
  * Memhack guard (docs/known-bugs.md, docs/reverse-engineering.md).
  *

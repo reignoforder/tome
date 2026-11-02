@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # The Rust crate for WebAssembly mods (tome-wasm) and its example: a
 # workspace of its own, since everything here builds for
 # wasm32-unknown-unknown (.cargo/config.toml), not for the DLL mods'

@@ -313,8 +313,39 @@ A signature says who made a mod, not that it's safe.
   before reading a field added in a later API version (`tome::has_field` in
   C++); the Rust API does this for you.
 
+## Legal
+
+Tome is unofficial and has nothing to do with Blizzard Entertainment;
+neither do your mods. Worth keeping in mind when you publish one:
+
+- **Don't ship the game's files.** A mod's `assets/` may replace the game's
+  files, but put only your own work (or work you may share) in it, not
+  files copied out of the game's MPQs, edited or not.
+- **Don't suggest Blizzard is involved.** Warcraft and Blizzard are
+  Blizzard Entertainment's trademarks: say your mod is *for* Warcraft III,
+  don't name or brand it as an official product, and don't use their logos.
+- **Say what your mod does.** Players approve your code before it runs,
+  trusting your description: no hidden features, nothing that collects data
+  or reaches the network without saying so.
+- **No cheats for online play.** A mod that gives one player an advantage
+  others can't see or agree to (map hacks, automation) hurts the
+  communities Tome is for. Tome's handshake only compares mods marked
+  `"sync": "required"`; it can't stop a cheat, so don't make one.
+
+Tome and the SDK come with no warranty (`LICENSE`); neither do mods, unless
+their authors say otherwise.
+
 ## License
 
-The SDK (everything in this folder) is under the MIT license (`LICENSE`).
-Your mod may use any license, open or closed. Tome itself, the loader that
-runs mods, is under the GNU GPL v3.
+Your mod may use any license, open or closed, and owes the SDK no notice.
+What a mod is built from is under MIT No Attribution (`LICENSE-MIT-0`),
+which asks nothing of copies: the templates (they carry no license line,
+so a mod started from one takes yours), the headers in `include/`,
+`support/fpreset.c` and `support/tome_wasm.c`, and the Rust crates `tome`,
+`tome-sys` and `tome-wasm`. The rest of the SDK (its CMake helpers, tools,
+docs and examples) is under the MIT license (`LICENSE`). Tome itself, the
+loader that runs mods, is under the GNU GPL v3 or later, and so are the
+tools in the SDK zip's `bin/` and `lib/` (`tome-check`, `tome_test.dll`:
+Tome's loader on a fake game); the mod you ship links neither. The zip's
+`licenses/` has the GPL and the licenses of the third-party code in those
+tools (`licenses/NOTICES.md`).

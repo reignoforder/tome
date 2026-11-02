@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // The archives Tome layers over the game's MPQs (docs/architecture.md, "Asset

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 [package]
 name = "hello-rs"
 description = "Tome's hello example, in Rust"

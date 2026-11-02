@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // The TOME_DEBUG_CLICKS script (debug_input.h): steps separated by ';'.

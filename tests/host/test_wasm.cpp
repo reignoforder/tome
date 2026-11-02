@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // WebAssembly mods (docs/wasm-mods.md) through the real loader and WAMR:
 // fixture modules made by tests/wasm_builder.h, written into the test's
 // tome/mods.

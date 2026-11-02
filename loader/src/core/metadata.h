@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // tome.mod.json: see docs/research.md §7 for the full schema.

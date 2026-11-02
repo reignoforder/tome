@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // The size of one decoded movie frame from blizzard.ax, the game's BLZ0

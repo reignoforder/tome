@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT-0
 //! Popups (API version 10): a title, a message and buttons over any screen.
 
 use core::ffi::{c_char, c_void};

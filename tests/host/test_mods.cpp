@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Mod lifecycle, approval, natives, crash isolation and hooks: the e2e test's
 // checks of Tome's own behavior, against the real loader and the real
 // fixture mods, with a fake game image instead of the game.

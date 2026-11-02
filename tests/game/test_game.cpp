@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // The loader against the real game.dll, loaded into this process but never
 // run: every check here is deterministic (no window, no clock, no rendering).
 // Needs the local 1.27b install (TOME_GAME_DIR); each test says "skipped"

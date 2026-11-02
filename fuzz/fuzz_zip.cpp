@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // A .tome package: the central directory, every entry unpacked, and the
 // package checks, with small limits so a run doesn't stall on huge sizes.
 #include "core/package.h"

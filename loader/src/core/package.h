@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // .tome packages: a zip of a mod folder (tome.mod.json at the top), unpacked

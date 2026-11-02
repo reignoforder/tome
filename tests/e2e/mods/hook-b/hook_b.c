@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
 /*
  * e2e fixture: hooks RCString::GetText in all three phases at priority 10
  * (so its BEFORE and AFTER run ahead of hook-a's), then calls GetText on a

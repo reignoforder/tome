@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // The hook engine (loader/src/hooks.cpp) on real code: small functions in
 // each calling convention, written in assembly with MSVC-style prologues,
 // hooked in this process and called the way the game would call them.

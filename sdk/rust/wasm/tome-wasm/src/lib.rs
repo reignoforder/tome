@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT-0
 //! Rust API for Tome's WebAssembly mods (experimental; `docs/wasm-mods.md`).
 //!
 //! A Wasm mod runs sandboxed: it can only call Tome's imports, and Tome

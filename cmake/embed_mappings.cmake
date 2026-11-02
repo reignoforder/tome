@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # tome_embed_mappings(<output.cpp> <dir>): writes a source file defining
 # tome::mappings::kEmbeddedFiles with the text of every <dir>/*.json.
 # CMake re-runs when a file is added, removed or edited.

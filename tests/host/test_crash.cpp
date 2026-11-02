@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Crash loops (crash_loop.h) and crash reports (crash_handler.h): the
 // startup count in tome/startups, safe mode after a loop, and reports
 // written for a crash, also a real one nothing handled.

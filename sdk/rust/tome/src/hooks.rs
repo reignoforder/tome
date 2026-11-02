@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT-0
 //! Hooks on mapped game functions (API version 4; imports since 9): see
 //! "Hooks" in tome.h. Handlers run on whatever thread called the function,
 //! so they're plain `fn`s: keep state in atomics or locks, and log with

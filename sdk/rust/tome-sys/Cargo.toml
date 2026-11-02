@@ -1,10 +1,13 @@
+# SPDX-License-Identifier: MIT-0
 [package]
 name = "tome-sys"
 description = "Raw bindings to Tome's mod API (sdk/include/tome/tome.h)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-license.workspace = true
+license = "MIT-0"  # built into mods (sdk/LICENSE-MIT-0)
+# Not on crates.io (`tome` is taken there): mods use the SDK's copy by path.
+publish = false
 
 [lib]
 doctest = false

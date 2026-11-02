@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT-0
 /*
  * C++ helpers for Tome mods (C++17 or later), on top of the C API in
  * tome.h, which documents every function. Header-only.

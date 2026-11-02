@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // Chat commands typed in the in-game chat box ("/tome list", or a mod's

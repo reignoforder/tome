@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #include "tome_settings.h"
 
 #include "core/tome_settings.h"

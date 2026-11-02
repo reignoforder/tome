@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT-0
 //! The module's side of Tome's calls (`docs/wasm-mods.md`, "The module's
 //! contract"): the buffers Tome copies data into (`tome_buffer`), the
 //! callback table behind every registration (`tome_callback`,

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 /*
  * Shared by the hook-a and hook-b e2e fixtures: a fake engine string that
  * RCString::GetText reads like a real one ([[this + 8] + 0x1C]), and a

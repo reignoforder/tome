@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT-0
 use core::ffi::{CStr, c_char};
 use std::borrow::Cow;
 use std::ffi::CString;

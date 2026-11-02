@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """List a C++ class's vtables in game.dll using MSVC RTTI.
 
 usage: python3 -I tools/re/rtti.py <game.dll> <Class> [--base CFrame] [--slots N]

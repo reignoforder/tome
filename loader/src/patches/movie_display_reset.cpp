@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 /*
  * Movies under Wine (docs/known-bugs.md, "Under Wine";
  * docs/reverse-engineering.md, "Movies").

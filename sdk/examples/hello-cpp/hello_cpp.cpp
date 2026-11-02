@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /*
  * The hello example in C++, with tome/tome.hpp: logs each lifecycle step,
  * looks up a mapped game function, provides JASS natives (numbers, strings

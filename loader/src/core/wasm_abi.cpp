@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #include "wasm_abi.h"
 
 #include <tome/utf8.h>

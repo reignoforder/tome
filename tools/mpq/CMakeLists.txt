@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # tome-mpq: a small MPQ utility for tests and development (list, extract,
 # replace files in maps). Built on StormLib (MIT), fetched at configure time.
 include(FetchContent)

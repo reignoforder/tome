@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // Drives the real loader (tome_runtime: the code in tome.mix but DllMain) in

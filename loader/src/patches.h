@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // Built-in patches: Tome's own fixes for game bugs and vulnerabilities,

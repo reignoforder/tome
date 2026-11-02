@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Runs every test in a process of its own: the loader keeps its state in
 // globals (the mod manager, native slots, hooks), so a fresh process is the
 // only clean slate. Without arguments this program starts itself once per

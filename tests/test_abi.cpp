@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // tome.h is append-only: a field, once released, keeps its offset forever, or
 // mods built against an older header read the wrong one. These are the
 // offsets on i686 (the only target) as of API version 13. Adding a field at

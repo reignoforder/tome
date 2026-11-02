@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // What a WebAssembly module passes Tome's imports (docs/wasm-mods.md): any
 // pointer and length over any memory. The memory is a heap block of exactly
 // its size, so ASan catches a single byte read or written outside it. Then

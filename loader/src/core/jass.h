@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // JASS native declarations, as written in common.j or a mod's metadata:

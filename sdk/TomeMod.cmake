@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # Build helpers for mods (sdk/README.md). Included by Tome's own
 # sdk/CMakeLists.txt, and by mods built outside this repo:
 #

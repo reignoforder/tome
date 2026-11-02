@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // Validator for BLP1 texture files, the format Warcraft III's own loader
