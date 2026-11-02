@@ -15,8 +15,17 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # MinGW's default printf family is msvcrt's, which lacks C99 formats like %zu.
 add_compile_definitions(__USE_MINGW_ANSI_STDIO=1)
 
-# Where `cmake --build build --target deploy` copies tome.mix.
-set(TOME_GAME_DIR "${CMAKE_SOURCE_DIR}/WarCraft III" CACHE PATH "Warcraft III install directory")
+# The Warcraft III 1.27b files the tests read: input/ (input/README.md).
+# Nothing writes there. (Build folders made before input/ cached another one.)
+unset(TOME_GAME_DIR CACHE)
+set(TOME_GAME_DIR "${CMAKE_SOURCE_DIR}/input")
+
+# Where `cmake --build build --target deploy` copies tome.mix: a game folder
+# of your choice, given explicitly (empty: deploy only says so).
+set(TOME_INSTALL_DIR "" CACHE PATH "Warcraft III folder that the deploy target copies tome.mix into")
+if(TOME_INSTALL_DIR)
+    get_filename_component(TOME_INSTALL_DIR "${TOME_INSTALL_DIR}" ABSOLUTE BASE_DIR "${CMAKE_SOURCE_DIR}")
+endif()
 
 # Developer builds read the TOME_DEBUG_* environment variables (README,
 # "Environment variables"), which the tests need. TOME_DEBUG_APPROVE allows

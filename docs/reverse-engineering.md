@@ -1287,14 +1287,14 @@ and by a unit test against the local file.
 
 ## Methods and tools
 
-- **Disassembly:** `objdump -d -M intel --start-address=0x6f… --stop-address=0x6f… "WarCraft III/game.dll"`.
+- **Disassembly:** `objdump -d -M intel --start-address=0x6f… --stop-address=0x6f… input/game.dll`.
   For repeated searches, dump `.text` once to a scratch file and grep it.
-- **String → code:** `python3 -I tools/re/xrefs.py "WarCraft III/game.dll" CreditsButton`.
+- **String → code:** `python3 -I tools/re/xrefs.py input/game.dll CreditsButton`.
   Shows `push`/`mov ecx` uses and data tables. Strings used as FDF frame
   names lead straight to the code that looks those frames up.
-- **Class → vtable:** `python3 -I tools/re/rtti.py "WarCraft III/game.dll" CTextFrame --base CFrame`.
+- **Class → vtable:** `python3 -I tools/re/rtti.py input/game.dll CTextFrame --base CFrame`.
   Prints the overridden slots, which narrows down where a class's own code is.
-- **Byte signatures:** `python3 -I tools/re/signatures.py "WarCraft III/game.dll" mappings/1.27b.json [--write]`.
+- **Byte signatures:** `python3 -I tools/re/signatures.py input/game.dll mappings/1.27b.json [--write]`.
   Prints each function's signature (relocated bytes masked as `??`), compares
   it with the file and, with `--write`, fills in `bytes`. Exits non-zero if a
   stored signature differs.

@@ -364,8 +364,8 @@ Both are fixed by built-in patches:
   desktop's shape, scaled by Proton, was tried and dropped: Proton's
   scaling leaves a light line (one screen row) along the edge of Wine's
   video window (`wine_quartz_window`), wherever it is and whatever its
-  background. Checked on GE-Proton11-11 in Xvfb at 2560x1440 and 2844x1600
-  (the scale of 864x486 on 1440 lines): no light line in the desktop's
+  background. Checked on GE-Proton11-11 in Xvfb at two 16:9 desktop sizes
+  (one of them 864x486 scaled to 1440 lines): no light line in the desktop's
   mode, and the picture as smooth as in a scaled mode.
 - **Movies: washed out, grainy, purple blacks (fullscreen).** For a
   fullscreen movie, Movie::Play sets a display gamma ramp of

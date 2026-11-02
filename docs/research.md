@@ -761,7 +761,7 @@ Direct3D 11/Metal and 64-bit (1.31): 1.27b is a 32-bit binary. CASC and
 - Run the game under Wine (already installed) with `-window -opengl`. A
   `tome.log` plus `winedbg`/x32dbg (under Wine) covers runtime debugging.
 - RE tooling: Ghidra (not installed), plus the existing `objdump` for quick checks.
-- Never commit Blizzard files. `.gitignore` already excludes `WarCraft III/`.
+- Never commit Blizzard files. `.gitignore` already excludes `input/`, where the game's files go.
   Mappings (addresses and names) are fine to commit.
 
 Proposed layout:

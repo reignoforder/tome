@@ -3,7 +3,7 @@
 usage: python3 -I tools/re/mdx_info.py <model.mdx> [...]
 
 Extract the model first, e.g.:
-  wine build/tools/mpq/tome-mpq.exe extract "WarCraft III/War3x.mpq" \\
+  wine build/tools/mpq/tome-mpq.exe extract input/War3x.mpq \\
       'UI\\Glues\\SpriteLayers\\Expansion\\TopLeftPanel-Expansion.mdx' panel.mdx
 
 Sequence names are what SetAnimation's tag sets select, e.g. the tags

@@ -64,8 +64,8 @@ cmake -S . -B build -G Ninja \
 cmake --build build
 ```
 
-That's a release build. The tests need a developer build: add `-DTOME_DEV=ON`
-(see "Environment variables").
+That's a release build (CI builds one too). The e2e test needs a developer
+build: add `-DTOME_DEV=ON` (see "Environment variables").
 
 Outputs:
 
@@ -118,17 +118,16 @@ the mod when the file changes. `tome_package()` makes one when building
 An older install's `mods/` folder next to `war3.exe` is moved to `tome/mods/`
 on the first start, with each mod's `config/settings.json`.
 
-When the game folder is `./WarCraft III` (the default), this builds and copies
-`tome.mix` in one step:
+Copy `build/loader/tome.mix` into the game folder, or build and copy it in
+one step:
 
 ```sh
-make deploy          # or: cmake --build build --target deploy
+make deploy INSTALL_DIR=/path/to/your/game   # or: -DTOME_INSTALL_DIR=... and --target deploy
 ```
 
-Use `make deploy GAME_DIR=/path/to/Warcraft III` (or
-`-DTOME_GAME_DIR=...`) to point it somewhere else. Nothing else copies into
-your install: `make game` and the tests run the build from a folder of their
-own (see Testing).
+There's no default: nothing copies into a game folder unless you name it.
+`make game` and the tests run the build from a folder of their own and only
+read the game's files from `input/` (see Testing).
 
 Run the game (`wine war3.exe -window -opengl` on Linux). The main menu gets a
 **Mods** button, the window title shows `[Tome 0.1.0]`, and `tome/tome.log`
@@ -170,7 +169,7 @@ this one. It replaces the earlier `fps-unlock`.
 The `TOME_DEBUG_*` variables are read only by developer builds: configure
 with `-DTOME_DEV=ON` (`make` does; `make DEV=OFF` doesn't). Release builds
 ignore them, since `TOME_DEBUG_APPROVE` would let anything that sets the
-game's environment allow a mod's code. The tests need a developer build;
+game's environment allow a mod's code. The e2e test needs a developer build;
 the log's `Tome <version> starting` line says when it's one.
 
 | Variable | Effect |
@@ -192,13 +191,14 @@ make game                          # the build in the game, to try things (tools
 `make test` includes two deterministic suites that drive the real loader
 in a test process, each test in a process of its own: `tome_host_tests`
 against a fake game image (no game files), and `tome_game_tests` against the
-real `game.dll` loaded but never run (skipped without `GAME_DIR`). They take
+real `game.dll` loaded but never run (skipped without the game in `input/`). They take
 seconds and give the same result every run; see `docs/architecture.md`,
 "Testing".
 
-The end-to-end test needs a Warcraft III 1.27b folder: `./WarCraft III`, or
-`GAME_DIR=/path/to/it`. It only reads it. Each launch runs from a temporary
-folder of links to the install's files, with the build's `tome.mix`, a test
+The tests on `game.dll` and the end-to-end test need the files of a
+Warcraft III 1.27b install in `input/` (or `input` as a link to such a
+folder; `input/README.md`). They only read them. Each launch runs from a
+temporary folder of links to those files, with the build's `tome.mix`, a test
 map (made from one of your melee maps when `tome-mpq` is built) and its own
 `tome/`, `save/` and `replay/`. The game runs in a Wine prefix of the
 test's own, made once in `build/test-env/wine` with fixed settings (800x600,

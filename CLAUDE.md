@@ -17,20 +17,20 @@ tools/fuzz.sh [seconds] [target...]      # libFuzzer + ASan/UBSan on the core pa
 tools/gen-rust-bindings.sh               # after changing tome.h: regenerate sdk/rust/tome-sys (bindgen)
 tools/gen-wasm-consts.py                 # after changing tome.h's enums: regenerate the Wasm SDKs' constants (C and Rust)
 make sdk                                 # build/tome-sdk-<version>.zip, the SDK for mod makers
-make container-test / container-e2e      # the same in a podman/docker image (tools/container/)
-make deploy                              # copy tome.mix into GAME_DIR: only when asked to
+make container-test / container-e2e      # the same in a podman/docker image (tools/container/); CI runs container-test (.github/workflows/ci.yml)
+make deploy INSTALL_DIR=<game folder>    # copy tome.mix into a game folder (never input/): only when asked to
 ```
 
 The game for testing (`tools/test-env.sh`) runs from a folder of links to
-`GAME_DIR` (default `./WarCraft III`, only read) in a Wine prefix of its own
+`input/` (the game's files, only read: `input/README.md`) in a Wine prefix of its own
 (`build/test-env/wine`: 800x600, profile Tome). `HEADLESS=1` (the e2e
 default) puts it in its own Xvfb; `tools/game.sh` shows it on screen unless
 `HEADLESS=1`. Its folder is `build/test-env/game/` (`tools/game.sh dir`).
 
 ## Rules
 
-- **Never commit game files.** `WarCraft III/` is the local install and is
-  gitignored, along with game data and binary types. Don't describe where
+- **Never commit game files.** `input/` holds the game's files and is
+  gitignored (all but its README), along with game data and binary types. Don't describe where
   the game files came from in committed text.
 - Store **RVAs**, not absolute addresses (ASLR). Add every new address to
   `mappings/<build>.json` with its calling convention and signature, and

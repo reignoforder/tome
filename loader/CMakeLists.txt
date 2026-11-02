@@ -244,11 +244,23 @@ target_link_libraries(tome_runtime PUBLIC bcrypt version ole32 wamr)
 # Linking an object library adds its objects (and its definitions) to tome.mix.
 target_link_libraries(tome_loader PRIVATE tome_runtime)
 
-add_custom_target(deploy
-    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:tome_loader> "${TOME_GAME_DIR}/tome.mix"
-    DEPENDS tome_loader
-    COMMENT "Copying tome.mix to ${TOME_GAME_DIR}"
-)
+get_filename_component(_tome_install "${TOME_INSTALL_DIR}" REALPATH)
+get_filename_component(_tome_input "${TOME_GAME_DIR}" REALPATH)
+if(TOME_INSTALL_DIR AND NOT _tome_install STREQUAL _tome_input)
+    add_custom_target(deploy
+        COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:tome_loader> "${TOME_INSTALL_DIR}/tome.mix"
+        DEPENDS tome_loader
+        COMMENT "Copying tome.mix to ${TOME_INSTALL_DIR}"
+        VERBATIM  # paths like "Program Files (x86)": unquoted, ( breaks the shell
+    )
+else()
+    # input/ is only read (by the tests), so it's no place to deploy to.
+    add_custom_target(deploy
+        COMMAND ${CMAKE_COMMAND} -E echo "deploy: set TOME_INSTALL_DIR to a game folder other than input/ (make deploy INSTALL_DIR=...)"
+        COMMAND ${CMAKE_COMMAND} -E false
+        VERBATIM
+    )
+endif()
 
 # The loader without the game (src/testing/fake_game.h): a fake 1.27b image
 # and a temporary Tome folder, for Tome's host tests and for mod makers'

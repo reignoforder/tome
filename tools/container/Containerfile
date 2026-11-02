@@ -6,7 +6,7 @@
 #
 #   make container            build this image (tome-dev)
 #   make container-test       unit tests inside it
-#   make container-e2e        the e2e test inside it (GAME_DIR mounted read-only)
+#   make container-e2e        the e2e test inside it (input/ mounted read-only)
 FROM registry.fedoraproject.org/fedora:44
 
 RUN dnf install -y --setopt=install_weak_deps=False \

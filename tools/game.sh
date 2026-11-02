@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Developer helper: runs the build's tome.mix in the game under Wine, in a
-# test game folder (tools/test-env.sh), never in your own install.
+# test game folder (tools/test-env.sh), never in input/ itself.
 #
 #   tools/game.sh start [VAR=value ...] [-- game args]   restart the game (stops any running copy)
 #   tools/game.sh stop                                   stop the game
@@ -14,8 +14,8 @@
 #   tools/game.sh start "TOME_DEBUG_CLICKS=wait:Main menu set up@0;0.874,0.84@4000"
 #   tools/game.sh start -- -loadfile 'Maps\Test\test.w3m'
 #
-# The game folder is <build>/test-env/game: links to your install's files
-# (GAME_DIR, default ./WarCraft III) with the build's tome.mix, and its own
+# The game folder is <build>/test-env/game: links to the game's files in
+# input/ (input/README.md) with the build's tome.mix, and its own
 # tome/ (put mods to try in tome/mods/ there), Maps/, save/ and replay/.
 # BUILD picks the build folder (default ./build). HEADLESS=1 runs the game
 # in its own X server (Xvfb) instead of on your screen. TOME_HOME (a Windows

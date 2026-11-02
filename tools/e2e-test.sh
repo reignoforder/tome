@@ -3,16 +3,16 @@
 # mods, changes things while it runs, and checks tome.log for the expected
 # behavior.
 #
-# Nothing is written to your Warcraft III install or your Wine prefix: the
-# game runs from a temporary folder of links to the install's files, in a
+# Nothing is written to input/ (the game's files: input/README.md) or your
+# Wine prefix: the game runs from a temporary folder of links to them, in a
 # Wine prefix of the test's own, with TOME_HOME in a temporary folder
 # (tools/test-env.sh). If tome-mpq was built (-DTOME_BUILD_DEV_TOOLS=ON), a
-# test map made from one of the install's melee maps calls the JASS natives
+# test map made from one of the game's melee maps calls the JASS natives
 # of the hello mod, its C++ version (hello-cpp) and its Rust version
 # (hello-rs) if that was built (sdk/rust: cargo and its i686-pc-windows-gnu
 # target).
 #
-# Usage: tools/e2e-test.sh [build-dir] [game-dir]
+# Usage: tools/e2e-test.sh [build-dir]
 # The game is launched six times. By default it runs in its own X server
 # (Xvfb), off screen: it keeps the keyboard focus, and its clicks don't move
 # your mouse, so you can go on working. HEADLESS=0 shows it on your screen
@@ -25,13 +25,14 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD="$(realpath "${1:-${BUILD:-$ROOT/build}}")"
-[[ -n "${2:-}" ]] && GAME_DIR="$(realpath "$2")"
 HEADLESS="${HEADLESS:-1}"
 source "$ROOT/tools/test-env.sh"
 FIXTURES="$ROOT/tests/e2e/mods"
 MPQ_TOOL="$BUILD/tools/mpq/tome-mpq.exe"
 
 die() { echo "e2e: $*" >&2; exit 2; }
+# The game comes from input/ only (a second argument used to name it).
+[[ $# -le 1 ]] || die "usage: tools/e2e-test.sh [build-dir] (the game's files go in input/: input/README.md)"
 env_check
 [[ -f "$BUILD/loader/tome.mix" ]] || die "build first: cmake --build $BUILD"
 grep -qiE '^TOME_DEV:BOOL=(ON|1|TRUE|YES|Y)$' "$BUILD/CMakeCache.txt" 2>/dev/null \
@@ -44,7 +45,7 @@ env_running && die "the test's Warcraft III is still running (tools/game.sh stop
 env_prefix
 
 WORK="$(mktemp -d)"          # scratch files; deleted at the end
-GAME="$WORK/game"            # the game folder: links to GAME_DIR's files
+GAME="$WORK/game"            # the game folder: links to input/'s files
 TEST_MAP_DIR="$GAME/Maps/TomeE2E"
 HOME_DIR="$WORK/home"         # TOME_HOME: tome/ (with tome/mods/) for the test
 MODS="$HOME_DIR/tome/mods"
@@ -146,7 +147,7 @@ MAP_ARG=()
 if [[ -f "$MPQ_TOOL" ]]; then
     SOURCE_MAP="$(find "$GAME/Maps" -maxdepth 1 -name '*.w3m' | sort | head -n 1)"
     [[ -n "$SOURCE_MAP" ]] || die "no melee map found in $GAME/Maps"
-    # A Maps/TomeE2E in the install (left by an older version of this test)
+    # A Maps/TomeE2E in input/ (left by an older version of this test)
     # is linked here: replace the link, or the map would be written there.
     [[ -L "$TEST_MAP_DIR" ]] && rm "$TEST_MAP_DIR"
     mkdir -p "$TEST_MAP_DIR"

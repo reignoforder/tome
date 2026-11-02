@@ -1,9 +1,9 @@
 # Sourced by tools/game.sh and tools/e2e-test.sh: the place the game runs
 # in for testing, kept apart from your own install and desktop.
 #
-# - Game folder: a folder of links to the install's files (GAME_DIR,
-#   default ./WarCraft III, which is only ever read), with its own tome.mix,
-#   tome/, Maps/, save/ and replay/. Nothing is copied into the install.
+# - Game folder: a folder of links to the game's files in input/ (which is
+#   only ever read; input/README.md), with its own tome.mix, tome/, Maps/,
+#   save/ and replay/. Nothing is copied into input/.
 # - Wine prefix: its own (TEST_PREFIX, default <build>/test-env/wine), made
 #   on first use with fixed settings (800x600, a profile called Tome, no
 #   intro movie), so the game looks the same on every machine and
@@ -24,7 +24,7 @@
 # Wine's ALSA driver (SOUND=0: wine-alsa).
 
 # BUILD and ROOT are set by the script that sources this.
-GAME_DIR="${GAME_DIR:-$ROOT/WarCraft III}"
+GAME_DIR="$ROOT/input"
 TEST_PREFIX="$(realpath -m "${TEST_PREFIX:-$BUILD/test-env/wine}")"  # Wine wants it absolute
 HEADLESS="${HEADLESS:-0}"
 SOUND="${SOUND:-$([[ "$HEADLESS" == 1 ]] && echo 0 || echo 1)}"
@@ -35,12 +35,12 @@ TEST_WIDTH=800 TEST_HEIGHT=600
 
 env_die() { echo "test-env: $*" >&2; exit 2; }
 
-# env_check: the tools and the install are there.
+# env_check: the tools and the game are there.
 env_check() {
     command -v wine >/dev/null || env_die "wine not found"
     command -v winepath >/dev/null || env_die "winepath not found"
     [[ "$HEADLESS" != 1 ]] || command -v Xvfb >/dev/null || env_die "HEADLESS=1 needs Xvfb"
-    [[ -f "$GAME_DIR/war3.exe" ]] || env_die "no war3.exe in $GAME_DIR (set GAME_DIR to your Warcraft III 1.27b folder)"
+    [[ -f "$GAME_DIR/war3.exe" ]] || env_die "no war3.exe in $GAME_DIR (put a Warcraft III 1.27b folder's files there: input/README.md)"
 }
 
 # What the prefix was made with: Wine copies its DLLs into a prefix when it
@@ -79,20 +79,24 @@ env_prefix() {
 }
 
 # env_link <target> <link>: (re)points a link there, also one left dangling
-# or pointing into another GAME_DIR; never replaces a real file or folder.
+# or pointing into another game folder; never replaces a real file or folder.
 env_link() {
     [[ -L "$2" || ! -e "$2" ]] && ln -sfn "$1" "$2"
 }
 
 # env_game <folder> <tome.mix>: makes (or refreshes) a game folder there.
-# Links to everything in GAME_DIR except what the game or Tome writes.
+# Links to everything in input/ except what the game or Tome writes.
 env_game() {
     local dir="$1" mix="$2" entry name
     mkdir -p "$dir/Maps" "$dir/save" "$dir/replay"
     for entry in "$GAME_DIR"/*; do
         name="$(basename "$entry")"
         case "${name,,}" in
-        tome | tome.mix | maps | save | replay | errors | logs | glcache | bncache.dat) continue ;;
+        # mods/: an old layout's, which Tome moves to tome/mods and writes in.
+        # A link to one of these left by an older version of this goes.
+        tome | tome.mix | mods | maps | save | replay | screenshots | errors | logs | glcache | bncache.dat)
+            [[ -L "$dir/$name" ]] && rm "$dir/$name"
+            continue ;;
         esac
         env_link "$entry" "$dir/$name"
     done

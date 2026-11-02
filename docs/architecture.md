@@ -210,7 +210,7 @@ logs each error with the symbol's name.
   every import's slot in the import directory (the names come from the
   lookup table, which the loader leaves alone), before anything is patched. A mismatch logs the symbol and leaves the game
   unmodified. A unit test runs the same check against the local
-  `WarCraft III/game.dll` (skipped when there's none).
+  `input/game.dll` (skipped when there's none).
 - `"module"` (optional, lowercase, default `"game.dll"`) makes a file
   describe another DLL Tome patches: `mappings/blizzard.ax.json` (the
   movies' decoder). Such a file is kept apart from the game builds (never
@@ -1521,10 +1521,10 @@ API version 10: `popup`, `popup_close`, `restart_game`.
   epilogue of the test's), so `/tome` commands, a mod's command and the
   lines that go on to the game all run through Tome's real hook.
 - `tome_game_tests` (`tests/game/`): the same harness against the real
-  `game.dll` from `TOME_GAME_DIR`, loaded into the test process (where
+  `game.dll` from `input/` (`TOME_GAME_DIR`), loaded into the test process (where
   Windows puts it, so the RVAs are exercised) but never run; each test is
   skipped without it. `Mss32.dll` doesn't load `.mix` files until the game
-  opens its sound, so a `tome.mix` deployed in the install stays out (the
+  opens its sound, so a `tome.mix` in the game folder stays out (the
   test checks). It checks the build's identity and signatures on the loaded
   image, applies everything `start_bootstrap` patches from DllMain (natives,
   every built-in patch, the sound wait, the mod menu, events, the
@@ -1577,7 +1577,7 @@ API version 10: `popup`, `popup_close`, `restart_game`.
   overflows only 32-bit `size_t` arithmetic would hit don't show up.
 - `tools/e2e-test.sh` (`make e2e`): six real game launches with a temporary `TOME_HOME`.
   The game runs as `tools/test-env.sh` sets it up, the same on every
-  machine: a temporary game folder of symbolic links to `GAME_DIR`'s files
+  machine: a temporary game folder of symbolic links to `input/`'s files
   (which is only read) with the build's `tome.mix` and its own `Maps/`,
   `save/`, `replay/`; a Wine prefix of the test's own (`build/test-env/wine`,
   made once: 800x600, a profile called Tome, the intro movie seen), so
