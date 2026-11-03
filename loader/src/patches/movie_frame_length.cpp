@@ -141,7 +141,7 @@ void TOME_CALL on_set_display_mode(tome_mod*, tome_hook_call*, void*) {
     }
 }
 
-bool install_movie_frame_length(uintptr_t, const BuildMappings&, std::string& report) {
+bool install_movie_frame_length(uintptr_t, const BuildMappings&, const Variant&, std::string& report) {
     std::string error;
     hooks::Target* set_mode = hooks::find_or_install("Movie::SetDisplayMode", error);
     if (!set_mode) {
@@ -163,7 +163,7 @@ const char* const kSymbols[] = {"Movie::SetDisplayMode", nullptr};
 extern const Patch kMovieFrameLength = {
     "movie-frame-length",
     "keeps movies (campaign cinematics) from crashing Wine's video renderer with frames longer than its surface",
-    nullptr,  // any build that maps the symbols below
+    {},  // the same on every build
     kSymbols,
     nullptr,  // nothing to protect: a mod can't reopen a hole through it
     only_under_wine,

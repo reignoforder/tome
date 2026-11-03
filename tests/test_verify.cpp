@@ -3,6 +3,7 @@
 #include "core/mappings.h"
 #include "core/pe.h"
 #include "core/verify.h"
+#include "game_dir.h"
 #include "test.h"
 
 #include <cstdio>
@@ -179,8 +180,8 @@ TEST(pe_map_image_places_sections) {
 // (game files are never committed, so this is skipped elsewhere).
 TEST(verify_embedded_mappings_against_local_game) {
     std::vector<uint8_t> file;
-    if (!read_file(TOME_TEST_GAME_DIR "/game.dll", file)) {
-        std::printf("  skipped: no %s/game.dll\n", TOME_TEST_GAME_DIR);
+    if (!read_file((test::game_dir() + "/game.dll").c_str(), file)) {
+        std::printf("  skipped: no %s/game.dll\n", test::game_dir().c_str());
         return;
     }
     pe::Image image;
@@ -205,8 +206,8 @@ TEST(verify_embedded_mappings_against_local_game) {
 // mappings/blizzard.ax.json against the local install's blizzard.ax.
 TEST(verify_blizzard_ax_mapping_against_local_game) {
     std::vector<uint8_t> file;
-    if (!read_file(TOME_TEST_GAME_DIR "/blizzard.ax", file)) {
-        std::printf("  skipped: no %s/blizzard.ax\n", TOME_TEST_GAME_DIR);
+    if (!read_file((test::game_dir() + "/blizzard.ax").c_str(), file)) {
+        std::printf("  skipped: no %s/blizzard.ax\n", test::game_dir().c_str());
         return;
     }
     pe::Image image;

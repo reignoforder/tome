@@ -1138,7 +1138,7 @@
     "PreloadGen::End": {
       "kind": "function", "rva": "0x00230170", "conv": "thiscall", "sig": "void(void* gen, const char* filename)",
       "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 81 ec 38 06 00 00 a1 ?? ?? ?? ?? 33 c5 89 45 f0 53 56 57 50 8d 45 f4 64 a3 00 00 00 00 89 8d",
-      "doc": "PreloadGenEnd's body (the native at 0x20FB30 passes the generator from 0x231DF0 and the name). Copies the name with SStrCopy(buf, name, 260), adds .pld if it has no extension, refuses \\..\\, \\.. and ..\\ itself, and builds <game.dll folder>\\CustomMapData\\<name> with strncpy into 260-byte stack buffers, which it leaves unterminated when the whole path reaches 260. Names up to 259 characters run (checked in game); one of ~4000 ends in __report_gsfailure (docs/known-bugs.md, Over-long path). Not hooked: the path sanitizer refuses such names at the native. ret 4."
+      "doc": "PreloadGenEnd's body (the native at 0x20FB30 passes the generator from 0x231DF0 and the name). Copies the name with SStrCopy(buf, name, 260), adds .pld if it has no extension, refuses \\..\\, \\.. and ..\\ itself, and builds <war3.exe folder (GetModuleFileNameA(NULL))>\\CustomMapData\\<name> with strncpy into 260-byte stack buffers, which it leaves unterminated when the whole path reaches 260. Names up to 259 characters run (checked in game); one of ~4000 ends in __report_gsfailure (docs/known-bugs.md, Over-long path). Not hooked: the path sanitizer refuses such names at the native. ret 4."
     },
     "__report_gsfailure": {
       "kind": "function", "rva": "0x0078f443", "conv": "cdecl", "sig": "void(void)",

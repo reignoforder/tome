@@ -176,6 +176,7 @@ bool FakeGame::create() {
                                PAGE_EXECUTE_READWRITE);
     if (!image) return false;
     base_ = reinterpret_cast<uintptr_t>(image);
+    set_edition(Edition::FrozenThrone);
 
     // Every mapped function's checked bytes, so Tome's hooks install
     // (events::install hooks dozens); none of them runs but these:
@@ -276,7 +277,12 @@ GameBuild FakeGame::build() const {
     out.pe_timestamp = mappings_->data->pe_timestamp;
     out.sha256 = mappings_->data->sha256;
     out.known = mappings_;
+    out.edition = read_edition(base_, mappings_);
     return out;
+}
+
+void FakeGame::set_edition(Edition edition) const {
+    *reinterpret_cast<int32_t*>(base_ + mappings_->game.expansion) = static_cast<int32_t>(edition);
 }
 
 uintptr_t FakeGame::address(const char* symbol) const {

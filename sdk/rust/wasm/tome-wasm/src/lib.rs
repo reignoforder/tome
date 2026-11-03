@@ -183,12 +183,15 @@ pub struct GameInfo {
     pub build_name: String,
     /// e.g. "1.27.1.7085"
     pub file_version: String,
+    /// `TOME_EDITION_REIGN_OF_CHAOS`, `TOME_EDITION_FROZEN_THRONE`, or
+    /// `TOME_EDITION_UNKNOWN` (also from a Tome older than API version 15).
+    pub edition: i32,
 }
 
 pub fn game_info() -> GameInfo {
-    // [size][build_name][file_version], the strings after it in the block.
+    // [size][build_name][file_version][edition], the strings after it in the block.
     let Some(block) = read_out(256, |out, cap| unsafe { raw::game_info(out, cap) }) else {
-        return GameInfo::default();
+        return GameInfo { edition: consts::TOME_EDITION_UNKNOWN, ..GameInfo::default() };
     };
     #[repr(C)]
     #[derive(Clone, Copy, Default)]
@@ -196,13 +199,18 @@ pub fn game_info() -> GameInfo {
         size: u32,
         build_name: u32,
         file_version: u32,
+        edition: i32,
     }
-    let raw: Raw = events::read_struct(&block);
+    let mut raw: Raw = events::read_struct(&block);
+    if (raw.size as usize) < core::mem::size_of::<Raw>() {
+        raw.edition = consts::TOME_EDITION_UNKNOWN;
+    }
     // The pointers are addresses in `block`, which is alive here.
     unsafe {
         GameInfo {
             build_name: events::text(raw.build_name).into_owned(),
             file_version: events::text(raw.file_version).into_owned(),
+            edition: raw.edition,
         }
     }
 }

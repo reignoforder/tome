@@ -40,6 +40,7 @@ struct Layout {
     uint32_t stack_slots = 0;   // 32-bit stack slots of the fixed arguments
     uint32_t pop_bytes = 0;     // what the function pops on return (0 for cdecl and variadic)
     Result result = Result::None;
+    bool wide_result = false;   // Int in edx:eax (64-bit); else edx goes back to the caller as it came
     bool variadic = false;      // "..." last: always caller-cleaned, everything on the stack
 };
 

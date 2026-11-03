@@ -237,8 +237,8 @@ DWORD bootstrap() {
                    "the game will run unmodified.");
         return 1;
     }
-    TOME_INFO("Recognized Warcraft III %s (%zu mapped symbols)", g_build.known->data->name.c_str(),
-              g_build.known->data->symbols.size());
+    TOME_INFO("Recognized Warcraft III %s, %s (%zu mapped symbols)", g_build.known->data->name.c_str(),
+              edition_name(g_build.edition), g_build.known->data->symbols.size());
 
     // Checked before anything is patched: in DllMain if game.dll was already
     // loaded, otherwise here, before the late hooks.
@@ -403,6 +403,7 @@ void start_bootstrap(HMODULE self) {
                 GameBuild early;
                 early.known = g_early_build;
                 early.file_version = g_early_build->data->file_version;
+                early.edition = read_edition(reinterpret_cast<uintptr_t>(game), g_early_build);
                 mod_manager().mount_startup_assets(g_paths, early, g_assets_report);
             }
         }

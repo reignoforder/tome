@@ -275,6 +275,7 @@ void ModManager::read_settings_schema(Installed& mod) const {
 void ModManager::declare_natives(std::vector<Installed>& installed) const {
     for (Installed& mod : installed) {
         if (!mod.valid || !mod.meta.game.matches(game_version_)) continue;
+        if (!edition_matches(mod.meta.edition, build_.edition)) continue;
         for (const std::string& decl : mod.meta.natives) {
             std::string error;
             if (!natives::declare(mod.meta.id, decl, error)) {
@@ -721,7 +722,7 @@ void ModManager::mount_startup_assets(const Paths& paths, const GameBuild& build
         inputs.push_back({&mod.meta, wanted_and_allowed(state, mod)});
         input_mods.push_back(&mod);
     }
-    ResolveResult resolved = resolve(inputs, {tome_version_, game_version_});
+    ResolveResult resolved = resolve(inputs, {tome_version_, game_version_, build_.edition});
     std::vector<const Installed*> running;
     for (size_t i : resolved.load_order) running.push_back(input_mods[i]);
     report = apply_assets(running, assets::Moment::Startup);
@@ -981,7 +982,7 @@ std::vector<std::string> ModManager::set_enabled_locked(const std::string& id, b
             inputs.push_back({&mod.meta, wanted_and_allowed(state, mod)});
         }
         if (target != SIZE_MAX) {
-            for (size_t i : dependents_of(inputs, {tome_version_, game_version_}, target)) {
+            for (size_t i : dependents_of(inputs, {tome_version_, game_version_, build_.edition}, target)) {
                 ids.push_back(inputs[i].meta->id);
                 TOME_INFO("%s: disabled, since it depends on %s", ids.back().c_str(), id.c_str());
             }
@@ -1444,7 +1445,7 @@ void ModManager::refresh_locked(std::vector<Installed> installed, assets::Moment
             inputs[k].user_enabled = false;
         }
     }
-    ResolveResult resolved = resolve(inputs, {tome_version_, game_version_});
+    ResolveResult resolved = resolve(inputs, {tome_version_, game_version_, build_.edition});
     if (!waiting_inputs.empty()) {
         for (size_t k : waiting_dependents(inputs, resolved, waiting_inputs)) waiting.insert(inputs[k].meta->id);
     }

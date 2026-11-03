@@ -2,8 +2,12 @@
 # tome-mpq on a copy of the game's first melee map (the e2e test's map is
 # built the same way): list, extract, put, extract again, and its errors.
 # cmake -DMPQ=<tome-mpq.exe> -DWINE=<wine or empty> -DGAME=<game folder> -DWORK=<folder> -P test_mpq.cmake
+# TOME_GAME_DIR in the environment (`make test <version>`) overrides GAME.
 # Says "skipped: no melee map" (SKIP_REGULAR_EXPRESSION) without a map.
 # CMake 3.20 (the project's minimum): no cmake_language(EXIT) or file(COPY_FILE).
+if(DEFINED ENV{TOME_GAME_DIR} AND NOT "$ENV{TOME_GAME_DIR}" STREQUAL "")
+    set(GAME "$ENV{TOME_GAME_DIR}")
+endif()
 file(GLOB maps "${GAME}/Maps/*.w3m")
 if(NOT maps)
     message("skipped: no melee map in ${GAME}/Maps")

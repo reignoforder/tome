@@ -28,6 +28,7 @@ namespace {
 std::unique_ptr<tome::testing::Home> g_home;
 FakeGame g_game;
 bool g_started = false;
+tome::Edition g_edition = tome::Edition::FrozenThrone;  // tome_test_set_edition
 bool g_stopped = false;
 size_t g_log_from = 0;     // tome_test_clear_log: kept lines before this are forgotten
 std::string g_text;        // the string the last call returned
@@ -89,12 +90,23 @@ const char* TOME_CALL tome_test_folder(void) {
     return keep(tome::narrow(home().paths().home_dir));
 }
 
+int TOME_CALL tome_test_set_edition(int32_t edition) {
+    if (g_started || (edition != TOME_EDITION_FROZEN_THRONE && edition != TOME_EDITION_REIGN_OF_CHAOS)) {
+        std::printf("  tome_test_set_edition(%d): %s\n", static_cast<int>(edition),
+                    g_started ? "set it before tome_test_start" : "not an edition");
+        return 0;
+    }
+    g_edition = static_cast<tome::Edition>(edition);
+    return 1;
+}
+
 int TOME_CALL tome_test_start(void) {
     if (g_started) return 1;
     if (!g_game.create()) {
         std::printf("  tome_test_start: couldn't lay out the fake game\n");
         return 0;
     }
+    g_game.set_edition(g_edition);
     tome::testing::StartOptions options;
     options.events = true;
     options.fake_storm = true;

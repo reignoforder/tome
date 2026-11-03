@@ -211,7 +211,7 @@ logs each error with the symbol's name.
   every import's slot in the import directory (the names come from the
   lookup table, which the loader leaves alone), before anything is patched. A mismatch logs the symbol and leaves the game
   unmodified. A unit test runs the same check against the local
-  `input/game.dll` (skipped when there's none).
+  `input/<version>/game.dll` (skipped when there's none).
 - `"module"` (optional, lowercase, default `"game.dll"`) makes a file
   describe another DLL Tome patches: `mappings/blizzard.ax.json` (the
   movies' decoder). Such a file is kept apart from the game builds (never
@@ -247,6 +247,19 @@ logs each error with the symbol's name.
   mod's `config/settings.json` to `config/<id>.json` and the rest of its
   `config/` to `config/<id>/`. It never overwrites; what it did is logged
   as `Layout:` lines.
+- **Editions.** One game.dll runs Reign of Chaos and The Frozen Throne;
+  `war3.exe -classic` (what `Warcraft III.exe` starts) is Reign of Chaos.
+  The game sets `Game.expansion` (0/1, -1 before) while it opens its
+  archives, before Mss32 loads `tome.mix`; `read_edition` (game_build.cpp)
+  reads it into `GameBuild.edition`, in DllMain for the startup assets and
+  again on the bootstrap thread, and logs it with the build. A mod's
+  `"edition"` (`roc`/`tft`, `core/edition.h`) makes the resolver treat it as
+  `IncompatibleGame` in the other game ("is for Reign of Chaos, this is The
+  Frozen Throne"); without it the mod runs in both. If the value isn't set
+  yet (Tome attached before game.dll), every mod counts as fitting. Mods read
+  it in `tome_game_info.edition` (API version 15). `tome-check` runs a mod
+  in its own edition (`--edition` to choose); the e2e test runs either one
+  (`EDITION=roc`, `make e2e roc`).
 - State: `<home>/tome/state.json` (`{"schema":3,"mods":{"id":{"enabled":bool,
   "approved":"<sha256>","approved_from":"<folder>","approved_key":"<base64>"}}}`,
   the key only for a signed mod), parsed and written by
@@ -781,18 +794,19 @@ once at startup. Unlike mods they aren't discovered, listed, toggled or
 removed, so a fix like the JASS "memhack" typecast is always in force — the
 reason to make a fix a patch rather than ship it as a mod.
 
-- **A patch** is a `patches::Patch`: a name, a one-line summary, an optional
-  `builds` allowlist (build names from `mappings/<build>.json`), the mapping
-  `symbols` it needs, an optional `needed(report)` check of where the game
-  runs (the Wine-only fixes; a patch that isn't needed is counted and logged
-  as skipped, not applied), and an `install(base, build, report)`. Each lives in its
+- **A patch** is a `patches::Patch`: a name, a one-line summary, its
+  `variants` (below), the mapping `symbols` it needs, an optional
+  `needed(report)` check of where the game runs (the Wine-only fixes; a
+  patch that isn't needed is counted and logged as skipped, not applied),
+  and an `install(base, build, variant, report)`. Each lives in its
   own file under `patches/` and is listed in `patches.cpp`'s `kAll` table
   (an `extern const Patch`, so the registry references it across translation
   units without static-initializer ordering). A patch installs through the
   **hook manager** (`hooks::find_or_install` + `hooks::add`) with no mod and
   no gate, exactly like Tome's event handlers, at the highest BEFORE / lowest
   AFTER priority so it wraps mods' handlers.
-- **Mods can't disable a patch.** A patch lists the functions it `reserve`s;
+- **Mods can't disable a patch.** A patch lists the functions it `reserve`s
+  (and each variant those only it hooks, e.g. memhack-guard's constructor);
   `patches::install` calls `hooks::reserve(name)` for each once the patch is
   live, and the mod-facing `hook`/`unhook` API then refuses those names with
   `TOME_ERR_NOT_OWNER`. So a mod can't drop the patch's handlers or slip in one
@@ -805,14 +819,25 @@ reason to make a fix a patch rather than ship it as a mod.
   to interfere.
 - **Version targeting is capability gating, not a version string.** The patch
   manager skips a patch unless the running build maps every symbol in
-  `symbols` (and, if `builds` is set, is in that list). Those symbols are the
+  `symbols` and its variant's. Those symbols are the
   same ones the mapping database already verifies against the loaded `game.dll`
   by byte signature at startup, and the hook re-checks the target bytes before
   patching. So a patch runs only where its functions are present and match,
   and automatically covers any later build whose mapping defines the same
-  symbols — no per-build copy of the patch needed. A patch whose logic truly
-  differs between builds would split into one file per build selected by the
-  `builds` allowlist; none does yet.
+  symbols — no per-build copy of the patch needed.
+- **Variants: what differs per build stays with the patch.** A
+  `patches::Variant` names builds (`mappings/<build>.json` "name"), the
+  extra symbols the patch needs there, and a pointer to the patch's own
+  struct of what it does differently (`params`), or a `skip` reason when the
+  patch isn't for those builds. The manager picks the variant naming the
+  running build, else the default (no builds); without one the patch is
+  skipped as "not for <build>", and a `skip` variant logs "not for <build>:
+  <reason>". `install` gets the chosen variant. Today: memhack-guard's
+  constructor (`JassLocalVarDesc::ctor`, or on 1.26a the shared
+  `JassVarDesc::ctor` with the kind as an argument), blp-guard's header-copy
+  site (1.27b's 7 bytes, 1.26a's 9 with a `mov edi,eax` it keeps), and
+  ambient-sound's 1.26a skip (that build still makes the MIDI sound). A
+  patch with no variants gets one that adds nothing.
 - **When:** `patches::install` runs from DllMain right after
   `natives::install_hooks` (bootstrap.cpp), so the fixes are in place before
   the game compiles any map script. It doesn't depend on Tome's folders or on
@@ -974,10 +999,13 @@ reason to make a fix a patch rather than ship it as a mod.
   `path_guard::is_unsafe` rejects (absolute, drive or NTFS stream `:`,
   UNC/rooted, any `..` component, a reserved DOS device name, a name over
   `kMaxPathLen` (259, `MAX_PATH` less its NUL: the game would truncate a
-  longer one, and one of ~4000 characters crashes `PreloadGenEnd`; not for
-  `Preload`, whose argument maps also use as data); empty,
+  longer one, and one of ~4000 characters crashes `PreloadGenEnd`); empty,
   for the writes), skips the call and returns 0 (nothing / false / 0 / a null
-  handle). One template wrapper per entry of a table of name, argument count
+  handle). `Preload` is never refused (maps use its argument as data, which
+  `PreloadGenEnd` writes out); an argument that isn't a safe path instead
+  makes it refuse the natives that open the preload list's files
+  (`PreloadStart`, `PreloadEnd`, `PreloadEndEx`, `PreloadRefresh`) until
+  `PreloadGenClear` empties the list. One template wrapper per entry of a table of name, argument count
   and path arguments, so covering another native is one table line.
   `BlzLoadTOCFile` checks its TOC path and the FDF paths listed in it
   (`path_guard::toc_is_unsafe`).
@@ -1161,7 +1189,7 @@ API version 4 (`hook`, `unhook`, `hook_call_next` in `tome.h`).
   through the import, by its thunk or by `call [slot]`, then runs the
   chain; other DLLs' imports are untouched. The slot is checked against the
   import directory at startup (above).
-- **Calls:** `tome_hook_entry` (asm) pushes ecx/edx and calls
+- **Calls:** `tome_hook_entry` (asm) pushes eax/edx/ecx and calls
   `tome_hook_dispatch` with a pointer to them, the target, the return
   address and the stack arguments, plus 24 bytes for its answer. The
   dispatcher copies the arguments (declaration order) into an array, runs
@@ -1170,10 +1198,19 @@ API version 4 (`hook`, `unhook`, `hook_call_next` in `tome.h`).
   dword`/`fld qword`), sets eax/edx and returns, popping the stack arguments
   for callee-cleaned conventions (`ret N`, N from the layout). The original
   runs through `tome_hook_invoke` (asm), which pushes the possibly changed
-  arguments, sets ecx/edx, calls the trampoline, and stores eax, edx and
+  arguments, sets eax/ecx/edx, calls the trampoline, and stores eax, edx and
   (popped, so the x87 stack stays balanced) st(0); esp is restored from
   ebp, so the callee's convention doesn't matter. Registers no parameter
-  uses pass through unchanged.
+  uses pass through unchanged. The caller gets its ecx and edx back as it
+  passed them (edx stays the result's high half for a 64-bit result):
+  1.26a's compiler keeps a value in ecx across a call to a leaf function
+  that doesn't touch it (callers of RCString::GetText), and a hook that
+  handed back the handlers' ecx crashed the game
+  (`hook_runtime_keeps_the_callers_ecx_and_edx`). The caller's eax goes into
+  the original, so a void function that leaves it alone still does when
+  hooked, and a constructor declared void still returns `this`; a void
+  function whose original the handlers skip gives back the caller's eax
+  (`hook_runtime_passes_the_callers_eax_through`).
 - **Chain order** (`core/hooks.cpp`, `run`): BEFORE handlers, then the
   REPLACE handlers nested (each calls `hook_call_next` for the rest; the
   last one's next is the original), then AFTER handlers. Within a phase,
@@ -1541,7 +1578,8 @@ API version 10: `popup`, `popup_close`, `restart_game`.
   epilogue of the test's), so `/tome` commands, a mod's command and the
   lines that go on to the game all run through Tome's real hook.
 - `tome_game_tests` (`tests/game/`): the same harness against the real
-  `game.dll` from `input/` (`TOME_GAME_DIR`), loaded into the test process (where
+  `game.dll` from `input/<version>/` (`TOME_GAME_DIR`, set by `make test <version>`;
+  `tests/game_dir.h`), loaded into the test process (where
   Windows puts it, so the RVAs are exercised) but never run; each test is
   skipped without it. `Mss32.dll` doesn't load `.mix` files until the game
   opens its sound, so a `tome.mix` in the game folder stays out (the
@@ -1597,8 +1635,8 @@ API version 10: `popup`, `popup_close`, `restart_game`.
   overflows only 32-bit `size_t` arithmetic would hit don't show up.
 - `tools/e2e-test.sh` (`make e2e`): six real game launches with a temporary `TOME_HOME`.
   The game runs as `tools/test-env.sh` sets it up, the same on every
-  machine: a temporary game folder of symbolic links to `input/`'s files
-  (which is only read) with the build's `tome.mix` and its own `Maps/`,
+  machine: a temporary game folder of symbolic links to the files of
+  `input/<version>/` (`GAME_VERSION`, default 1.27b; only read) with the build's `tome.mix` and its own `Maps/`,
   `save/`, `replay/`; a Wine prefix of the test's own (`build/test-env/wine`,
   made once: 800x600, a profile called Tome, the intro movie seen), so
   neither the user's prefix nor their settings matter; and, with

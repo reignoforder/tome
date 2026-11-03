@@ -312,7 +312,9 @@ std::string script_spec() {
 // movie, and its caller calls it again after (the movie's window is gone by
 // then). After each call a thread waits for a movie's window, another
 // visible top-level window of this process, and skips the movie with Esc
-// there; after a movie it finds none and gives up. Not counting the calls:
+// there (a posted key, then a real one if the window ignored it, only while
+// that window or one of its thread's has the focus); after a movie it finds
+// none and gives up. Not counting the calls:
 // a hook installed during a movie would have counted them the wrong way round.
 HWND g_game_window = nullptr;
 constexpr DWORD kMovieWindowWaitMs = 10000;  // a watchdog
@@ -325,14 +327,42 @@ BOOL CALLBACK find_movie_window(HWND w, LPARAM out) {
     return FALSE;
 }
 
+// True if the window with the focus is `movie`, or another visible window
+// of the thread that owns it (DirectShow's video windows share one), so a
+// real Esc goes to the movie and not to some other window of this process.
+bool movie_has_focus(HWND movie) {
+    HWND focused = GetForegroundWindow();
+    if (!focused || focused == g_game_window || !IsWindowVisible(focused)) return false;
+    if (focused == movie) return true;
+    DWORD focused_pid = 0, movie_pid = 0;
+    const DWORD focused_thread = GetWindowThreadProcessId(focused, &focused_pid);
+    const DWORD movie_thread = GetWindowThreadProcessId(movie, &movie_pid);
+    return focused_pid == GetCurrentProcessId() && movie_pid == focused_pid && focused_thread == movie_thread;
+}
+
 DWORD WINAPI skip_movie_thread(LPVOID) {
+    DWORD posted_at = 0;
+    bool posted = false;
     for (DWORD waited = 0; waited < kMovieWindowWaitMs; waited += 50) {
         HWND movie = nullptr;
         EnumWindows(find_movie_window, reinterpret_cast<LPARAM>(&movie));
-        if (movie) {
+        if (!movie) {
+            if (posted) return 0;  // the movie is over
+        } else if (!posted) {
             TOME_INFO("Debug: skipping the movie (Esc)");
             PostMessageW(movie, WM_KEYDOWN, VK_ESCAPE, 0);
-            return 0;
+            posted = true;
+            posted_at = waited;
+        } else if (waited - posted_at >= 1000) {
+            // 1.26a's movie window is DirectShow's, which ignores a posted
+            // key: a real Esc once a movie window has the focus, as a player
+            // would press it.
+            if (movie_has_focus(movie)) {
+                TOME_INFO("Debug: the movie is still on; pressing Esc");
+                keybd_event(VK_ESCAPE, 0, 0, 0);
+                keybd_event(VK_ESCAPE, 0, KEYEVENTF_KEYUP, 0);
+                return 0;
+            }
         }
         Sleep(50);
     }

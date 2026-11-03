@@ -158,6 +158,17 @@ pub struct GameInfo {
     pub file_version: &'static str,
     /// Where game.dll is loaded; add RVAs to it.
     pub game_base: usize,
+    /// Reign of Chaos or The Frozen Throne (API version 15; `Unknown` before).
+    pub edition: Edition,
+}
+
+/// Which game game.dll runs as (`tome_edition`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Edition {
+    /// The game hadn't decided yet, or a Tome older than API version 15.
+    Unknown,
+    ReignOfChaos,
+    FrozenThrone,
 }
 
 /// An entry of the mapping database for the running build (`tome_symbol`).
@@ -265,16 +276,23 @@ impl Tome {
             .and_then(|p| unsafe { p.as_ref() });
         match info {
             Some(info) => unsafe {
+                let has_edition = info.size as usize >= offset_of!(sys::tome_game_info, edition) + 4;
                 GameInfo {
                     build_name: util::static_str(info.build_name),
                     file_version: util::static_str(info.file_version),
                     game_base: info.game_base,
+                    edition: match if has_edition { info.edition } else { -1 } {
+                        0 => Edition::ReignOfChaos,
+                        1 => Edition::FrozenThrone,
+                        _ => Edition::Unknown,
+                    },
                 }
             },
             None => GameInfo {
                 build_name: "",
                 file_version: "",
                 game_base: 0,
+                edition: Edition::Unknown,
             },
         }
     }

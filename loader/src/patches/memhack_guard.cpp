@@ -24,6 +24,12 @@
  * EOF) never reaches its endfunction, and the next compile's first
  * endfunction would otherwise write into the old compile's freed symbols.
  *
+ * 1.26a has no local-only constructor: the compiler calls the shared one,
+ * JassVarDesc::ctor, with the kind as its first argument (0x29 local, 0x2A
+ * global), and it does the same swap. The patch's 1.26a variant hooks that
+ * one instead, for locals only, with the symbol one argument further
+ * (kVariants).
+ *
  * Built in as a patch, not a mod, so it's always in force (patches.h). The
  * downloaded-map scanner that *reports* the same pattern in the log lives
  * separately, at map load (events.cpp, core/jass.cpp).
@@ -63,15 +69,28 @@ void wr(uint32_t p, uint32_t v) {
     if (ok(p)) *reinterpret_cast<volatile uint32_t*>(static_cast<uintptr_t>(p)) = v;
 }
 
-// BEFORE JassLocalVarDesc::ctor(this, a0, typeNode, sym, a3): sym+0x18 still
-// holds the symbol's current descriptor. Unless it's another local's (or
-// there is none), remember it so the next endfunction can restore it: global
-// variables (kind 0x2a) and any other non-local kind, so a global kind other
-// than 0x2a (e.g. 0x2b, which the compiler's variable test also accepts)
-// can't slip past the restore.
-void TOME_CALL on_local_before(tome_mod*, tome_hook_call* call, void*) {
-    if (call->arg_count < 4) return;
-    uint32_t sym = call->args[3];
+// The constructor that writes a local's descriptor into its symbol, per build.
+struct Ctor {
+    const char* name;  // the mapped function
+    int kind_arg;      // args[] index of the variable's kind, or -1: locals only
+    int sym_arg;       // args[] index of the symbol
+};
+// 1.27b: JassLocalVarDesc::ctor(this, a0, typeNode, sym, a3), locals only.
+const Ctor kLocalCtor = {"JassLocalVarDesc::ctor", -1, 3};
+// 1.26a: JassVarDesc::ctor(this, kind, a0, typeNode, sym, a3), every kind.
+const Ctor kSharedCtor = {"JassVarDesc::ctor", 1, 4};
+
+// BEFORE the constructor (user: its Ctor): sym+0x18 still holds the symbol's
+// current descriptor. Unless it's another local's (or there is none),
+// remember it so the next endfunction can restore it: global variables (kind
+// 0x2a) and any other non-local kind, so a global kind other than 0x2a (e.g.
+// 0x2b, which the compiler's variable test also accepts) can't slip past the
+// restore.
+void TOME_CALL on_local_before(tome_mod*, tome_hook_call* call, void* user) {
+    const Ctor& ctor = *static_cast<const Ctor*>(user);
+    if (call->arg_count <= ctor.sym_arg || call->arg_count <= ctor.kind_arg) return;
+    if (ctor.kind_arg >= 0 && call->args[ctor.kind_arg] != kKindLocalVar) return;  // not a local's
+    uint32_t sym = call->args[ctor.sym_arg];
     uint32_t cur = rd(sym + 0x18);
     if (!ok(cur) || rd(cur + 0x4) == kKindLocalVar) return;  // nothing shadowed, or a leftover local
     g_saved.push_back({sym, cur});
@@ -100,16 +119,17 @@ void TOME_CALL on_compile(tome_mod*, tome_hook_call*, void*) {
     g_saved.clear();
 }
 
-bool install_memhack_guard(uintptr_t, const BuildMappings&, std::string& report) {
+bool install_memhack_guard(uintptr_t, const BuildMappings&, const Variant& variant, std::string& report) {
+    const Ctor& ctor = *static_cast<const Ctor*>(variant.params);
     std::string error;
     hooks::Target* compile = hooks::find_or_install("Jass::compile", error);
     if (!compile) {
         report = "Jass::compile: " + error;
         return false;
     }
-    hooks::Target* ctor = hooks::find_or_install("JassLocalVarDesc::ctor", error);
-    if (!ctor) {
-        report = "JassLocalVarDesc::ctor: " + error;
+    hooks::Target* ctor_target = hooks::find_or_install(ctor.name, error);
+    if (!ctor_target) {
+        report = std::string(ctor.name) + ": " + error;
         return false;
     }
     hooks::Target* token = hooks::find_or_install("JassScanner::nextToken", error);
@@ -122,7 +142,8 @@ bool install_memhack_guard(uintptr_t, const BuildMappings&, std::string& report)
     before.phase = TOME_HOOK_BEFORE;
     before.priority = INT32_MAX;  // before any mod's handler
     before.fn = on_local_before;
-    hooks::add(ctor, before);
+    before.user = const_cast<Ctor*>(&ctor);
+    hooks::add(ctor_target, before);
 
     hooks::Handler after;
     after.phase = TOME_HOOK_AFTER;
@@ -145,7 +166,16 @@ bool install_memhack_guard(uintptr_t, const BuildMappings&, std::string& report)
     return true;
 }
 
-const char* const kSymbols[] = {"Jass::compile", "JassLocalVarDesc::ctor", "JassScanner::nextToken", nullptr};
+const char* const kSymbols[] = {"Jass::compile", "JassScanner::nextToken", nullptr};
+const char* const kLocalCtorSymbols[] = {"JassLocalVarDesc::ctor", nullptr};
+const char* const kSharedCtorSymbols[] = {"JassVarDesc::ctor", nullptr};
+// Each variant also reserves the constructor it hooks (and only that one).
+const char* const kReserve[] = {"Jass::compile", "JassScanner::nextToken", nullptr};
+const char* const k126a[] = {"1.26a", nullptr};
+const Variant kVariants[] = {
+    {k126a, kSharedCtorSymbols, nullptr, &kSharedCtor, kSharedCtorSymbols},  // no local-only constructor
+    {nullptr, kLocalCtorSymbols, nullptr, &kLocalCtor, kLocalCtorSymbols},
+};
 
 } // namespace
 
@@ -154,9 +184,9 @@ const char* const kSymbols[] = {"Jass::compile", "JassLocalVarDesc::ctor", "Jass
 extern const Patch kMemhackGuard = {
     "memhack-guard",
     "closes the JASS local-shadows-global typecast (memhack/ACE)",
-    nullptr,   // any build that maps the symbols below
-    kSymbols,  // symbols it needs mapped
-    kSymbols,  // and reserves: mods can't hook either compiler function
+    kVariants,  // the constructor it hooks
+    kSymbols,   // symbols it needs mapped
+    kReserve,   // and reserves: mods can't hook the compiler functions
     nullptr,    // needed everywhere
     install_memhack_guard,
 };

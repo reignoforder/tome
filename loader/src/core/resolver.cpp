@@ -66,6 +66,9 @@ ResolveResult resolve(const std::vector<ResolveInput>& inputs, const ResolveEnvi
             set_state(i, ModState::IncompatibleGame,
                       "supports game " + m.game.text() + ", this is " +
                       (alias ? std::string(alias) : env.game_version.to_string()));
+        } else if (!edition_matches(m.edition, env.edition)) {
+            set_state(i, ModState::IncompatibleGame,
+                      std::string("is for ") + edition_name(m.edition) + ", this is " + edition_name(env.edition));
         } else if (!m.tome.matches(env.tome_version)) {
             set_state(i, ModState::IncompatibleTome,
                       "needs Tome " + m.tome.text() + ", this is " + env.tome_version.to_string());

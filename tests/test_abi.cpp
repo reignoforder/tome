@@ -19,6 +19,8 @@ static_assert(offsetof(tome_game_info, size) == 0);
 static_assert(offsetof(tome_game_info, build_name) == 4);
 static_assert(offsetof(tome_game_info, file_version) == 8);
 static_assert(offsetof(tome_game_info, game_base) == 12);
+static_assert(offsetof(tome_game_info, edition) == 16);
+static_assert(TOME_EDITION_UNKNOWN == -1 && TOME_EDITION_REIGN_OF_CHAOS == 0 && TOME_EDITION_FROZEN_THRONE == 1);
 
 // tome_symbol
 static_assert(offsetof(tome_symbol, size) == 0);

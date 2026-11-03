@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "core/edition.h"
 #include "mappings.h"
 
 #include <windows.h>
@@ -18,7 +19,12 @@ struct GameBuild {
     uint32_t pe_timestamp = 0;
     std::string sha256;
     const BuildMappings* known = nullptr;  // null if the build isn't supported
+    Edition edition = Edition::Unknown;    // Reign of Chaos or The Frozen Throne (read_edition)
 };
+
+// The game the running game.dll is (Game.expansion), set before Tome is
+// attached; Unknown before that, or for a build without mappings.
+Edition read_edition(uintptr_t base, const BuildMappings* known);
 
 // Gathers version information about a loaded game.dll and matches it
 // against the known builds. Returns false only if the module can't be read.

@@ -41,6 +41,21 @@ int rt_call_fastcall_wide(const void* fn, uint32_t a_low, uint32_t a_high, int b
 // Calls `fn` with `count` stack arguments of 1 and ecx/edx set; returns how
 // far esp moved down across the call (0: the callee popped its arguments).
 uint32_t rt_esp_delta(const void* fn, uint32_t count, uint32_t ecx, uint32_t edx);
+// Leaf functions that leave ecx and edx alone, as 1.26a's RCString::GetText
+// does (its callers keep `this` in ecx across the call):
+void rt_leaf_text();  // const char* thiscall(void* this): [[this+8]+0x1C], or NULL
+void rt_leaf_add();   // int thiscall(int* this, int add): *this + add
+// Calls `fn` with `count` stack arguments of 1 and ecx/edx set; stores ecx
+// and edx as they are after the call in regs[0] and regs[1].
+void rt_regs_after(const void* fn, uint32_t count, uint32_t ecx, uint32_t edx, uint32_t* regs);
+// Void functions that leave eax alone (a compiler may keep a value in it
+// across the call), and a constructor that returns `this` in it:
+void rt_leaf_store();   // void thiscall(int* this): *this = 7
+void rt_leaf_store_n(); // void thiscall(int* this, int n): *this = n
+void rt_leaf_ctor();    // void thiscall(int* this): *this = 7, eax = this
+// Calls `fn` with `count` stack arguments of 9 and eax/ecx set; returns eax
+// as it is after the call.
+uint32_t rt_eax_after(const void* fn, uint32_t count, uint32_t eax, uint32_t ecx);
 }
 
 asm(R"(
@@ -270,6 +285,89 @@ _rt_esp_delta:
     pop esi
     pop ebp
     ret
+
+    .globl _rt_leaf_text
+_rt_leaf_text:
+    mov eax, [ecx + 8]
+    test eax, eax
+    jz .Lrt_leaf_null
+    mov eax, [eax + 0x1c]
+    ret
+.Lrt_leaf_null:
+    xor eax, eax
+    ret
+
+    .globl _rt_leaf_add
+_rt_leaf_add:
+    mov eax, [ecx]
+    add eax, [esp + 4]
+    ret 4
+
+    .globl _rt_regs_after
+_rt_regs_after:
+    push ebp
+    mov ebp, esp
+    push esi
+    mov esi, esp
+    mov ecx, [ebp + 12]
+.Lrt_regs_push:
+    test ecx, ecx
+    jz .Lrt_regs_call
+    push 1
+    dec ecx
+    jmp .Lrt_regs_push
+.Lrt_regs_call:
+    mov ecx, [ebp + 16]
+    mov edx, [ebp + 20]
+    call dword ptr [ebp + 8]
+    mov eax, [ebp + 24]
+    mov [eax], ecx
+    mov [eax + 4], edx
+    mov esp, esi
+    pop esi
+    pop ebp
+    ret
+
+    .globl _rt_leaf_store
+_rt_leaf_store:
+    mov dword ptr [ecx], 7
+    ret
+
+    .globl _rt_leaf_store_n
+_rt_leaf_store_n:
+    push edx
+    mov edx, [esp + 8]
+    mov [ecx], edx
+    pop edx
+    ret 4
+
+    .globl _rt_leaf_ctor
+_rt_leaf_ctor:
+    mov dword ptr [ecx], 7
+    mov eax, ecx
+    ret
+
+    .globl _rt_eax_after
+_rt_eax_after:
+    push ebp
+    mov ebp, esp
+    push esi
+    mov esi, esp
+    mov ecx, [ebp + 12]
+.Lrt_eax_push:
+    test ecx, ecx
+    jz .Lrt_eax_call
+    push 9
+    dec ecx
+    jmp .Lrt_eax_push
+.Lrt_eax_call:
+    mov eax, [ebp + 16]
+    mov ecx, [ebp + 20]
+    call dword ptr [ebp + 8]
+    mov esp, esi
+    pop esi
+    pop ebp
+    ret
     .att_syntax prefix
 )");
 
@@ -421,6 +519,73 @@ TEST(hook_runtime_fastcall) {
     hooks::add(t, handler(TOME_HOOK_BEFORE, skip_with_42, 50));
     CHECK_EQ(fn(6, 7, 8), 42);
     CHECK_EQ(rt_esp_delta(reinterpret_cast<const void*>(rt_fastcall_mad), 1, 2, 3), 0u);  // still pops when skipped
+}
+
+// A hooked function gives its caller back ecx and edx (unless it returns a
+// 64-bit value in edx:eax), whatever the handlers did: with no handler, a
+// handler that calls the original, and one that replaces it, on both ways
+// back (ret, and ret N).
+TEST(hook_runtime_keeps_the_callers_ecx_and_edx) {
+    hooks::Target* text = hook("rt_leaf_text", rt_leaf_text, mappings::Convention::Thiscall, "const char*(void* this)");
+    hooks::Target* add = hook("rt_leaf_add", rt_leaf_add, mappings::Convention::Thiscall, "int(int* this, int add)");
+    if (!text || !add) return;
+    const char* name = "probe";
+    uint32_t inner[8] = {};
+    inner[7] = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(name));
+    uint32_t object[3] = {0, 0, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(inner))};
+    const uint32_t ecx_text = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(object));
+    int value = 5;
+    const uint32_t ecx_add = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&value));
+    const uint32_t edx = 0x5a5a5a5a;
+    auto check_regs = [&](const char* when) {
+        uint32_t regs[2] = {};
+        rt_regs_after(reinterpret_cast<const void*>(rt_leaf_text), 0, ecx_text, edx, regs);
+        if (regs[0] != ecx_text || regs[1] != edx) test::fail(__FILE__, __LINE__, std::string("ret: ") + when);
+        rt_regs_after(reinterpret_cast<const void*>(rt_leaf_add), 1, ecx_add, edx, regs);
+        if (regs[0] != ecx_add || regs[1] != edx) test::fail(__FILE__, __LINE__, std::string("ret 4: ") + when);
+    };
+    check_regs("no handler");
+    hooks::add(text, handler(TOME_HOOK_BEFORE, record_args));
+    hooks::add(add, handler(TOME_HOOK_BEFORE, record_args));
+    check_regs("a handler, then the original");
+    CHECK_EQ(as<ThiscallGet>(rt_leaf_add)(&value, 1), 6);
+    hooks::add(text, handler(TOME_HOOK_BEFORE, skip_with_42, 50));
+    hooks::add(add, handler(TOME_HOOK_BEFORE, skip_with_42, 50));
+    check_regs("the original skipped");
+    CHECK_EQ(as<ThiscallGet>(rt_leaf_add)(&value, 1), 42);
+}
+
+// The caller's eax goes into the original: a void function that leaves it
+// alone still does when hooked (or skipped), and a constructor's `this` comes
+// back.
+TEST(hook_runtime_passes_the_callers_eax_through) {
+    hooks::Target* store = hook("rt_leaf_store", rt_leaf_store, mappings::Convention::Thiscall, "void(int* this)");
+    hooks::Target* store_n =
+        hook("rt_leaf_store_n", rt_leaf_store_n, mappings::Convention::Thiscall, "void(int* this, int n)");
+    hooks::Target* ctor = hook("rt_leaf_ctor", rt_leaf_ctor, mappings::Convention::Thiscall, "void(int* this)");
+    if (!store || !store_n || !ctor) return;
+    int value = 0;
+    const uint32_t self = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&value));
+    const uint32_t eax = 0x13572468;
+    auto check = [&](const char* when, int stored_n) {
+        value = 0;
+        if (rt_eax_after(reinterpret_cast<const void*>(rt_leaf_store), 0, eax, self) != eax)
+            test::fail(__FILE__, __LINE__, std::string("ret: ") + when);
+        if (rt_eax_after(reinterpret_cast<const void*>(rt_leaf_store_n), 1, eax, self) != eax)
+            test::fail(__FILE__, __LINE__, std::string("ret 4: ") + when);
+        CHECK_EQ(value, stored_n);
+        if (rt_eax_after(reinterpret_cast<const void*>(rt_leaf_ctor), 0, eax, self) != (stored_n ? self : eax))
+            test::fail(__FILE__, __LINE__, std::string("constructor: ") + when);
+    };
+    check("no handler", 9);
+    hooks::add(store, handler(TOME_HOOK_BEFORE, record_args));
+    hooks::add(store_n, handler(TOME_HOOK_BEFORE, record_args));
+    hooks::add(ctor, handler(TOME_HOOK_BEFORE, record_args));
+    check("a handler, then the original", 9);
+    hooks::add(store, handler(TOME_HOOK_BEFORE, skip_with_42, 50));
+    hooks::add(store_n, handler(TOME_HOOK_BEFORE, skip_with_42, 50));
+    hooks::add(ctor, handler(TOME_HOOK_BEFORE, skip_with_42, 50));
+    check("the original skipped", 0);
 }
 
 TEST(hook_runtime_moves_a_call) {

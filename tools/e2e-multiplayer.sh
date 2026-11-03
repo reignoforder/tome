@@ -151,12 +151,14 @@ ip route add default via 10.77.0.2
 
 # --- the games -----------------------------------------------------------------------
 
-# Each instance has its own game folder (links to input/), TOME_HOME and
-# sync-test. The client's starts at another version.
+# Each instance has its own game folder (links to input/<version>/),
+# TOME_HOME and sync-test. The client's starts at another version.
 for who in host client; do
     env_game "$WORK/$who/game" "$BUILD/loader/tome.mix"
     mkdir -p "$WORK/$who/home/tome/mods"
     cp -r "$FIXTURES/sync-test" "$WORK/$who/home/tome/mods/"
+    # sync-test declares 1.27b, the default game; on another version both copies declare that one too.
+    env_mods_for_game "$WORK/$who/home/tome/mods/sync-test/tome.mod.json"
 done
 HOST_LOG="$WORK/host/home/tome/tome.log"
 CLIENT_LOG="$WORK/client/home/tome/tome.log"
@@ -184,7 +186,7 @@ launch() {
     (cd "$WORK/$who/game" && WINEPREFIX="$prefix" DISPLAY="$display" TOME_HOME="$home" \
         TOME_DEBUG_CLICKS="$clicks" TOME_DEBUG_APPROVE=sync-test \
         TOME_DEBUG_EXIT="${E2E_COVERAGE:-0}" WINEDEBUG=err+module \
-        exec "${in_ns[@]}" wine war3.exe -window -opengl "$@" >"$WORK/$who/wine.log" 2>&1) &
+        exec "${in_ns[@]}" wine war3.exe -window -opengl "${EDITION_ARGS[@]}" "$@" >"$WORK/$who/wine.log" 2>&1) &
     GAME_PIDS+=($!)
 }
 
@@ -267,7 +269,7 @@ check_absent "$HOST_LOG" "Game started: " "host: no game started"
 # The client's sync-test made right: the same file as the host's, so the
 # same hash; a live reload sends the host the new set. Through a rename, so
 # the watcher never reads half a file.
-cp "$FIXTURES/sync-test/tome.mod.json" "$WORK/tome.mod.json.new" && mv "$WORK/tome.mod.json.new" "$CLIENT_META"
+cp "$WORK/host/home/tome/mods/sync-test/tome.mod.json" "$WORK/tome.mod.json.new" && mv "$WORK/tome.mod.json.new" "$CLIENT_META"
 check "$HOST_LOG" "Handshake: from lobby player 129: \[Tome\] My mods 1/1: sync-test 1\.0\.0" \
     "host: gets the client's new set (a live reload in the lobby)"
 check "$HOST_LOG" "Handshake: Guest has the same required mods" "host: says they match now"

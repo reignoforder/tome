@@ -25,7 +25,7 @@ make e2e             # the real game, off screen: needs your own game files
 ```
 
 **The end-to-end test runs only on your machine.** It needs the files of a
-Warcraft III 1.27b install in `input/` (`input/README.md`), which this
+Warcraft III 1.27b install in `input/1.27b/` (`input/README.md`), which this
 repository doesn't have and CI can't use. Run it before a pull request
 that touches anything the game runs (patches, hooks, events, the UI, the
 handshake), and say in the pull request whether it passed. Without the game,

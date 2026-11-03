@@ -7,12 +7,14 @@
 #include "test.h"
 #include "wasm_builder.h"
 
+#include "api.h"
 #include "core/json.h"
 #include "core/signature.h"
 #include "mod_manager.h"
 
 #include <windows.h>
 
+#include <cstddef>
 #include <cstring>
 #include <string>
 
@@ -146,6 +148,29 @@ TEST(host_discovery_problems) {
     CHECK_MESSAGE("no-wasm", "\"wasm\" module \"mod.wasm\" not found");
     CHECK_MESSAGE("no-assets", "\"assets\" folder \"art\" not found");
     CHECK_MESSAGE("other-game", "no \"entry\" DLL for this game version; loading as assets-only");
+}
+
+// "edition": a mod for the other game doesn't load; one for this game, or
+// for both, does. Mods see the edition in game_info.
+TEST(host_mods_for_one_edition) {
+    Home home;
+    CHECK(write_mod(home, "roc-only", R"(, "edition": "roc")"));
+    CHECK(write_mod(home, "tft-only", R"(, "edition": "tft")"));
+    CHECK(write_mod(home, "either", ""));
+    Session session;
+    session.edition = tome::Edition::ReignOfChaos;
+    CHECK(session.start(home));
+    auto all = mod_manager().status();
+    const tome::ModStatus* roc = find_status(all, "roc-only");
+    const tome::ModStatus* tft = find_status(all, "tft-only");
+    const tome::ModStatus* either = find_status(all, "either");
+    CHECK(roc && roc->state == "active");
+    CHECK(either && either->state == "active");
+    CHECK(tft && tft->state != "active");
+    CHECK_MESSAGE("tft-only", "is for The Frozen Throne, this is Reign of Chaos");
+    const tome_game_info* info = tome::api_table()->game_info();
+    CHECK(info->size >= offsetof(tome_game_info, edition) + sizeof(info->edition));
+    CHECK_EQ(info->edition, int32_t(TOME_EDITION_REIGN_OF_CHAOS));
 }
 
 TEST(host_dll_that_doesnt_load) {

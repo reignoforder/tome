@@ -5,6 +5,7 @@
 
 #include "json.h"
 #include "keys.h"
+#include "edition.h"
 #include "version.h"
 
 #include <string>
@@ -37,6 +38,7 @@ struct ModMetadata {
     std::string icon;
 
     GameVersionRange game;
+    Edition edition = Edition::Unknown;  // "edition": the one game it's for; Unknown = both
     SemVerRange tome;
 
     std::vector<Dependency> depends;

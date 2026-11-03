@@ -211,7 +211,7 @@ tome_check_fails(needs-ghost "doesn't start: error: needs \"ghost\"")
 tome_check_fails(needs-unmapped "tome.mod.json: needs \"CUnit.armor\", which isn't mapped for 1.27b")
 tome_check_fails(wrong-arch "tome.mod.json: entry DLL \"wrong-arch.dll\" not found")
 # ...and where it passes or only warns: the C example and an assets-only
-# mod pass (--strict: warnings would fail them); a mod whose icon is
+# mod pass (--strict: warnings would fail them); a mod for one edition; a mod whose icon is
 # missing; a folder that isn't there; no arguments.
 function(tome_check_prints name expected)
     add_test(NAME tome_check_${name} COMMAND tome_check ${ARGN})
@@ -220,6 +220,10 @@ endfunction()
 tome_check_prints(hello "hello 1\\.0\\.0: ok \\(native, 7 natives\\)" --strict "${CMAKE_BINARY_DIR}/mods/hello")
 tome_check_prints(assets "asset-demo 1\\.0\\.0: ok \\(assets, 0 natives\\)" --strict "${CMAKE_CURRENT_SOURCE_DIR}/e2e/mods/asset-demo")
 tome_check_prints(icon "warning: icon icon\\.blp isn't in the mod folder" "${CMAKE_CURRENT_SOURCE_DIR}/e2e/mods/zz-bad-icon")
+# A mod for Reign of Chaos only: checked in that game unless told otherwise.
+tome_check_prints(roc_only "roc-only 1\\.0\\.0: ok \\(no code, 0 natives\\)" --strict "${CMAKE_CURRENT_SOURCE_DIR}/e2e/mods/roc-only")
+tome_check_prints(roc_only_in_tft "error: doesn't start: .*is for Reign of Chaos, this is The Frozen Throne"
+    --edition tft "${CMAKE_CURRENT_SOURCE_DIR}/e2e/mods/roc-only")
 tome_check_prints(missing "tome-check: can't read" "${CMAKE_CURRENT_BINARY_DIR}/no-such-mod")
 tome_check_prints(usage "usage: tome-check")
 

@@ -4,7 +4,7 @@
 
 /* tome.h's enums for WebAssembly mods (tome_wasm.h). */
 
-#define TOME_API_VERSION 14
+#define TOME_API_VERSION 15
 #define TOME_POPUP_CLOSED (-1)
 
 typedef enum tome_result {
@@ -23,6 +23,14 @@ typedef enum tome_log_level {
     TOME_LOG_WARN = 2,
     TOME_LOG_ERROR = 3
 } tome_log_level;
+
+/* API version 15: which game game.dll runs as. One game.dll runs both;
+ * war3.exe -classic (what "Warcraft III.exe" starts) is Reign of Chaos. */
+typedef enum tome_edition {
+    TOME_EDITION_UNKNOWN = -1,         /* the game hadn't decided yet (Tome loaded early) */
+    TOME_EDITION_REIGN_OF_CHAOS = 0,
+    TOME_EDITION_FROZEN_THRONE = 1
+} tome_edition;
 
 /* Anchor points, numbered like 1.31's FRAMEPOINT_*. */
 typedef enum tome_frame_point {

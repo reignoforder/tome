@@ -80,7 +80,7 @@ void TOME_CALL on_can_draw(tome_mod*, tome_hook_call* call, void*) {
     }
 }
 
-bool install_gl_context_restore(uintptr_t base, const BuildMappings& build, std::string& report) {
+bool install_gl_context_restore(uintptr_t base, const BuildMappings& build, const Variant&, std::string& report) {
     g_fullscreen_offset = build.gl.fullscreen_offset;
     g_destroy_context = reinterpret_cast<DestroyContextFn>(base + build.gl.destroy_context);
     g_create_context = reinterpret_cast<CreateContextFn>(base + build.gl.create_context);
@@ -106,7 +106,7 @@ const char* const kSymbols[] = {"CGxDeviceOpenGl::CanDraw", "CGxDeviceOpenGl::De
 extern const Patch kGlContextRestore = {
     "gl-context-restore",
     "rebuilds the OpenGL context after Alt+Tab in fullscreen under Wine, so textures come back",
-    nullptr,  // any build that maps the symbols below
+    {},  // the same on every build
     kSymbols,
     nullptr,  // nothing to protect: a mod can't reopen a hole through it
     only_under_wine,

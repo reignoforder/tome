@@ -9,6 +9,7 @@
 #include "api.h"
 #include "events.h"
 #include "frames.h"
+#include "hooks.h"
 #include "core/keys.h"
 #include "keybinds.h"
 #include "main_thread.h"
@@ -408,6 +409,14 @@ TEST(host_examples_events_keys_and_settings) {
 // The built-in patches against a mapping that lacks some of their symbols
 // (another build's, say): those are skipped, saying which symbol; the rest
 // install on the fake game image or fail there, and the report says which.
+// patches::install points the hook manager at the build it's given: point it
+// back at the session's when a test's own copy of the mapping goes away.
+struct RestoreHookBuild {
+    uintptr_t base;
+    const tome::mappings::Build* build;
+    ~RestoreHookBuild() { tome::hooks::init(base, build); }
+};
+
 TEST(host_patches_skipped_without_their_symbols) {
     Home home;
     Session session;
@@ -419,11 +428,55 @@ TEST(host_patches_skipped_without_their_symbols) {
     });
     tome::BuildMappings partial = known;
     partial.data = &data;
+    RestoreHookBuild restore{session.game.base(), known.data};
     std::string report;
     tome::patches::install(session.game.base(), partial, report);
     if (report.find("movie-frame-length skipped (1.27b has no mapping for Movie::SetDisplayMode)") ==
         std::string::npos) {
         test::fail(__FILE__, __LINE__, report);
+    }
+}
+
+// A patch's variant for a build: the one naming it, else the default; none
+// without a default; with no variants, one that adds nothing.
+TEST(host_patch_variant_for_a_build) {
+    using tome::patches::Patch;
+    using tome::patches::Variant;
+    const char* const old_builds[] = {"1.24e", "1.26a", nullptr};
+    const char* const extra[] = {"Extra", nullptr};
+    int old_params = 1, default_params = 2;
+    const Variant both[] = {{old_builds, extra, nullptr, &old_params}, {nullptr, nullptr, nullptr, &default_params}};
+    Patch patch{};
+    patch.variants = both;
+    CHECK(tome::patches::variant_for(patch, "1.26a") == &both[0]);
+    CHECK(tome::patches::variant_for(patch, "1.24e") == &both[0]);
+    CHECK(tome::patches::variant_for(patch, "1.27b") == &both[1]);
+    patch.variants = std::span<const Variant>(both, 1);
+    CHECK(tome::patches::variant_for(patch, "1.27b") == nullptr);
+    patch.variants = {};
+    const Variant* plain = tome::patches::variant_for(patch, "1.27b");
+    CHECK(plain && !plain->builds && !plain->symbols && !plain->skip && !plain->params);
+}
+
+// The same mapping under another build's name: the patches pick that
+// build's variant. ambient-sound isn't for 1.26a (and says why);
+// memhack-guard's 1.26a variant needs the shared constructor, which the fake
+// game doesn't map.
+TEST(host_patches_use_the_builds_variant) {
+    Home home;
+    Session session;
+    CHECK(session.start(home));
+    const tome::BuildMappings& known = *session.game.build().known;
+    tome::mappings::Build data = *known.data;
+    data.name = "1.26a";
+    tome::BuildMappings renamed = known;
+    renamed.data = &data;
+    RestoreHookBuild restore{session.game.base(), known.data};
+    std::string report;
+    tome::patches::install(session.game.base(), renamed, report);
+    for (const char* expected : {"ambient-sound skipped (not for 1.26a: its CSound::InitMIDI still makes the MIDI sound",
+                                 "memhack-guard skipped (1.26a has no mapping for JassVarDesc::ctor)"}) {
+        if (report.find(expected) == std::string::npos) test::fail(__FILE__, __LINE__, std::string(expected) + "\n" + report);
     }
 }
 
@@ -572,6 +625,10 @@ TEST(host_api_basics_and_refusals) {
     CHECK_EQ(api->hook(mod, "Jass::compile", TOME_HOOK_BEFORE, 0, handler, nullptr), TOME_ERR_NOT_OWNER);
     CHECK_LOG("[plain] hook(Jass::compile): reserved by a built-in Tome patch");
     CHECK_EQ(api->unhook(mod, "Jass::compile", TOME_HOOK_BEFORE, handler, nullptr), TOME_ERR_NOT_OWNER);
+    // A variant reserves only what it hooks: memhack-guard's default one the
+    // local constructor, not 1.26a's shared one.
+    CHECK(tome::hooks::is_reserved("JassLocalVarDesc::ctor"));
+    CHECK(!tome::hooks::is_reserved("JassVarDesc::ctor"));
 }
 
 // Keybinds: a broken keybinds.json, the game's CustomKeys.txt, keys asked

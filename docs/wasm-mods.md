@@ -115,7 +115,7 @@ checks).
 `core/wasm_layout.*` lays out its structs as clang does for wasm32 (4-byte
 pointers, 8-aligned doubles), for the address the block is copied to:
 `tome_wasm_event` (184 bytes, the fields of `tome_event_info`),
-`tome_wasm_unit` (28), `tome_wasm_game_info` (12),
+`tome_wasm_unit` (28), `tome_wasm_game_info` (16),
 `tome_wasm_script_shadow` (20). `tome_wasm.h` declares the same structs and
 `_Static_assert`s every offset Tome writes, so a mismatch fails the mod's
 build. Strings are NUL-terminated copies after the struct.

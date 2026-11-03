@@ -33,8 +33,9 @@ FIXTURES="$ROOT/tests/e2e/mods"
 MPQ_TOOL="$BUILD/tools/mpq/tome-mpq.exe"
 
 die() { echo "e2e: $*" >&2; exit 2; }
-# The game comes from input/ only (a second argument used to name it).
-[[ $# -le 1 ]] || die "usage: tools/e2e-test.sh [build-dir] (the game's files go in input/: input/README.md)"
+# The game comes from input/<version>/ only (GAME_VERSION; a second argument
+# used to name a folder).
+[[ $# -le 1 ]] || die "usage: [GAME_VERSION=<version>] tools/e2e-test.sh [build-dir] (the game's files go in input/<version>/: input/README.md)"
 env_check
 [[ -f "$BUILD/loader/tome.mix" ]] || die "build first: cmake --build $BUILD"
 grep -qiE '^TOME_DEV:BOOL=(ON|1|TRUE|YES|Y)$' "$BUILD/CMakeCache.txt" 2>/dev/null \
@@ -47,7 +48,7 @@ env_running && die "the test's Warcraft III is still running (tools/game.sh stop
 env_prefix
 
 WORK="$(mktemp -d)"          # scratch files; deleted at the end
-GAME="$WORK/game"            # the game folder: links to input/'s files
+GAME="$WORK/game"            # the game folder: links to input/<version>/'s files
 TEST_MAP_DIR="$GAME/Maps/TomeE2E"
 HOME_DIR="$WORK/home"         # TOME_HOME: tome/ (with tome/mods/) for the test
 MODS="$HOME_DIR/tome/mods"
@@ -100,6 +101,11 @@ env_registry_pristine "$WORK/user.reg.e2e" \
 
 # --- setup -------------------------------------------------------------------
 
+# The installed mods' copies declare this game too (env_mods_for_game).
+mods_for_this_game() {
+    env_mods_for_game "$MODS"/*/tome.mod.json
+}
+
 env_game "$GAME" "$BUILD/loader/tome.mix"
 env_display_start
 env_sound
@@ -128,6 +134,8 @@ fi
 cp -r "$BUILD/mods/hook-a" "$BUILD/mods/hook-b" "$BUILD/mods/crash" "$MODS/"
 echo native > "$MODS/crash/mode.txt"  # where the crash fixture crashes first; see crash.c
 cp -r "$FIXTURES/broken-json" "$FIXTURES/needs-ghost" "$FIXTURES/needs-unmapped" "$MODS/"
+# A mod for Reign of Chaos only ("edition"): runs in EDITION=roc, not in tft.
+cp -r "$FIXTURES/roc-only" "$MODS/"
 # A mod with code nobody allowed (not in APPROVED): it must not even be
 # loaded, so its "DLL" is only text.
 cp -r "$FIXTURES/unapproved" "$FIXTURES/unapproved-script" "$MODS/"
@@ -152,6 +160,7 @@ if command -v x86_64-w64-mingw32-gcc >/dev/null; then
     cp "$FIXTURES/wrong-arch/tome.mod.json" "$MODS/wrong-arch/"
     x86_64-w64-mingw32-gcc -shared -o "$MODS/wrong-arch/wrong-arch.dll" "$FIXTURES/wrong-arch/wrong-arch.c"
 fi
+mods_for_this_game
 
 MAP_ARG=()
 if [[ -f "$MPQ_TOOL" ]]; then
@@ -203,7 +212,7 @@ launch() {
     env_registry_load "$WORK/user.reg.e2e"
     (cd "$GAME" && DISPLAY="$(env_display)" TOME_HOME="$TOME_HOME_WIN" TOME_DEBUG_CLICKS="${TOME_DEBUG_CLICKS:-}" \
         TOME_DEBUG_ASSET="$PROBE" TOME_DEBUG_APPROVE="$APPROVED" \
-        TOME_DEBUG_SKIP_MOVIES=1 TOME_DEBUG_EXIT="${E2E_COVERAGE:-0}" WINEDEBUG=err+module exec wine war3.exe -window -opengl "${MAP_ARG[@]}" >"$WORK/wine.log" 2>&1) &
+        TOME_DEBUG_SKIP_MOVIES=1 TOME_DEBUG_EXIT="${E2E_COVERAGE:-0}" WINEDEBUG=err+module exec wine war3.exe -window -opengl "${EDITION_ARGS[@]}" "${MAP_ARG[@]}" >"$WORK/wine.log" 2>&1) &
     WINE_PID=$!
     # Without Tome's log there's nothing to check: say why instead of
     # timing out every check.
@@ -347,15 +356,26 @@ else
 fi
 
 echo "startup"
-check "Recognized Warcraft III 1\.27b \([0-9]+ mapped symbols\)" "game build recognized from the mapping database" 30
+check "Recognized Warcraft III ${GAME_VERSION//./\\.}, $EDITION_NAME \([0-9]+ mapped symbols\)" \
+    "game build and edition recognized" 30
+if [[ "$EDITION" == roc ]]; then
+    check "  roc-only +1\.0\.0 +active" "a mod for Reign of Chaos runs in Reign of Chaos"
+else
+    check "  roc-only +1\.0\.0 +[a-z ]+: is for Reign of Chaos, this is The Frozen Throne" \
+        "a mod for Reign of Chaos doesn't run in The Frozen Throne"
+fi
 check "Signatures match \(functions and call sites\)" "game.dll matches the byte signatures"
 check "DEP: (on|off|unknown)" "DEP state logged at startup"
-check "Crash reports: tome\\\\crashes, in front of the filter [Gg]ame\.dll\+0x3b590" "crash reports go in front of game.dll's filter"
+if [[ "$GAME_VERSION" == 1.27b ]]; then
+    check "Crash reports: tome\\\\crashes, in front of the filter [Gg]ame\.dll\+0x3b590" "crash reports go in front of game.dll's filter"
+else
+    check "Crash reports: tome\\\\crashes, in front of the filter " "crash reports go in front of the game's filter"
+fi
 check "JASS natives: redirected 3 of 3 InitNatives call sites" "InitNatives hooked"
 check "\[hello\] enabled \(1 time" "hello loaded and enabled"
 check "broken-json +error: tome\.mod\.json: line 2" "broken JSON reported with position"
 check "needs-ghost .*needs \"ghost\" \^1, which isn't installed" "missing dependency reported"
-check "needs-unmapped .*needs \"CUnit\.armor\", which isn't mapped for 1\.27b" "unmapped requires reported"
+check "needs-unmapped .*needs \"CUnit\.armor\", which isn't mapped for ${GAME_VERSION//./\\.}" "unmapped requires reported"
 check "hello: code allowed \(TOME_DEBUG_APPROVE\), sha256 [0-9a-f]{64}" "a mod's code is hashed and allowed"
 check "unapproved +0\.1\.0 +approval: runs native code; turn it on to allow it" "new code waits for approval"
 check "unapproved: runs native code; turn it on to allow it \(in the mod menu, or /tome enable unapproved\)" \
@@ -368,12 +388,23 @@ fi
 check "Assets at startup: $ASSET_FILES files from 3 mods \(0 overridden" "mods' assets mounted from DllMain"
 check "Asset probe .*: [0-9]+ bytes, fnv1a $PROBE_HASH" "the game reads the mod's texture instead of its own"
 check "Bootstrap complete" "bootstrap finished" 15
-check "Patches: [0-9]+ applied, 0 skipped: memhack-guard applied.*path-sanitizer applied.*blp-guard applied.*d3d-reset-lights applied.*gl-context-restore applied.*background-mute applied.*widescreen applied.*ambient-sound applied" "every built-in patch applied"
+if [[ "$GAME_VERSION" == 1.27b ]]; then
+    check "Patches: [0-9]+ applied, 0 skipped: memhack-guard applied.*path-sanitizer applied.*blp-guard applied.*d3d-reset-lights applied.*gl-context-restore applied.*background-mute applied.*widescreen applied.*ambient-sound applied" "every built-in patch applied"
+else
+    # Another build may leave a patch out: for want of its symbols
+    # (mappings/<version>.json), or its variant for that build says why.
+    for patch in memhack-guard path-sanitizer blp-guard d3d-reset-lights gl-context-restore background-mute widescreen \
+        ambient-sound; do
+        check "Patches: .*$patch (applied|skipped \(${GAME_VERSION//./\\.} has no mapping for|skipped \(not for ${GAME_VERSION//./\\.}: )" \
+            "$patch applied (or not for this build)"
+    done
+    check_absent "Patches: .*FAILED" "no built-in patch failed"
+fi
 check_absent "blp-guard.*unclamped" "the BLP header-copy clamp was applied"
 check "Main-thread dispatcher installed" "main-thread dispatcher installed"
 check "Events: hooked screens, map load, game start and end, frames, game ticks, shutdown, chat, pause, units, spells, damage, experience, players, resources, keys, menus, dialogs, levels and saved games" "event hooks installed"
 check "\[hello\] 100 ticks" "tick events reach mods"
-check "\[hello-cpp\] loaded \(Tome [0-9.]+, Warcraft III 1\.27b, game\.dll at 0x[0-9a-f]{8}\)" "a C++ mod loaded"
+check "\[hello-cpp\] loaded \(Tome [0-9.]+, Warcraft III ${GAME_VERSION//./\\.}, game\.dll at 0x[0-9a-f]{8}\)" "a C++ mod loaded"
 check "\[hello-cpp\] CTextFrame::SetText is a thiscall function at 0x[0-9a-f]{8} \(void\(CTextFrame\* this" \
     "a C++ mod resolved a mapped name"
 check "\[hello-cpp\] enabled" "a C++ mod enabled"
@@ -383,19 +414,19 @@ check "Loaded wasm-e2e 0\.1\.0 \(WebAssembly\)" "and reported as WebAssembly"
 check "\[wasm-e2e\] enabled" "a Wasm mod enabled"
 check "\[hello-cpp\] 100 ticks" "events reach a C++ lambda"
 if ((WASM)); then
-    check "\[hello-wasm\] loaded, Warcraft III 1\.27b" "the C Wasm example loaded (game info)"
+    check "\[hello-wasm\] loaded, Warcraft III ${GAME_VERSION//./\\.}" "the C Wasm example loaded (game info)"
     check "\[hello-wasm\] enabled" "and enabled"
     check "\[hello-wasm\] main menu: SinglePlayerButton found" "a Wasm mod got a frame handle on the main menu"
     check "\[hello-wasm\] 100 ticks" "events reach a Wasm mod"
 fi
 if ((WASMRS)); then
-    check "\[hello-wasm-rs\] loaded, Warcraft III 1\.27b" "the Rust Wasm example loaded (game info)"
+    check "\[hello-wasm-rs\] loaded, Warcraft III ${GAME_VERSION//./\\.}" "the Rust Wasm example loaded (game info)"
     check "\[hello-wasm-rs\] enabled" "and enabled"
     check "\[hello-wasm-rs\] main menu: SinglePlayerButton found" "a Rust Wasm closure got a frame handle"
     check "\[hello-wasm-rs\] 100 ticks" "events reach a Rust Wasm closure"
 fi
 if ((RUST)); then
-    check "\[hello-rs\] loaded \(Tome [0-9.]+, Warcraft III 1\.27b, game\.dll at 0x[0-9a-f]{8}\)" "a Rust mod loaded"
+    check "\[hello-rs\] loaded \(Tome [0-9.]+, Warcraft III ${GAME_VERSION//./\\.}, game\.dll at 0x[0-9a-f]{8}\)" "a Rust mod loaded"
     check "\[hello-rs\] CTextFrame::SetText is a thiscall function at 0x[0-9a-f]{8} \(void\(CTextFrame\* this" \
         "a Rust mod resolved a mapped name"
     check "\[hello-rs\] enabled" "a Rust mod enabled"
@@ -433,6 +464,10 @@ if ((${#MAP_ARG[@]})); then
     check "path-sanitizer: refused PreloadGenEnd\(\"longpath\\\\a+\.\.\.\"\) -- too long" \
         "a PreloadGenEnd name too long to fit after the game's folder is refused"
     check_absent "path-sanitizer: refused Preload\(\"e2edata" "a long Preload argument (data) isn't refused"
+    check "path-sanitizer: kept Preload\(\"e2e save: \.\.\\\\Gold\"\) for PreloadGenEnd" \
+        "Preload keeps data that isn't a safe path"
+    check "path-sanitizer: refused PreloadEnd\(\) -- the preload list" "then the preload list isn't loaded"
+    check_absent "path-sanitizer: refused PreloadRefresh" "until PreloadGenClear empties it"
     check "\[map\] TomeLogInteger\(9600\)" "a refused InitGameCache gives a null cache that reads 0"
     for n in 9601 9602 9603 9604 9605 9606 9607 9608; do
         check "\[map\] TomeLogInteger\($n\)" "refused call $n returned false or null"
@@ -446,7 +481,9 @@ if ((${#MAP_ARG[@]})); then
     echo "game events (-loadfile)"
     check "\[hello\] map load: .+ \(Maps\\\\TomeE2E\\\\e2e\.w3m\)" "map load event with the map's name and path"
     check "\[hello\] game start: " "game start event" 30
-    check "ambient-sound: made '[A-Za-z]+Day' as a MIDI sound" "the map's ambient sound was made (CreateMIDISound)"
+    if [[ $(count "ambient-sound applied") -gt 0 ]]; then  # not on a build without the bug (1.26a)
+        check "ambient-sound: made '[A-Za-z]+Day' as a MIDI sound" "the map's ambient sound was made (CreateMIDISound)"
+    fi
     check "\[hello\] 200 game ticks: 1\.000 s of game time" "game ticks follow game time (200 steps of 5 ms)" 15
     check "\[hello\] map description: ." "map load event with the map's description"
     check "\[map\] TomeLogInteger\(84(0[1-9]|1[0-2])\)" "the map selected some of its units" 15
@@ -694,15 +731,42 @@ REMAINING=$(find "$MODS" -mindepth 1 -maxdepth 1 -type d ! -name config | wc -l)
 # hello, hook-a, hook-b, asset-demo, asset-restart, and asset-map unless
 # disabled above; hello-wasm if it's built (it stays: the map declares its
 # natives), and hello-wasm-rs.
-ACTIVE=$(( (${#MAP_ARG[@]} ? 5 : 6) + WASM + WASMRS ))
+# roc-only in Reign of Chaos.
+ROC_ONLY=0; [[ "$EDITION" == roc ]] && ROC_ONLY=1
+ACTIVE=$(( (${#MAP_ARG[@]} ? 5 : 6) + WASM + WASMRS + ROC_ONLY ))
 check "Mods: $REMAINING installed, $ACTIVE active" "mod list refreshed"
 if ! tail -n 5 "$LOG" | grep -q "needs-ghost"; then pass "removed mod gone from the list"; else fail "removed mod still listed"; fi
 
 echo ".tome packages"
 PACKAGES="$HOME_DIR/tome/packages"
+# repack <src> <dst> [version]: a copy of a package with its tome.mod.json
+# made for this game (as mods_for_this_game does) and at `version`, if given.
+repack() {
+    python3 -I - "$1" "$2" "${3:-}" "$GAME_VERSION" <<'PY'
+import json, shutil, sys, zipfile
+src, dst, version, game = sys.argv[1:5]
+with zipfile.ZipFile(src) as zin:
+    meta = json.loads(zin.read("tome.mod.json"))
+changed = dict(meta)
+if version:
+    changed["version"] = version
+if game != "1.27b" and meta.get("game") == "1.27b":
+    changed["game"] = "1.27b || " + game
+if changed == meta:  # the package as built
+    shutil.copyfile(src, dst)
+    sys.exit()
+with zipfile.ZipFile(src) as zin, zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as zout:
+    for info in zin.infolist():
+        data = zin.read(info)
+        if info.filename == "tome.mod.json":
+            data = json.dumps(changed).encode()
+        zout.writestr(info.filename, data)
+PY
+}
 if [[ -f "$BUILD/packages/hello.tome" ]]; then
     # Next to the hello folder (same id): the folder is used.
-    cp "$BUILD/packages/hello.tome" "$MODS/hello-pkg.tome"
+    repack "$BUILD/packages/hello.tome" "$WORK/hello-pkg.tome"
+    mv -f "$WORK/hello-pkg.tome" "$MODS/hello-pkg.tome"
     check "Unpacked hello-pkg\.tome" "a .tome is unpacked" 10
     check "hello +error: the folder hello has the same id and is used instead" "a folder wins over a package with its id" 10
     # Without the folder, the package's copy runs.
@@ -711,18 +775,7 @@ if [[ -f "$BUILD/packages/hello.tome" ]]; then
     check_more "\[hello\] loaded \(Tome" "$before" "the package runs once the folder is gone" 10
     check "\[hello\] enabled" "the packaged mod is enabled" 10
     # Updated in place: a new version in the same file reloads it from a new copy.
-    python3 -I - "$BUILD/packages/hello.tome" "$WORK/hello-pkg.tome" <<'PY'
-import json, sys, zipfile
-src, dst = sys.argv[1], sys.argv[2]
-with zipfile.ZipFile(src) as zin, zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as zout:
-    for info in zin.infolist():
-        data = zin.read(info)
-        if info.filename == "tome.mod.json":
-            meta = json.loads(data)
-            meta["version"] = "1.0.1"
-            data = json.dumps(meta).encode()
-        zout.writestr(info.filename, data)
-PY
+    repack "$BUILD/packages/hello.tome" "$WORK/hello-pkg.tome" 1.0.1
     mv -f "$WORK/hello-pkg.tome" "$MODS/hello-pkg.tome"
     check "Loaded hello 1\.0\.1" "an updated package reloads the mod" 15
     check "Removed the unused unpacked package hello-pkg\." "the old unpacked copy is removed" 10
@@ -782,13 +835,14 @@ fi
 # --- run 3: the mod menu on the main screen ------------------------------------
 
 echo "mod menu (third launch, simulated clicks)"
-rm -rf "$MODS/broken-json" "$MODS/wrong-arch" "$MODS/needs-ghost" "$MODS/asset-demo" "$MODS/asset-map" \
+rm -rf "$MODS/broken-json" "$MODS/wrong-arch" "$MODS/needs-ghost" "$MODS/asset-demo" "$MODS/asset-map" "$MODS/roc-only" \
     "$MODS/asset-restart" "$MODS/hook-a" "$MODS/hook-b" "$MODS/crash" "$MODS/unapproved" "$MODS/unapproved-script"
 set_enabled hello true
 # A mod whose icon is a malformed BLP (valid "BLP1" magic, mip past EOF), to
 # check the blp-guard patch refuses it when the menu decodes the icon. It
 # sorts after hello, so hello stays row 0 and the clicks below are unchanged.
 cp -r "$FIXTURES/zz-bad-icon" "$MODS/zz-bad-icon"
+mods_for_this_game
 python3 -I - "$MODS/zz-bad-icon/icon.blp" <<'PY'
 import struct, sys
 h = bytearray(0xA0)
@@ -904,6 +958,7 @@ stop_game
 
 echo "asset reload modes (fourth launch, a game started from the menu)"
 cp -r "$FIXTURES/asset-map" "$FIXTURES/asset-restart" "$MODS/"
+mods_for_this_game
 python3 -I - "$STATE" <<'PY'
 import json, sys
 path = sys.argv[1]

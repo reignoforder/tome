@@ -5,11 +5,13 @@ usage: python3 -I tools/re/signatures.py <game.dll> <mappings/build.json> [--wri
 
 For every function symbol, prints the pattern Tome checks at startup: the
 first bytes of the function, at least MIN_LEN and extended (up to MAX_LEN)
-until the pattern occurs only once in its section. Bytes the loader rewrites
+until the pattern occurs only once in its section, but never into the next
+mapped function (a short wrapper gets a shorter pattern). Bytes the loader rewrites
 when it relocates game.dll (ASLR) are "??". Each existing "bytes" field is
 compared with the generated one; --write adds or replaces them in the file
 (a text edit that keeps the file's formatting).
 """
+import bisect
 import json
 import os
 import re
@@ -68,10 +70,10 @@ def count_in_section(pe, rva, pattern):
     return count
 
 
-def signature(pe, relocs, rva):
+def signature(pe, relocs, rva, limit=MAX_LEN):
     off = pe.va_to_offset(pe.image_base + rva)
     pattern = []
-    for i in range(MAX_LEN):
+    for i in range(min(MAX_LEN, limit)):
         pattern.append(None if rva + i in relocs else pe.data[off + i])
         if len(pattern) >= MIN_LEN and count_in_section(pe, rva, pattern) == 1:
             break
@@ -94,12 +96,17 @@ def main():
     symbols = json.loads(text)["symbols"]
     relocs = relocated_rvas(pe)
 
+    def rva_of(sym):
+        return int(sym["rva"], 16) if isinstance(sym["rva"], str) else sym["rva"]
+
+    starts = sorted(rva_of(s) for s in symbols.values() if s["kind"] == "function")
     status = 0
     for name, sym in symbols.items():
         if sym["kind"] != "function":
             continue
-        rva = int(sym["rva"], 16) if isinstance(sym["rva"], str) else sym["rva"]
-        pattern = signature(pe, relocs, rva)
+        rva = rva_of(sym)
+        nxt = bisect.bisect_right(starts, rva)  # the next mapped function
+        pattern = signature(pe, relocs, rva, starts[nxt] - rva if nxt < len(starts) else MAX_LEN)
         sig = fmt(pattern)
         unique = count_in_section(pe, rva, pattern) == 1
         old = sym.get("bytes")

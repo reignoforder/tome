@@ -194,13 +194,21 @@ can turn a checked-safe name into an unsafe one (`..x` into `..`, `CONSOLE`
 into `CON`). No legitimate name is that long, since the ANSI file APIs can't
 open one. `Preload` is exempt: it keeps its string as is (no fixed buffer),
 and maps use it as a data channel, because `PreloadGenEnd` writes it out word
-for word (File I/O, codeless save/load), so a long one is legitimate.
-`is_unsafe_any_length` still checks the whole string and its first 259 bytes
-for traversal, drives, roots and devices. Unit-tested
-(`tests/test_path_guard.cpp`). The e2e test map calls `PreloadGenEnd` with a
-239-character name and checks that it is refused (`-- too long`). It also
-checks that a 307-character `Preload` argument is not refused, and that the
-script carries on (9609).
+for word (File I/O, codeless save/load), so a long one is legitimate, and so
+is one with a `:` or `..` in it ("Gold: 500"). So `Preload` is never
+refused. `Preload` itself opens nothing: the game opens the preload list's
+files in `PreloadStart`, `PreloadEnd`, `PreloadEndEx` and `PreloadRefresh`
+(`docs/reverse-engineering.md`, "The preload list"). When
+`is_unsafe_any_length` (the whole string and its first 259 bytes checked
+for traversal, drives, roots and devices) rejects a `Preload` argument, it
+is kept (`path-sanitizer: kept Preload(...) for PreloadGenEnd`), and those
+four natives are refused until `PreloadGenClear` empties the list.
+Unit-tested (`tests/test_path_guard.cpp`). The e2e test map calls
+`PreloadGenEnd` with a 239-character name and checks that it is refused
+(`-- too long`). It also checks that a 307-character `Preload` argument is
+not refused, that `Preload("e2e save: ..\Gold")` is kept and the
+`PreloadEnd` after it refused, that `PreloadRefresh` runs again after
+`PreloadGenClear`, and that the script carries on (9609).
 
 #### Long string literal overruns the JASS compiler's buffer
 
@@ -538,7 +546,7 @@ path, BLP) plus the path-length limits are what exists today.
 1. **Redirect map writes to a dedicated subfolder (1.28.1's fix).** On this
    1.27b build, `PreloadGenEnd`/`InitGameCache`/`SaveGame` already write under
    `CustomMapData\` and `save\<profile>\` (confirmed in game, Nov 2026;
-   `PreloadGen::End` builds `<game.dll folder>\CustomMapData\<name>` and
+   `PreloadGen::End` builds `<war3.exe folder>\CustomMapData\<name>` and
    refuses `\..\`, `\..` and `..\` in it itself), so the "inside the game
    folder" worry is milder than feared, and the
    path-sanitizer's `..`/rooted/device/length checks keep a write inside those

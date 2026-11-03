@@ -149,10 +149,11 @@ TEST(wasm_layout_units_info_shadows) {
     CHECK_EQ(str_at(b, 16, 100), std::string("Grunt"));
     CHECK_EQ(u32_at(b, 20), 2u);
 
-    b = encode_game_info("1.27b", "1.27.1.7085", 64);
+    b = encode_game_info("1.27b", "1.27.1.7085", TOME_EDITION_REIGN_OF_CHAOS, 64);
     CHECK_EQ(b.size(), size_t(kGameInfoSize + 6 + 12));
     CHECK_EQ(str_at(b, 4, 64), std::string("1.27b"));
     CHECK_EQ(str_at(b, 8, 64), std::string("1.27.1.7085"));
+    CHECK_EQ(u32_at(b, 12), uint32_t(TOME_EDITION_REIGN_OF_CHAOS));
 
     tome_script_shadow s[1] = {{sizeof(tome_script_shadow), "bj_lastCreatedUnit", "integer", "unit", 12}};
     b = encode_shadows(s, 1, 0);

@@ -194,3 +194,24 @@ TEST(metadata_wasm) {
     CHECK(has_error_containing(parse_text(with(R"("wasm": 3)"), bad), "\"wasm\""));
     CHECK(has_error_containing(parse_text(with(R"("wasm": "w.wasm", "entry": "w.dll")"), bad), "not both"));
 }
+
+TEST(metadata_edition) {
+    auto with = [](const std::string& extra) {
+        return R"({"schema": 1, "id": "edition-test", "version": "1.0.0", "game": "*", "tome": "*", "sync": "client")" +
+               (extra.empty() ? "" : ", " + extra) + "}";
+    };
+    ModMetadata m;
+    CHECK(parse_text(with(""), m).ok);
+    CHECK(m.edition == Edition::Unknown);  // both games
+    CHECK(parse_text(with(R"("edition": "roc")"), m).ok);
+    CHECK(m.edition == Edition::ReignOfChaos);
+    ModMetadata t;
+    auto r = parse_text(with(R"("edition": "tft")"), t);
+    CHECK(r.ok);
+    CHECK(r.warnings.empty());  // a known field
+    CHECK(t.edition == Edition::FrozenThrone);
+    ModMetadata bad;
+    CHECK(has_error_containing(parse_text(with(R"("edition": "TFT")"), bad), "\"edition\" must be"));
+    CHECK(has_error_containing(parse_text(with(R"("edition": "both")"), bad), "\"edition\" must be"));
+    CHECK(has_error_containing(parse_text(with(R"("edition": ["roc"])"), bad), "\"edition\""));
+}

@@ -5,7 +5,7 @@
 
 #![allow(missing_docs)]
 
-pub const TOME_API_VERSION: u32 = 14;
+pub const TOME_API_VERSION: u32 = 15;
 pub const TOME_POPUP_CLOSED: i32 = -1;
 
 // tome_result
@@ -22,6 +22,11 @@ pub const TOME_LOG_DEBUG: i32 = 0;
 pub const TOME_LOG_INFO: i32 = 1;
 pub const TOME_LOG_WARN: i32 = 2;
 pub const TOME_LOG_ERROR: i32 = 3;
+
+// tome_edition
+pub const TOME_EDITION_UNKNOWN: i32 = -1;
+pub const TOME_EDITION_REIGN_OF_CHAOS: i32 = 0;
+pub const TOME_EDITION_FROZEN_THRONE: i32 = 1;
 
 // tome_frame_point
 pub const TOME_FRAMEPOINT_TOPLEFT: i32 = 0;

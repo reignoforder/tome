@@ -16,8 +16,9 @@
 #   tools/game.sh start -- -loadfile 'Maps\Test\test.w3m'
 #
 # The game folder is <build>/test-env/game: links to the game's files in
-# input/ (input/README.md) with the build's tome.mix, and its own
-# tome/ (put mods to try in tome/mods/ there), Maps/, save/ and replay/.
+# input/<version>/ (GAME_VERSION, default 1.27b: input/README.md) with the
+# build's tome.mix, and its own tome/ (put mods to try in tome/mods/ there),
+# Maps/, save/ and replay/.
 # BUILD picks the build folder (default ./build). HEADLESS=1 runs the game
 # in its own X server (Xvfb) instead of on your screen. TOME_HOME (a Windows
 # path) moves tome/ elsewhere, as in the game.
@@ -69,7 +70,7 @@ start)
     fi
     env_sound
     rm -f "$LOG"
-    (cd "$GAME" && DISPLAY="$(env_display)" setsid env "${envs[@]}" wine war3.exe -window -opengl "$@" \
+    (cd "$GAME" && DISPLAY="$(env_display)" setsid env "${envs[@]}" wine war3.exe -window -opengl "${EDITION_ARGS[@]}" "$@" \
         >/dev/null 2>&1 &)
     ;;
 stop)

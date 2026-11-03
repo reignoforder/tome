@@ -4,6 +4,7 @@
 #include "core/mappings.h"
 #include "core/pe.h"
 #include "core/rtti.h"
+#include "game_dir.h"
 #include "test.h"
 
 #include <cstdio>
@@ -94,8 +95,8 @@ TEST(rtti_rejects_unreadable_or_odd_data) {
 // absolute, and the unrelocated file holds them for that base).
 TEST(rtti_against_local_game) {
     std::vector<uint8_t> file;
-    if (!read_file(TOME_TEST_GAME_DIR "/game.dll", file)) {
-        std::printf("  skipped: no %s/game.dll\n", TOME_TEST_GAME_DIR);
+    if (!read_file((test::game_dir() + "/game.dll").c_str(), file)) {
+        std::printf("  skipped: no %s/game.dll\n", test::game_dir().c_str());
         return;
     }
     pe::Image image;

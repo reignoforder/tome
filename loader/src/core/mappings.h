@@ -157,6 +157,7 @@ struct BuildMappings {
         uint32_t game_tick;               // OnNetGameTick
         uint32_t game_tick_step_offset;   // CNetEventGameTick.step
         uint32_t game_shutdown;           // GameShutdown
+        uint32_t expansion;               // Game.expansion (int: 1 The Frozen Throne, 0 Reign of Chaos)
     } game;
 
     // Players, units, the selection, chat and pause (events.cpp, units.cpp).

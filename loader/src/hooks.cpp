@@ -52,12 +52,14 @@ struct TomeHookFrame {
     // Saved by tome_hook_entry.
     uint32_t ecx;
     uint32_t edx;
+    uint32_t eax_in;  // the caller's eax
     tome::hooks::Target* target;
     uint32_t return_address;
     uint32_t stack[1];
 };
 static_assert(offsetof(TomeHookFrame, fp) == 16 && offsetof(TomeHookFrame, ecx) == 24 &&
-              offsetof(TomeHookFrame, stack) == 40, "tome_hook_entry depends on this layout");
+              offsetof(TomeHookFrame, eax_in) == 32 && offsetof(TomeHookFrame, stack) == 44,
+              "tome_hook_entry depends on this layout");
 
 struct TomeHookResult {
     uint32_t eax;
@@ -70,16 +72,18 @@ extern "C" {
 void tome_hook_dispatch(TomeHookFrame* frame);
 void tome_hook_entry();
 void tome_hook_invoke(const void* fn, const uint32_t* stack, uint32_t count, uint32_t ecx, uint32_t edx,
-                      TomeHookResult* out, uint32_t fp_kind);
+                      TomeHookResult* out, uint32_t fp_kind, uint32_t eax);
 }
 
 // tome_hook_entry: every stub jumps here with its Target* pushed. Saves
-// ecx/edx (fastcall/thiscall arguments) next to it, makes room for the
+// eax and ecx/edx (fastcall/thiscall arguments) next to it, makes room for the
 // answer and calls the dispatcher with a pointer to the whole frame. Then
-// loads st(0) for floating-point results, sets eax/edx, and returns to the
-// game, popping the arguments for callee-cleaned conventions.
+// loads st(0) for floating-point results, sets eax/edx, puts the caller's
+// ecx back (as the dispatcher does with edx) and returns to the game, popping
+// the arguments for callee-cleaned conventions: for those it moves the return
+// address up over them and the saved ecx just below it, then pops that.
 //
-// tome_hook_invoke: calls `fn` with `count` stack arguments and ecx/edx set,
+// tome_hook_invoke: calls `fn` with `count` stack arguments and eax/ecx/edx set,
 // whatever its convention: esp is restored from ebp afterwards, so it doesn't
 // matter whether the callee popped them. Stores eax, edx and, if `fp_kind`
 // says so, pops st(0).
@@ -88,6 +92,7 @@ asm(R"(
     .text
     .globl _tome_hook_entry
 _tome_hook_entry:
+    push eax
     push edx
     push ecx
     sub esp, 24
@@ -106,16 +111,20 @@ _tome_hook_entry:
     mov eax, [esp]
     mov edx, [esp + 4]
     mov ecx, [esp + 8]
-    add esp, 36
     test ecx, ecx
     jnz .Ltome_hook_pop
+    mov ecx, [esp + 24]
+    add esp, 40
     ret
 .Ltome_hook_pop:
     push eax
-    mov eax, [esp + 4]
-    mov [esp + ecx + 4], eax
+    mov eax, [esp + 44]
+    mov [esp + ecx + 44], eax
+    mov eax, [esp + 28]
+    mov [esp + ecx + 40], eax
     pop eax
-    add esp, ecx
+    lea esp, [esp + ecx + 36]
+    pop ecx
     ret
 
     .globl _tome_hook_invoke
@@ -134,6 +143,7 @@ _tome_hook_invoke:
 .Ltome_invoke_call:
     mov ecx, [ebp + 20]
     mov edx, [ebp + 24]
+    mov eax, [ebp + 36]
     call dword ptr [ebp + 8]
     mov esi, [ebp + 28]
     mov [esi], eax
@@ -241,13 +251,16 @@ struct Original {
     const TomeHookFrame* frame;
     const uint32_t* args;  // the dispatcher's array, even if a mod repoints call.args
     uint32_t extra;
+    bool called = false;
 };
 
 // Calls the original with `args` (fixed arguments, then `extra` variadic words).
 TomeHookResult invoke(const Target& t, const TomeHookFrame& frame, const uint32_t* args, uint32_t extra) {
     const Layout& l = t.layout;
     uint32_t stack[kMaxArgWords + kVariadicWords];
-    // Registers no parameter uses pass through as the caller set them.
+    // Registers no parameter uses pass through as the caller set them (eax
+    // too: a void function the compiler knows leaves it alone, or a
+    // constructor returning `this` in it, gives the caller what it expects).
     uint32_t ecx = frame.ecx, edx = frame.edx;
     for (const Param& p : l.params) {
         switch (p.where) {
@@ -260,12 +273,13 @@ TomeHookResult invoke(const Target& t, const TomeHookFrame& frame, const uint32_
     }
     std::memcpy(stack + l.stack_slots, args + l.arg_words, extra * 4);
     TomeHookResult r = {};
-    tome_hook_invoke(t.trampoline, stack, l.stack_slots + extra, ecx, edx, &r, fp_kind(l));
+    tome_hook_invoke(t.trampoline, stack, l.stack_slots + extra, ecx, edx, &r, fp_kind(l), frame.eax_in);
     return r;
 }
 
 void call_original(void* context, tome_hook_call& call) {
     auto& o = *static_cast<Original*>(context);
+    o.called = true;
     TomeHookResult r = invoke(*o.target, *o.frame, o.args, o.extra);
     call.result = r.eax;
     call.result_high = r.edx;
@@ -291,7 +305,7 @@ bool invoke_guarded(const Handler& h, tome_hook_call& call) {
 
 uint32_t call_with_stack(const void* fn, const uint32_t* args, uint32_t count) {
     TomeHookResult r = {};
-    tome_hook_invoke(fn, args, count, 0, 0, &r, kFpNone);
+    tome_hook_invoke(fn, args, count, 0, 0, &r, kFpNone, 0);
     return r.eax;
 }
 
@@ -582,12 +596,18 @@ extern "C" void tome_hook_dispatch(TomeHookFrame* frame) {
         d.context = &original;
         d.invoke = invoke_guarded;
         run(d);
-        eax = d.call.result;
+        // A void function the handlers skipped leaves eax as the caller had
+        // it, as the original would have (if it leaves eax alone).
+        eax = l.result == Result::None && !original.called ? frame->eax_in : d.call.result;
         edx = d.call.result_high;
         fp = d.call.result_float;
     }
     frame->eax = eax;
-    frame->edx_out = edx;
+    // edx is the caller's again unless the result is 64-bit: 1.26a's compiler
+    // relies on a leaf function it calls leaving a register alone (callers of
+    // RCString::GetText keep `this` in ecx across the call), so a hook must
+    // too. tome_hook_entry gives back ecx itself; eax goes into the original.
+    frame->edx_out = l.wide_result ? edx : frame->edx;
     frame->pop_bytes = l.pop_bytes;
     frame->fp_kind = fp_kind(l);
     if (l.result == Result::Float) frame->fp.f = static_cast<float>(fp);

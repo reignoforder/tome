@@ -151,8 +151,9 @@ An error fails the build: `tome.mod.json` or the settings schema, a
 disable, an unsafe icon. Every warning Tome logged (the mod's own included)
 is printed. A mod that needs others gets them with `CHECK_WITH <their
 targets or folders>`; `NO_CHECK` skips one. By hand: `tome-check [--strict]
-<mod folder or .tome> [<the mods it needs>...]` (`--strict` fails on
-warnings too).
+[--edition roc|tft] <mod folder or .tome> [<the mods it needs>...]`
+(`--strict` fails on warnings too; `--edition` picks the game it runs as,
+by default the mod's own `"edition"`, else The Frozen Throne).
 
 **Tests.** [`tome_test.h`](include/tome/tome_test.h) drives a built mod as
 the game would: it starts Tome with the mod installed and allowed, then a

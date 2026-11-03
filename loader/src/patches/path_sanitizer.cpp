@@ -21,8 +21,12 @@
  * which the game would truncate (for PreloadGenEnd, one too long to fit after
  * the game's folder, which can crash the game); a plain relative name (the
  * natives' intended use, subdirectories included) is untouched. Preload's
- * argument may be any length: maps use it as a data channel
- * (path_guard::is_unsafe_any_length).
+ * argument is never refused: maps use it as a data channel (PreloadGenEnd
+ * writes it out word for word, any length and any characters). The game only
+ * opens the files Preload lists in PreloadStart, PreloadEnd, PreloadEndEx and
+ * PreloadRefresh (docs/reverse-engineering.md), so while the list holds a
+ * name that isn't a safe path (path_guard::is_unsafe_any_length), those are
+ * refused instead, until PreloadGenClear empties the list.
  *
  * Mechanism (build-independent, no native addresses hardcoded): hook the
  * mapped BindNative(fn, name, signature), which the engine's InitNatives
@@ -74,9 +78,10 @@ using StringTextFn = const char*(__thiscall*)(const void* string);
 //
 // Writes (create, overwrite, move or delete a file) also refuse an empty
 // name, which has no target. Reads allow one: maps pass "" on purpose, e.g. a
-// special effect with no model. Data (only Preload) is a read whose argument
-// may also be any length: Preload keeps its string as is, and maps use it to
-// carry data into the file PreloadGenEnd writes (codeless save/load).
+// special effect with no model. Data (only Preload) is never refused: Preload
+// keeps its string as is, and maps use it to carry data into the file
+// PreloadGenEnd writes (codeless save/load), so any string is legitimate. An
+// unsafe one marks the preload list instead (g_preload_unsafe, kListNatives).
 enum class Access { Write, Read, Data };
 // in_custom_map_data: the game puts the name after "<game folder>\\CustomMapData\\"
 // in a MAX_PATH buffer (PreloadGenEnd), so its limit is path_guard::
@@ -143,6 +148,14 @@ StringTextFn g_string_text = nullptr;
 // so `volatile` (as in natives.cpp) is enough and no lock is needed.
 void* volatile g_orig[kCount] = {};
 unsigned long g_refused_total = 0;
+// Preload arguments kept though they aren't safe paths: counted (and their
+// log lines paced) apart, so a map saving data doesn't use up the refusals'.
+unsigned long g_kept_total = 0;
+
+// The game's preload list (one for the process, kept across maps) holds a
+// name from Preload that isn't a safe path: the natives that open the list's
+// files are refused until PreloadGenClear empties it. Main thread only.
+bool g_preload_unsafe = false;
 
 // The longest name PreloadGenEnd may take here (path_guard::max_name_after the
 // game's own "<game folder>\\CustomMapData\\"), set at install.
@@ -176,11 +189,11 @@ bool escapes(size_t i, uint32_t jass_string) {
                                                   : !path_guard::is_unsafe(text))) {
         return false;
     }
-    ++g_refused_total;
+    const unsigned long total = spec.access == Access::Data ? ++g_kept_total : ++g_refused_total;
     const Reason reason = too_long ? kTooLong : kEscapes;
     const bool first_of_kind = !g_logged[i][reason];
     g_logged[i][reason] = true;
-    if (first_of_kind || g_refused_total <= kLogFirst || g_refused_total % kLogEvery == 0) {
+    if (first_of_kind || total <= kLogFirst || total % kLogEvery == 0) {
         char shown[kLogChars + 1];
         size_t n = 0;
         for (; n < kLogChars && path[n]; ++n) {
@@ -188,19 +201,30 @@ bool escapes(size_t i, uint32_t jass_string) {
             shown[n] = (c < 0x20 || c == 0x7f) ? '?' : path[n];
         }
         shown[n] = '\0';
-        TOME_WARN("path-sanitizer: refused %s(\"%s%s\") -- %s (total %lu)", spec.name, shown, path[n] ? "..." : "",
-                  reason == kTooLong ? "too long" : "escapes the data folder", g_refused_total);
+        if (spec.access == Access::Data) {
+            TOME_WARN("path-sanitizer: kept %s(\"%s%s\") for PreloadGenEnd, but it escapes the data folder: the "
+                      "preload list's files won't be loaded until PreloadGenClear (total %lu)",
+                      spec.name, shown, path[n] ? "..." : "", total);
+        } else {
+            TOME_WARN("path-sanitizer: refused %s(\"%s%s\") -- %s (total %lu)", spec.name, shown,
+                      path[n] ? "..." : "", reason == kTooLong ? "too long" : "escapes the data folder", total);
+        }
     }
     return true;
 }
 
 // True if any path argument of kSpecs[i] must be refused. Checks (and logs)
-// every path, so a refused CopySaveGame names both.
+// every path, so a refused CopySaveGame names both. Data is never refused: an
+// unsafe one marks the preload list (g_preload_unsafe).
 bool refuse(size_t i, const uint32_t* args) {
     const Spec& spec = kSpecs[i];
     bool refused = false;
     for (int a = 0; a < spec.args; ++a) {
         if (spec.paths & (1u << a)) refused = escapes(i, args[a]) || refused;
+    }
+    if (spec.access == Access::Data) {
+        g_preload_unsafe = g_preload_unsafe || refused;
+        return false;
     }
     return refused;
 }
@@ -233,6 +257,65 @@ std::array<void*, kCount> make_wrappers(std::index_sequence<I...>) {
 }
 const std::array<void*, kCount> kWrappers = make_wrappers(std::make_index_sequence<kCount>{});
 
+// The natives that work on the preload list Preload fills: the first four
+// open its files (models, textures, other files; PreloadStart and PreloadEnd
+// through 0x249B80, PreloadEnd, PreloadEndEx and PreloadRefresh through
+// 0x2441B0 on 1.27b), PreloadGenClear empties it (0x229A30). None takes a
+// path or returns a value. Refused while g_preload_unsafe.
+struct ListSpec {
+    const char* name;
+    int args;
+    bool clears;
+};
+constexpr ListSpec kListSpecs[] = {
+    {"PreloadStart", 0, false},
+    {"PreloadEnd", 1, false},  // (timeout)
+    {"PreloadEndEx", 0, false},
+    {"PreloadRefresh", 0, false},
+    {"PreloadGenClear", 0, true},
+};
+constexpr size_t kListCount = sizeof(kListSpecs) / sizeof(kListSpecs[0]);
+void* volatile g_list_orig[kListCount] = {};
+unsigned long g_list_refused = 0;
+
+// Runs kListSpecs[i] (or doesn't); false if it's refused.
+bool list_native_runs(size_t i) {
+    if (!g_list_orig[i]) return false;
+    if (kListSpecs[i].clears) {
+        g_preload_unsafe = false;  // the list is empty after it
+        return true;
+    }
+    if (!g_preload_unsafe) return true;
+    ++g_list_refused;
+    if (g_list_refused <= kLogFirst || g_list_refused % kLogEvery == 0) {
+        TOME_WARN("path-sanitizer: refused %s() -- the preload list holds a name that escapes the data folder "
+                  "(total %lu)", kListSpecs[i].name, g_list_refused);
+    }
+    return false;
+}
+
+template <size_t I>
+uint32_t __cdecl list_wrapper0() {
+    if (!list_native_runs(I)) return 0;
+    return reinterpret_cast<uint32_t(__cdecl*)()>(g_list_orig[I])();
+}
+template <size_t I>
+uint32_t __cdecl list_wrapper1(uint32_t a) {
+    if (!list_native_runs(I)) return 0;
+    return reinterpret_cast<uint32_t(__cdecl*)(uint32_t)>(g_list_orig[I])(a);
+}
+template <size_t I>
+constexpr void* list_wrapper() {
+    static_assert(kListSpecs[I].args == 0 || kListSpecs[I].args == 1);
+    if constexpr (kListSpecs[I].args == 0) return reinterpret_cast<void*>(&list_wrapper0<I>);
+    else return reinterpret_cast<void*>(&list_wrapper1<I>);
+}
+template <size_t... I>
+std::array<void*, kListCount> make_list_wrappers(std::index_sequence<I...>) {
+    return {list_wrapper<I>()...};
+}
+const std::array<void*, kListCount> kListWrappers = make_list_wrappers(std::make_index_sequence<kListCount>{});
+
 // BEFORE BindNative(void* fn, const char* name, const char* signature)
 // (fastcall: fn=args[0], name=args[1], signature=args[2]). For a target
 // native, remember the engine's real fn and bind our wrapper instead. Mods
@@ -251,6 +334,13 @@ void TOME_CALL on_bind_native(tome_mod*, tome_hook_call* call, void*) {
         void* fn = reinterpret_cast<void*>(call->args[0]);
         if (fn != kWrappers[i]) g_orig[i] = fn;
         call->args[0] = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(kWrappers[i]));
+        return;
+    }
+    for (size_t i = 0; i < kListCount; ++i) {
+        if (std::strcmp(name, kListSpecs[i].name) != 0) continue;
+        void* fn = reinterpret_cast<void*>(call->args[0]);
+        if (fn != kListWrappers[i]) g_list_orig[i] = fn;
+        call->args[0] = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(kListWrappers[i]));
         return;
     }
 }
@@ -275,15 +365,12 @@ size_t custom_map_data_prefix_len() {
     return n + std::strlen("CustomMapData\\");
 }
 
-bool install_path_sanitizer(uintptr_t game_base, const BuildMappings& build, std::string& report) {
+bool install_path_sanitizer(uintptr_t game_base, const BuildMappings& build, const Variant&, std::string& report) {
     g_string_text = reinterpret_cast<StringTextFn>(game_base + build.jass.string_get_text);
-    if (size_t prefix = custom_map_data_prefix_len()) {
-        g_custom_map_data_max = path_guard::max_name_after(prefix);
-    } else {
-        TOME_WARN("path-sanitizer: can't tell the length of the game folder; PreloadGenEnd names over %zu refused",
-                  path_guard::max_name_after(MAX_PATH / 2));
-        g_custom_map_data_max = path_guard::max_name_after(MAX_PATH / 2);
-    }
+    // Without the folder's length, assume a long one. This runs in DllMain,
+    // before tome.log is open (patches.cpp), so the report says so, not a log line.
+    const size_t prefix = custom_map_data_prefix_len();
+    g_custom_map_data_max = path_guard::max_name_after(prefix ? prefix : MAX_PATH / 2);
     std::string error;
     hooks::Target* bind = hooks::find_or_install("BindNative", error);
     if (!bind) {
@@ -296,7 +383,8 @@ bool install_path_sanitizer(uintptr_t game_base, const BuildMappings& build, std
     before.fn = on_bind_native;
     hooks::add(bind, before);
     report = "sanitizes paths of " + std::to_string(kCount) + " file natives (PreloadGenEnd names up to " +
-             std::to_string(g_custom_map_data_max) + " characters)";
+             std::to_string(g_custom_map_data_max) + " characters" +
+             (prefix ? "" : "; the game folder's length is unknown") + "; guards the preload list)";
     return true;
 }
 
@@ -311,7 +399,7 @@ const char* const kSymbols[] = {"BindNative", "RCString::GetText", nullptr};
 extern const Patch kPathSanitizer = {
     "path-sanitizer",
     "refuses path traversal in every JASS native that takes a file path",
-    nullptr,    // any build that maps the symbols below
+    {},  // the same on every build
     kSymbols,   // symbols it needs mapped
     nullptr,    // reserves nothing: mods may still hook BindNative (see file header)
     nullptr,    // needed everywhere

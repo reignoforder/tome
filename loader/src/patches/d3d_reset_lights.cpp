@@ -56,7 +56,7 @@ void TOME_CALL on_release_for_reset(tome_mod*, tome_hook_call* call, void*) {
     for (uint32_t i = 0; i < kGameLights; ++i) light_enable(device, i, 0);
 }
 
-bool install_d3d_reset_lights(uintptr_t, const BuildMappings& build, std::string& report) {
+bool install_d3d_reset_lights(uintptr_t, const BuildMappings& build, const Variant&, std::string& report) {
     g_device_offset = build.d3d.device_offset;
     std::string error;
     hooks::Target* release = hooks::find_or_install("CGxDeviceD3d::ReleaseForReset", error);
@@ -79,7 +79,7 @@ const char* const kSymbols[] = {"CGxDeviceD3d::ReleaseForReset", "CGxDeviceD3d.d
 extern const Patch kD3dResetLights = {
     "d3d-reset-lights",
     "keeps the scene's lights after Alt+Tab in Direct3D fullscreen under Wine (a wined3d reset bug leaks them)",
-    nullptr,  // any build that maps the symbols below
+    {},  // the same on every build
     kSymbols,
     nullptr,  // nothing to protect: a mod can't reopen a hole through it
     only_under_wine,

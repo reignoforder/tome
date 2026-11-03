@@ -71,7 +71,7 @@ void TOME_CALL on_init_midi(tome_mod*, tome_hook_call* call, void*) {
     TOME_DEBUG("ambient-sound: made '%s' as a MIDI sound", label);
 }
 
-bool install_ambient_sound(uintptr_t base, const BuildMappings& build, std::string& report) {
+bool install_ambient_sound(uintptr_t base, const BuildMappings& build, const Variant&, std::string& report) {
     g_create_midi = reinterpret_cast<CreateMidiFn>(base + build.sound.create_midi);
     g_sound_offset = build.sound.sound_offset;
     g_midi_offset = build.sound.midi_offset;
@@ -93,13 +93,18 @@ bool install_ambient_sound(uintptr_t base, const BuildMappings& build, std::stri
 
 const char* const kSymbols[] = {"CSound::InitMIDI", "CreateMIDISnd", "CSound.sound", "CSound.midi",
                                 "SoundCategory.ambient", nullptr};
+const char* const k126a[] = {"1.26a", nullptr};
+const Variant kVariants[] = {
+    {k126a, nullptr, "its CSound::InitMIDI still makes the MIDI sound (the bug came with 1.27a)", nullptr},
+    {nullptr, nullptr, nullptr, nullptr},
+};
 
 } // namespace
 
 extern const Patch kAmbientSound = {
     "ambient-sound",
     "plays the day and night ambient sounds that 1.27a turned off (CreateMIDISound made nothing)",
-    nullptr,  // any build that maps the symbols below
+    kVariants,  // not 1.26a
     kSymbols,
     nullptr,  // nothing to protect: a mod may change the game's sounds
     nullptr,  // needed everywhere

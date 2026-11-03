@@ -271,6 +271,14 @@ function TomeE2EPaths takes nothing returns nothing
     // length: maps carry data in it.
     call Preload("LONGDATA_300")
     call PreloadGenEnd("LONGPATH_239")
+    // Preload keeps any data, even one that isn't a safe path ("Gold: ..\\"),
+    // but then the natives that load the preload list's files are refused
+    // until PreloadGenClear empties it.
+    call PreloadGenClear()
+    call Preload("e2e save: ..\\\\Gold")
+    call PreloadEnd(0.0)
+    call PreloadGenClear()
+    call PreloadRefresh()
     call TomeLogInteger(9609)
 endfunction
 
@@ -388,7 +396,8 @@ function TomeE2EMenuUnit takes nothing returns nothing
     if GetEventPlayerChatString() == "-build" then
         set u = CreateUnit(Player(0), 'hpea', x - 200.0, y - 450.0, 0.0)
     else
-        set u = CreateUnit(Player(0), 'Hblm', x - 300.0, y - 450.0, 0.0)
+        // A hero in Reign of Chaos too (the Blood Mage isn't): EDITION=roc.
+        set u = CreateUnit(Player(0), 'Hmkg', x - 300.0, y - 450.0, 0.0)
     endif
     call ClearSelection()
     call SelectUnit(u, true)

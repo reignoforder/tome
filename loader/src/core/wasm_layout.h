@@ -27,7 +27,7 @@ using Handles = std::function<uint32_t(HandleKind kind, const void* object)>;
 // Sizes and offsets of the wasm32 structs (tome_wasm.h checks the same).
 constexpr uint32_t kUnitSize = 28;
 constexpr uint32_t kEventSize = 184;
-constexpr uint32_t kGameInfoSize = 12;
+constexpr uint32_t kGameInfoSize = 16;
 constexpr uint32_t kShadowSize = 20;
 
 // tome_wasm_event: tome_event_info with wasm32 pointers; `item` and
@@ -37,9 +37,9 @@ std::string encode_event(const tome_event_info& info, const Handles& handles, ui
 // An array of tome_wasm_unit (selection), its names after it.
 std::string encode_units(const tome_unit* units, uint32_t count, const Handles& handles, uint32_t base);
 
-// tome_wasm_game_info: size, build_name, file_version (no game_base: an
-// address).
-std::string encode_game_info(const char* build_name, const char* file_version, uint32_t base);
+// tome_wasm_game_info: size, build_name, file_version, edition (no
+// game_base: an address).
+std::string encode_game_info(const char* build_name, const char* file_version, int32_t edition, uint32_t base);
 
 // An array of tome_wasm_script_shadow.
 std::string encode_shadows(const tome_script_shadow* shadows, uint32_t count, uint32_t base);

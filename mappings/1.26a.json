@@ -1,0 +1,1152 @@
+{
+  "schema": 2,
+  "name": "1.26a",
+  "file_version": "1.26.0.6401",
+  "pe_timestamp": "0x4d83bb00",
+  "size_of_image": "0x00bb5000",
+  "sha256": "6d21bd9a0f9fbc8446f455c9e89ac994fed68174426fe608fcb9baefd4dec53c",
+  "symbols": {
+
+    "BindNative": {
+      "kind": "function", "rva": "0x00455110", "conv": "fastcall",
+      "sig": "void(void* fn, const char* name, const char* signature)",
+      "bytes": "81 ec 0c 01 00 00 a1 ?? ?? ?? ?? 33 c4 89 84 24 08 01 00 00 56 8b b4 24 14 01 00 00 57"
+    },
+    "InitNatives": {
+      "kind": "function", "rva": "0x003d4020", "conv": "cdecl",
+      "sig": "void(void)",
+      "bytes": "e8 db fb 07 00 68 ?? ?? ?? ?? ba ?? ?? ?? ?? b9"
+    },
+    "InitNatives.call.startup": { "kind": "call", "rva": "0x000085da", "target": "InitNatives" },
+    "InitNatives.call.map_load_1": { "kind": "call", "rva": "0x003a313e", "target": "InitNatives" },
+    "InitNatives.call.map_load_2": { "kind": "call", "rva": "0x003aff0f", "target": "InitNatives" },
+    "RCString::GetText": {
+      "kind": "function", "rva": "0x004c4630", "conv": "thiscall",
+      "sig": "const char*(RCString* this)",
+      "bytes": "8b 41 08 85 c0 74 04 8b 40 1c c3 33 c0 c3 cc cc"
+    },
+    "CreateJassString": {
+      "kind": "function", "rva": "0x003baa20", "conv": "fastcall",
+      "sig": "uint32_t(const char* text)",
+      "bytes": "8b c1 85 c0 8b 0d ?? ?? ?? ?? 75 01 c3 50 e8 bd"
+    },
+    "JassScanner::nextToken": {
+      "kind": "function", "rva": "0x0045ff30", "conv": "thiscall",
+      "sig": "int(void* this)",
+      "bytes": "83 ec 08 53 55 56 8b f1 8b 8e 98 00 00 00 8a 56"
+    },
+    "Jass::compile": {
+      "kind": "function", "rva": "0x00458900", "conv": "fastcall",
+      "sig": "void*(void* context, void* callback, void* a0, int a1)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 81 ec ec 00 00 00 56"
+    },
+    "JassVarDesc::ctor": {
+      "kind": "function", "rva": "0x004641f0", "conv": "thiscall",
+      "sig": "void(void* this, int kind, void* a0, void* typeNode, void* sym, void* a3)",
+      "bytes": "8b c1 8b 4c 24 04 c7 00 ?? ?? ?? ?? 33 d2 89 50 14 89 48 04 8b 4c 24 08 89 48 0c 8b 89 b8 00 00 00 89 48 08 33 c9 89 48 10 8b 4c 24 0c 56",
+      "doc": "1.26a: the variable descriptor constructor for every kind (0x29 local, 0x2A global), which 1.27b splits; a local declaration writes sym+0x18 = this as 1.27b's JassLocalVarDesc::ctor does (the memhack gateway). The compiler calls it with 0x29 at 0x4648DE (the local-only wrapper at 0x464260 has no callers). ret 0x14."
+    },
+    "Native.CreateTrigger": {
+      "kind": "function", "rva": "0x003d11f0", "conv": "cdecl",
+      "sig": "uint32_t(void)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 34 56 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 3c 64 a3 00 00 00 00 6a 00 8d 4c 24 0c e8 c1 7f"
+    },
+    "Native.DestroyTrigger": {
+      "kind": "function", "rva": "0x003c1c00", "conv": "cdecl",
+      "sig": "void(uint32_t trigger)",
+      "bytes": "8b 4c 24 04 e8 e7 c2 ff ff 85 c0 74 09 8b 10 8b"
+    },
+    "Native.Condition": {
+      "kind": "function", "rva": "0x003bb0a0", "conv": "cdecl",
+      "sig": "uint32_t(uint32_t code)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 51 56 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 0c 64 a3 00 00 00 00 8b 0d ?? ?? ?? ?? e8 93"
+    },
+    "Native.TriggerAddCondition": {
+      "kind": "function", "rva": "0x003c3df0", "conv": "cdecl",
+      "sig": "uint32_t(uint32_t trigger, uint32_t boolexpr)",
+      "bytes": "8b 4c 24 04 56 e8 f6 a0 ff ff 8b f0 85 f6 75 04"
+    },
+    "Native.TriggerAddAction": {
+      "kind": "function", "rva": "0x003c3e90", "conv": "cdecl",
+      "sig": "uint32_t(uint32_t trigger, uint32_t code)",
+      "bytes": "8b 4c 24 04 e8 57 a0 ff ff 85 c0 75 01 c3 8b 4c"
+    },
+    "Native.TriggerExecute": {
+      "kind": "function", "rva": "0x003c3f40", "conv": "cdecl",
+      "sig": "void(uint32_t trigger)",
+      "bytes": "8b 4c 24 04 e8 a7 9f ff ff 85 c0 74 09 6a 00 8b"
+    },
+    "Native.TriggerEvaluate": {
+      "kind": "function", "rva": "0x003c3f80", "conv": "cdecl",
+      "sig": "int32_t(uint32_t trigger)",
+      "bytes": "8b 4c 24 04 e8 67 9f ff ff 85 c0 75 01 c3 8b c8"
+    },
+
+    "LoadFrameDefToc": {
+      "kind": "function", "rva": "0x005c8510", "conv": "fastcall",
+      "sig": "void(const char* toc_path, void* context)",
+      "bytes": "56 8b f2 85 f6 57 8b f9 75 05 be ?? ?? ?? ?? 6a"
+    },
+    "LoadFrameDefToc.call.startup": { "kind": "call", "rva": "0x000085d5", "target": "LoadFrameDefToc" },
+    "LoadTocFiles": {
+      "kind": "function", "rva": "0x005d8de0", "conv": "fastcall",
+      "sig": "int(const char* toc_path, void* table_a, void* table_b, void* status)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 60 53 55 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 74 64 a3 00 00 00 00 89 54"
+    },
+    "FrameDefTableA": { "kind": "data", "rva": "0x00acd214" },
+    "FrameDefTableB": { "kind": "data", "rva": "0x00acd264" },
+    "FrameDefStatus": { "kind": "data", "rva": "0x00a8c804" },
+
+    "CreateFrame": {
+      "kind": "function", "rva": "0x005c9560", "conv": "fastcall",
+      "sig": "CFrame*(const char* template_name, CFrame* parent, int, int, int)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 0c 56 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 14 64 a3 00 00 00 00 8b f2"
+    },
+    "GetFrameByName": {
+      "kind": "function", "rva": "0x005fa970", "conv": "fastcall",
+      "sig": "CFrame*(const char* name, int context)",
+      "bytes": "51 8d 04 24 50 6a 00 e8 b4 fe ff ff 85 c0 74 05"
+    },
+    "CFrame.layout": { "kind": "offset", "value": "0xb4" },
+    "CFrame.vtable.Hide": { "kind": "offset", "value": "0xd0" },
+    "CFrame.vtable.Show": { "kind": "offset", "value": "0xd4" },
+    "CLayoutFrame.points": { "kind": "offset", "value": "0x8" },
+    "CLayoutFrame.dependents": { "kind": "offset", "value": "0x40" },
+    "CLayoutFrame.scale": { "kind": "offset", "value": "0x60" },
+    "CLayoutFrame.vtable.SetScale": { "kind": "offset", "value": "0x14" },
+    "CLayoutFrame::SetPoint": {
+      "kind": "function", "rva": "0x00606770", "conv": "thiscall",
+      "sig": "void(CLayoutFrame* this, int point, CLayoutFrame* relative, int relative_point, float x, float y, int update)",
+      "bytes": "53 8b 5c 24 08 56 8b f1 57 8b 7c 9e 08 85 ff 74"
+    },
+    "CTextFrame::SetText": {
+      "kind": "function", "rva": "0x00611d40", "conv": "thiscall",
+      "sig": "void(CTextFrame* this, const char* text)",
+      "bytes": "53 56 57 8b 7c 24 10 85 ff 8b f1 74 62 57 e8 13"
+    },
+    "CSpriteFrame::GetInstance": {
+      "kind": "function", "rva": "0x0060ede0", "conv": "thiscall",
+      "sig": "CModelInstance*(CSpriteFrame* this)",
+      "bytes": "83 b9 74 01 00 00 00 74 09 8b 81 78 01 00 00 8b"
+    },
+    "SetAnimation": {
+      "kind": "function", "rva": "0x004d7e50", "conv": "fastcall",
+      "sig": "void(CModelInstance* instance, const int* tags, int count, int flags)",
+      "bytes": "83 ec 0c 53 55 8b ea 8b d9 8b 4b 30 33 d2 3b ca"
+    },
+    "AnimTag.birth": { "kind": "constant", "value": 0 },
+    "AnimTag.death": { "kind": "constant", "value": 1 },
+    "AnimTag.stand": { "kind": "constant", "value": 2 },
+    "AnimTag.morph": { "kind": "constant", "value": 3 },
+    "AnimTag.alternate": { "kind": "constant", "value": 4 },
+    "AnimTag.singleplayer": { "kind": "constant", "value": 7 },
+    "AnimTag.options": { "kind": "constant", "value": 23 },
+
+    "CGlueMenu::BindControl": {
+      "kind": "function", "rva": "0x0057d740", "conv": "thiscall",
+      "sig": "CFrame*(CGlueMenu* this, const char* name, int command, int enable)",
+      "bytes": "56 57 8b f9 8b 4c 24 0c 33 d2 e8 21 d2 07 00 6a"
+    },
+    "CMainMenu.vtable": { "kind": "data", "rva": "0x009661cc" },
+    "CMainMenu.vtable.OnEvent": { "kind": "offset", "value": "0x0c" },
+    "CMainMenu.vtable.Setup": { "kind": "offset", "value": "0xdc" },
+    "CMainMenu::OnEvent": {
+      "kind": "function", "rva": "0x005b6e30", "conv": "thiscall",
+      "sig": "int(CMainMenu* this, CEvent* event)",
+      "bytes": "8b 44 24 04 56 8b f1 8b 48 08 83 f9 21 77 50 ff"
+    },
+    "CMainMenu::Setup": {
+      "kind": "function", "rva": "0x0058bd20", "conv": "thiscall",
+      "sig": "int(CMainMenu* this, int, int)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 81 ec 08 01 00 00 a1 ?? ?? ?? ?? 33 c4 89 84 24 04 01 00 00 53 55 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 84 24 1c 01 00 00 64 a3 00 00 00 00 ba"
+    },
+
+    "COptionsMenu.vtable": { "kind": "data", "rva": "0x0095ba4c" },
+    "COptionsMenu::OnEvent": {
+      "kind": "function", "rva": "0x00567c90", "conv": "thiscall",
+      "sig": "int(COptionsMenu* this, CEvent* event)",
+      "bytes": "8b 44 24 04 8b 40 08 83 f8 18 56 8b f1 77 20 ff"
+    },
+    "COptionsMenu::AnimateBackdrop": {
+      "kind": "function", "rva": "0x00558990", "conv": "thiscall",
+      "sig": "void(COptionsMenu* this, int open)",
+      "bytes": "83 ec 14 83 7c 24 18 00 56 6a 00 6a 00 8b f1 b9 01"
+    },
+    "COptionsMenu.panel": { "kind": "offset", "value": "0x16c" },
+    "COptionsMenu.panel_frame": { "kind": "offset", "value": "0x1e4" },
+    "OptionsMenuEvent.panel_fade_in": { "kind": "constant", "value": "0x11" },
+    "CEvent.command": { "kind": "offset", "value": "0x8" },
+    "OptionsPanel.gameplay": { "kind": "constant", "value": 0 },
+    "OptionsPanel.video": { "kind": "constant", "value": 1 },
+    "OptionsPanel.sound": { "kind": "constant", "value": 2 },
+    "OptionsPanel.none": { "kind": "constant", "value": 3 },
+
+    "CGlueMgr::Get": {
+      "kind": "function", "rva": "0x00593390", "conv": "cdecl",
+      "sig": "CGlueMgr*(void)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 08 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 0c 64 a3 00 00 00 00 a1 ?? ?? ?? ?? 85 c0 75 41"
+    },
+    "CGlueMgr.instance": { "kind": "data", "rva": "0x00accc44" },
+    "CGlueMgr.sprite_background": { "kind": "offset", "value": "0x190" },
+    "CGlueMgr.sprite_top_left": { "kind": "offset", "value": "0x194" },
+    "CGlueMgr.sprite_top_right": { "kind": "offset", "value": "0x198" },
+    "CMainMenu.gateways": { "kind": "offset", "value": "0x4a0" },
+    "CBattleNetGateways.version": { "kind": "offset", "value": "0x0" },
+    "CBattleNetGateways.selected": { "kind": "offset", "value": "0x4" },
+    "CBattleNetGateways.count": { "kind": "offset", "value": "0xc" },
+    "CBattleNetGateways.entries": { "kind": "offset", "value": "0x10" },
+    "CBattleNetGateways.extra_count": { "kind": "offset", "value": "0x1c" },
+    "CBattleNetGateways.extra_entries": { "kind": "offset", "value": "0x20" },
+    "Gateway.size": { "kind": "constant", "value": "0x204" },
+    "Gateway.zone": { "kind": "offset", "value": "0x0" },
+    "Gateway.host": { "kind": "offset", "value": "0x4" },
+    "Gateway.name": { "kind": "offset", "value": "0x104" },
+    "UITimer::Fire": {
+      "kind": "function", "rva": "0x0062bc50", "conv": "fastcall",
+      "sig": "int(const float* elapsed, void* timer)",
+      "bytes": "8b 42 18 a3 ?? ?? ?? ?? d9 01 d9 1d ?? ?? ?? ??"
+    },
+    "CGlueMgr::SetScreen": {
+      "kind": "function", "rva": "0x005934f0", "conv": "fastcall",
+      "sig": "void(int screen, int force)",
+      "bytes": "81 ec 8c 02 00 00 a1 ?? ?? ?? ?? 33 c4 89 84 24"
+    },
+    "CGlueMgr::EnterGame": {
+      "kind": "function", "rva": "0x00593750", "conv": "fastcall",
+      "sig": "void(int)",
+      "bytes": "56 57 8b f9 e8 37 fc ff ff 83 0d ?? ?? ?? ?? 01"
+    },
+    "CGlueMgr.screen_id": { "kind": "offset", "value": "0x180" },
+    "CGlueMgr.screen": { "kind": "offset", "value": "0x184" },
+    "GlueScreen.loading": { "kind": "constant", "value": 1 },
+    "GlueScreen.main_menu": { "kind": "constant", "value": 2 },
+    "GlueScreen.options": { "kind": "constant", "value": 3 },
+    "GlueScreen.single_player": { "kind": "constant", "value": 4 },
+    "GlueScreen.custom_game": { "kind": "constant", "value": 5 },
+    "GlueScreen.custom_campaign": { "kind": "constant", "value": 6 },
+    "GlueScreen.campaign": { "kind": "constant", "value": 7 },
+    "GlueScreen.lan": { "kind": "constant", "value": 8 },
+    "GlueScreen.lan_create": { "kind": "constant", "value": 9 },
+    "GlueScreen.score_screen": { "kind": "constant", "value": 12 },
+    "GlueScreen.view_replay": { "kind": "constant", "value": 13 },
+    "GlueScreen.load_saved_game": { "kind": "constant", "value": 14 },
+    "GlueScreen.battle_net": { "kind": "constant", "value": 15 },
+    "GlueScreen.none": { "kind": "constant", "value": 17 },
+
+    "CGameWar3::Reset": {
+      "kind": "function", "rva": "0x003a2ec0", "conv": "thiscall",
+      "sig": "void(CGameWar3* this, int leaving, int)",
+      "bytes": "56 8b f1 57 33 c9 c7 86 e0 03 00 00 00 00 00 00"
+    },
+    "Game.expansion": { "kind": "data", "rva": "0x00a4f6e8" },
+    "CGameWar3.instance": { "kind": "data", "rva": "0x00ab65f4" },
+    "CGameWar3.map_info": { "kind": "offset", "value": "0x30" },
+    "MapInfo.name": { "kind": "offset", "value": "0x4" },
+    "MapInfo.path": { "kind": "offset", "value": "0x24" },
+    "MapInfo.description": { "kind": "offset", "value": "0x10" },
+    "CGameWar3.local_player": { "kind": "offset", "value": "0x28" },
+    "CGameWar3.player_count": { "kind": "offset", "value": "0x54" },
+    "CGameWar3.load_path": { "kind": "offset", "value": "0x2f0" },
+    "CGameWar3.load_is_save": { "kind": "offset", "value": "0x32c" },
+    "CGameWar3.handles": { "kind": "offset", "value": "0x1c" },
+    "CGameWar3::GetPlayer": {
+      "kind": "function", "rva": "0x003a1650", "conv": "thiscall",
+      "sig": "CPlayerWar3*(CGameWar3* this, int slot)",
+      "bytes": "8b 44 24 04 8b 44 81 58 c2 04 00 cc cc cc cc cc"
+    },
+    "CPlayerWar3.name": { "kind": "offset", "value": "0x24" },
+    "CPlayerWar3.slot": { "kind": "offset", "value": "0x30" },
+    "CPlayerWar3.game_state": { "kind": "offset", "value": "0x270" },
+    "CPlayerWar3.selection": { "kind": "offset", "value": "0x34" },
+    "CSelectionWar3.local_leader": { "kind": "offset", "value": "0x1e0" },
+    "CSelectionWar3.local_units": { "kind": "offset", "value": "0x1e8" },
+    "UnitGroup.first": { "kind": "offset", "value": "0xc" },
+    "UnitGroup.count": { "kind": "offset", "value": "0x10" },
+    "CAgent.id": { "kind": "offset", "value": "0xc" },
+    "CItem.type_id": { "kind": "offset", "value": "0x30" },
+    "COrder.id": { "kind": "offset", "value": "0x24" },
+    "COrder.x": { "kind": "offset", "value": "0x48" },
+    "COrder.y": { "kind": "offset", "value": "0x50" },
+    "CUnit.vtable": { "kind": "data", "rva": "0x00931934" },
+    "CItem.vtable": { "kind": "data", "rva": "0x009320b4" },
+    "CDestructable.vtable": { "kind": "data", "rva": "0x0092eaf4" },
+    "CDestructable.type_id": { "kind": "offset", "value": "0x30" },
+    "CAbility.vtable.GetCooldownRemaining": { "kind": "offset", "value": "0x2dc" },
+    "CAbility.type_id": { "kind": "offset", "value": "0x34" },
+    "CAbilitySpell.vtable.GetTargetWidget": { "kind": "offset", "value": "0x3c8" },
+    "CAbilitySpell.vtable.GetTargetX": { "kind": "offset", "value": "0x3cc" },
+    "CAbilitySpell.vtable.GetTargetY": { "kind": "offset", "value": "0x3d0" },
+    "CUnit.type_id": { "kind": "offset", "value": "0x30" },
+    "CUnit.vtable.IsVisibleTo": { "kind": "offset", "value": "0xfc" },
+    "CPlayerWar3.alliances": { "kind": "offset", "value": "0x38" },
+    "PlayerAlliances.passive": { "kind": "offset", "value": "0x38" },
+    "AllianceFlags.players": { "kind": "offset", "value": "0x78" },
+    "ObjectLookup": {
+      "kind": "function", "rva": "0x0003fa30", "conv": "fastcall",
+      "sig": "void*(uint32_t id_a, uint32_t id_b)",
+      "bytes": "56 8b 35 ?? ?? ?? ?? 57 8b f9 c1 ef 1f 75 0e 3b"
+    },
+    "ObjectRecord.tag": { "kind": "offset", "value": "0xc" },
+    "ObjectRecord.dead": { "kind": "offset", "value": "0x20" },
+    "ObjectTag.agent": { "kind": "constant", "value": "0x2b61676c" },
+    "CUnit.owner": { "kind": "offset", "value": "0x58" },
+    "CUnit.flags": { "kind": "offset", "value": "0x5c" },
+    "UnitFlag.dead": { "kind": "constant", "value": "0x100" },
+    "UnitFlag.structure": { "kind": "constant", "value": "0x10000" },
+    "UnitFlag.not_hero": { "kind": "constant", "value": "0x40000000" },
+    "GetUnitTypeName": {
+      "kind": "function", "rva": "0x0032dbe0", "conv": "fastcall",
+      "sig": "const char*(uint32_t type_id, uint32_t index)",
+      "bytes": "56 8b f2 ba ?? ?? ?? ?? e8 93 ec ff ff 85 c0 74"
+    },
+    "HandleManager.hash_buckets": { "kind": "offset", "value": "0x1c0" },
+    "HandleManager.hash_mask": { "kind": "offset", "value": "0x1c8" },
+    "HandleManager.entries": { "kind": "offset", "value": "0x19c" },
+    "HandleId.first": { "kind": "constant", "value": "0x100000" },
+
+    "OnNetGameTick": {
+      "kind": "function", "rva": "0x002f4950", "conv": "fastcall",
+      "sig": "int(CNetEventGameTick* event)",
+      "bytes": "83 c1 14 e8 18 c3 17 00 b8 01 00 00 00 c3 cc cc"
+    },
+    "CNetEventGameTick.step": { "kind": "offset", "value": "0x14" },
+    "GameShutdown": {
+      "kind": "function", "rva": "0x00007b00", "conv": "cdecl",
+      "sig": "void(void)",
+      "bytes": "56 e8 1a dc ff ff e8 55 dc ff ff e8 00 5e 7a 00"
+    },
+    "CGameUI::Get": {
+      "kind": "function", "rva": "0x00300710", "conv": "fastcall",
+      "sig": "CGameUI*(int create, int forget)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 08 56 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 10 64 a3 00 00 00 00 8b f2 83"
+    },
+    "CGameUI::HandleSlashCommand": {
+      "kind": "function", "rva": "0x002f93b0", "conv": "thiscall",
+      "sig": "int(CGameUI* this, const char* text)",
+      "bytes": "81 ec 4c 01 00 00 a1 ?? ?? ?? ?? 33 c4 89 84 24 48 01 00 00 53 8b"
+    },
+    "CGameUI::DisplayText": {
+      "kind": "function", "rva": "0x002f8e40", "conv": "thiscall",
+      "sig": "void(CGameUI* this, float x, float y, const char* text, float duration, uint32_t color)",
+      "bytes": "d9 44 24 08 56 83 ec 08 d9 5c 24 04 8b f1 d9 44"
+    },
+    "CPlayerWar3::OnUnitDeath": {
+      "kind": "function", "rva": "0x0041ca40", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* unit, CUnit* killer)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 34 53 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 44 64 a3 00 00 00 00 8b f9 68 14 02"
+    },
+    "CPlayerWar3::OnConstructFinish": {
+      "kind": "function", "rva": "0x0041d760", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* building)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 34 53 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 44 64 a3 00 00 00 00 8b f9 68 1c"
+    },
+    "CPlayerWar3::OnTrainFinish": {
+      "kind": "function", "rva": "0x0041e250", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* building, CUnit* trained)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 34 53 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 44 64 a3 00 00 00 00 8b f9 68 22"
+    },
+    "CPlayerWar3::OnUpgradeFinish": {
+      "kind": "function", "rva": "0x0041daa0", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* unit, uint32_t value)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 34 53 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 44 64 a3 00 00 00 00 8b f9 68 1f"
+    },
+    "CPlayerWar3::OnResearchFinish": {
+      "kind": "function", "rva": "0x0041ddf0", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* unit, uint32_t research)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 34 53 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 44 64 a3 00 00 00 00 8b f9 68 25"
+    },
+    "CPlayerWar3::OnHeroLevel": {
+      "kind": "function", "rva": "0x0041c190", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* hero)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 34 53 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 44 64 a3 00 00 00 00 8b f9 68 29"
+    },
+    "CPlayerWar3::OnSummon": {
+      "kind": "function", "rva": "0x0041d0b0", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* summoner, CUnit* summoned)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 34 53 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 44 64 a3 00 00 00 00 8b f9 68 2f"
+    },
+    "CPlayerWar3::OnPickupItem": {
+      "kind": "function", "rva": "0x0041d410", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* unit, CItem* item)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 34 53 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 44 64 a3 00 00 00 00 8b f9 68 31"
+    },
+    "CPlayerWar3::OnDropItem": {
+      "kind": "function", "rva": "0x0041d2f0", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* unit, CItem* item)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 34 53 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 44 64 a3 00 00 00 00 8b f9 68 30"
+    },
+    "CPlayerWar3::OnUseItem": {
+      "kind": "function", "rva": "0x0041d530", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* unit, CItem* item)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 34 53 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 44 64 a3 00 00 00 00 8b f9 68 32"
+    },
+    "CPlayerWar3::OnVictory": {
+      "kind": "function", "rva": "0x0041bd70", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 34 53 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 44 64 a3 00 00 00 00 8b f9 68 0e 02"
+    },
+    "CPlayerWar3::OnDefeat": {
+      "kind": "function", "rva": "0x0041bc70", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 34 53 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 44 64 a3 00 00 00 00 8b f9 68 0d 02"
+    },
+    "CPlayerWar3::OnLeave": {
+      "kind": "function", "rva": "0x0041be70", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 34 53 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 44 64 a3 00 00 00 00 8b f9 68 0f 02"
+    },
+    "HandleManager::FireGameSave": {
+      "kind": "function", "rva": "0x00431030", "conv": "thiscall",
+      "sig": "void(HandleManager* this, const char* name)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 0c 64 a3 00 00 00 00 8b f9 8b 74 24 1c 85 f6 74"
+    },
+    "HandleManager::FireGameLoaded": {
+      "kind": "function", "rva": "0x00431010", "conv": "thiscall",
+      "sig": "void(HandleManager* this)",
+      "bytes": "a1 ?? ?? ?? ?? 6a 00 68 00 03 08 00 c7 80 e8 03"
+    },
+    "CUnit::GetHeroLevel": {
+      "kind": "function", "rva": "0x002a0210", "conv": "thiscall",
+      "sig": "int(CUnit* this)",
+      "bytes": "8b 81 f0 01 00 00 85 c0 74 0c 8d 48 6c e8 4e 2f"
+    },
+    "CGameWar3::SaveGame": {
+      "kind": "function", "rva": "0x003af8d0", "conv": "fastcall",
+      "sig": "int(const char* path, int flag)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 81 ec f4 08"
+    },
+    "CPlayerWar3::RemovePlayer": {
+      "kind": "function", "rva": "0x0041f220", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, int result)",
+      "bytes": "56 8b f1 0f b6 46 30 8b 4e 34 6a 00 50 e8 be 5c"
+    },
+    "CPlayerWar3::OnUnitAttacked": {
+      "kind": "function", "rva": "0x0041c800", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* attacker, CUnit* attacked)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 34 53 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 44 64 a3 00 00 00 00 8b f9 68 12 02"
+    },
+    "CPlayerWar3::OnUnitRescued": {
+      "kind": "function", "rva": "0x0041c920", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* rescuer, CUnit* rescued)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 34 53 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 44 64 a3 00 00 00 00 8b f9 68 13 02"
+    },
+    "CPlayerWar3::OnConstructStart": {
+      "kind": "function", "rva": "0x0041d650", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* building)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 34 53 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 44 64 a3 00 00 00 00 8b f9 68 1a"
+    },
+    "CPlayerWar3::OnConstructCancel": {
+      "kind": "function", "rva": "0x0041d870", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* building)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 34 53 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 44 64 a3 00 00 00 00 8b f9 68 1b"
+    },
+    "CPlayerWar3::OnUpgradeStart": {
+      "kind": "function", "rva": "0x0041d980", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* unit, uint32_t type)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 34 53 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 44 64 a3 00 00 00 00 8b f9 68 1d"
+    },
+    "CPlayerWar3::OnUpgradeCancel": {
+      "kind": "function", "rva": "0x0041dbc0", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* unit, uint32_t type)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 34 53 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 44 64 a3 00 00 00 00 8b f9 68 1e"
+    },
+    "CPlayerWar3::OnTrainStart": {
+      "kind": "function", "rva": "0x0041e010", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* building, uint32_t type)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 34 53 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 44 64 a3 00 00 00 00 8b f9 68 20"
+    },
+    "CPlayerWar3::OnTrainCancel": {
+      "kind": "function", "rva": "0x0041e130", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* building, uint32_t type)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 34 53 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 44 64 a3 00 00 00 00 8b f9 68 21"
+    },
+    "CPlayerWar3::OnResearchStart": {
+      "kind": "function", "rva": "0x0041dce0", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* unit, uint32_t research)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 34 53 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 44 64 a3 00 00 00 00 8b f9 68 23"
+    },
+    "CPlayerWar3::OnResearchCancel": {
+      "kind": "function", "rva": "0x0041df00", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* unit, uint32_t research)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 34 53 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 44 64 a3 00 00 00 00 8b f9 68 24"
+    },
+    "CPlayerWar3::OnHeroSkill": {
+      "kind": "function", "rva": "0x0041c2a0", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* hero, uint32_t ability, int level)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 34 53 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 44 64 a3 00 00 00 00 8b f9 68 2a"
+    },
+    "CPlayerWar3::OnHeroRevivable": {
+      "kind": "function", "rva": "0x0041c3c0", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* hero)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 34 53 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 44 64 a3 00 00 00 00 8b f9 68 2b"
+    },
+    "CPlayerWar3::OnHeroReviveStart": {
+      "kind": "function", "rva": "0x0041c4d0", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* hero)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 34 53 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 44 64 a3 00 00 00 00 8b f9 68 2c"
+    },
+    "CPlayerWar3::OnHeroReviveCancel": {
+      "kind": "function", "rva": "0x0041c5e0", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* hero)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 34 53 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 44 64 a3 00 00 00 00 8b f9 68 2d"
+    },
+    "CPlayerWar3::OnHeroReviveFinish": {
+      "kind": "function", "rva": "0x0041c6f0", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* hero)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 34 53 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 44 64 a3 00 00 00 00 8b f9 68 2e"
+    },
+    "CPlayerWar3::OnUnitSell": {
+      "kind": "function", "rva": "0x0041e370", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* shop, CUnit* sold, CUnit* buyer)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 34 53 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 44 64 a3 00 00 00 00 8b f9 68 0d 03"
+    },
+    "CPlayerWar3::OnItemSell": {
+      "kind": "function", "rva": "0x0041e490", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* shop, CUnit* buyer, CItem* item)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 34 53 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 44 64 a3 00 00 00 00 8b f9 68 0f 03"
+    },
+    "CPlayerWar3::OnItemPawn": {
+      "kind": "function", "rva": "0x0041e5b0", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* seller, CUnit* shop, CItem* item)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 34 53 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 44 64 a3 00 00 00 00 8b f9 68 15 03"
+    },
+    "CPlayerWar3::OnUnitChangeOwner": {
+      "kind": "function", "rva": "0x0041e6d0", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* unit, int previous_owner)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 34 53 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 44 64 a3 00 00 00 00 8b f9 68 0e 03"
+    },
+    "CUnit::OnOrder": {
+      "kind": "function", "rva": "0x00299a00", "conv": "thiscall",
+      "sig": "void(CUnit* this, COrder* order)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 3c 53 55 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 50 64 a3 00 00 00 00 8b f9 e8 b2"
+    },
+    "CUnit::OnPointOrder": {
+      "kind": "function", "rva": "0x00299c40", "conv": "thiscall",
+      "sig": "void(CUnit* this, COrder* order)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 3c 53 55 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 50 64 a3 00 00 00 00 8b f9 e8 72"
+    },
+    "CUnit::OnTargetOrder": {
+      "kind": "function", "rva": "0x00299e90", "conv": "thiscall",
+      "sig": "void(CUnit* this, COrder* order)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 40 53 55 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 54 64 a3 00 00 00 00 8b f9"
+    },
+    "CUnit::OnLoaded": {
+      "kind": "function", "rva": "0x00299890", "conv": "thiscall",
+      "sig": "void(CUnit* this, CUnit* transport)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 38 53 55 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 4c 64 a3 00 00 00 00 8b f9 e8 22"
+    },
+    "CUnit::OnSpellChannel": {
+      "kind": "function", "rva": "0x0029a0f0", "conv": "thiscall",
+      "sig": "void(CUnit* this, CAbility* ability)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 38 53 55 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 4c 64 a3 00 00 00 00 8b f9 e8 c2"
+    },
+    "CUnit::OnSpellCast": {
+      "kind": "function", "rva": "0x0029a280", "conv": "thiscall",
+      "sig": "void(CUnit* this, CAbility* ability)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 38 53 55 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 4c 64 a3 00 00 00 00 8b f9 e8 32"
+    },
+    "CUnit::OnSpellEffect": {
+      "kind": "function", "rva": "0x0029a410", "conv": "thiscall",
+      "sig": "void(CUnit* this, CAbility* ability)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 38 53 55 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 4c 64 a3 00 00 00 00 8b f9 e8 a2"
+    },
+    "CUnit::OnSpellFinish": {
+      "kind": "function", "rva": "0x0029a5a0", "conv": "thiscall",
+      "sig": "void(CUnit* this, CAbility* ability)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 38 53 55 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 4c 64 a3 00 00 00 00 8b f9 e8 12"
+    },
+    "CUnit::OnSpellEndCast": {
+      "kind": "function", "rva": "0x0029a730", "conv": "thiscall",
+      "sig": "void(CUnit* this, CAbility* ability)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 38 53 55 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 4c 64 a3 00 00 00 00 8b f9 e8 82"
+    },
+    "CUnit::OnDamaged": {
+      "kind": "function", "rva": "0x00296d10", "conv": "thiscall",
+      "sig": "void(CUnit* this, float* damage, CUnit* source)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 34 53 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 44 64 a3 00 00 00 00 8b f9 68 34"
+    },
+    "CUnit::OnAcquireTarget": {
+      "kind": "function", "rva": "0x00297c80", "conv": "thiscall",
+      "sig": "void(CUnit* this, CWidget* target)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 34 53 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 44 64 a3 00 00 00 00 8b f9 68 3c"
+    },
+    "CPlayerWar3::OnUnitDecay": {
+      "kind": "function", "rva": "0x0041cb60", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* unit)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 34 53 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 44 64 a3 00 00 00 00 8b f9 68 15 02"
+    },
+    "CPlayerWar3::OnUnitDetected": {
+      "kind": "function", "rva": "0x0041cc70", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* unit)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 34 53 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 44 64 a3 00 00 00 00 8b f9 68 16"
+    },
+    "CPlayerWar3::OnUnitHidden": {
+      "kind": "function", "rva": "0x0041cd80", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, CUnit* unit)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 34 53 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 44 64 a3 00 00 00 00 8b f9 68 17"
+    },
+    "CPlayerWar3::OnEndCinematic": {
+      "kind": "function", "rva": "0x0041bf70", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 34 53 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 44 64 a3 00 00 00 00 8b f9 68 11 02"
+    },
+    "CPlayerWar3::OnArrowKey": {
+      "kind": "function", "rva": "0x0041bba0", "conv": "thiscall",
+      "sig": "void(CPlayerWar3* this, int event)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 0c 64 a3 00 00 00 00 8b f1 8b 7c 24 1c 8d"
+    },
+    "CWidget::OnDeath": {
+      "kind": "function", "rva": "0x002ad4d0", "conv": "thiscall",
+      "sig": "void(CWidget* this)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 10 56 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 18 64 a3 00 00 00 00 8b f1 8b 0d ?? ?? ?? ?? 0f b7 41 28 56 50 e8 49"
+    },
+    "CScriptDialog::OnClick": {
+      "kind": "function", "rva": "0x003e8a40", "conv": "thiscall",
+      "sig": "void(CScriptDialog* this, CScriptDialogButton* button, int player)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 1c 56 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 24 64 a3 00 00 00 00 8b f1 8d 4c 24 08 e8 21"
+    },
+    "OnNetShowSkillMenu": {
+      "kind": "function", "rva": "0x0043ed90", "conv": "fastcall",
+      "sig": "int(CNetEvent* event)",
+      "bytes": "8b 0d ?? ?? ?? ?? e8 c5 92 f6 ff 85 c0 75 0a 6a"
+    },
+    "OnNetShowBuildMenu": {
+      "kind": "function", "rva": "0x0043edc0", "conv": "fastcall",
+      "sig": "int(CNetEvent* event)",
+      "bytes": "8b 0d ?? ?? ?? ?? e8 95 92 f6 ff 85 c0 75 0a 6a"
+    },
+    "CNetEvent.sender": { "kind": "offset", "value": "0x15" },
+    "HandleManager::FireEndLevel": {
+      "kind": "function", "rva": "0x00426ae0", "conv": "thiscall",
+      "sig": "void(HandleManager* this)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 10 56 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 18 64 a3 00 00 00 00 8b f1 c7"
+    },
+    "CreateUnitObject": {
+      "kind": "function", "rva": "0x0029f990", "conv": "fastcall",
+      "sig": "CUnit*(int player, uint32_t type_id, const float* x, const float* y, const float* facing, uint32_t flags, int a, int b)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 81 ec e0 01 00 00 53"
+    },
+    "CUnit::Remove": {
+      "kind": "function", "rva": "0x002a63b0", "conv": "thiscall",
+      "sig": "void(CUnit* this, int a, int b)",
+      "bytes": "56 8b f1 0f b6 46 33 83 c0 bf 83 f8 19 77 0e f7"
+    },
+    "CAbilityHero::AddXP": {
+      "kind": "function", "rva": "0x0020b080", "conv": "thiscall",
+      "sig": "void(CAbilityHero* this, const float* xp, int a, int b, int c, int d, int e)",
+      "bytes": "83 ec 14 56 8b f1 8b 46 30 85 c0 57 75 05 e8 fd"
+    },
+    "CAbility.owner": { "kind": "offset", "value": "0x30" },
+    "CAbilityHero.xp": { "kind": "offset", "value": "0x8c" },
+    "CPlayerWar3.states": { "kind": "offset", "value": "0x40" },
+    "PlayerState.size": { "kind": "constant", "value": "0x10" },
+    "SyncedInt::Get": {
+      "kind": "function", "rva": "0x00473170", "conv": "thiscall",
+      "sig": "int(const SyncedInt* this)",
+      "bytes": "8b 51 0c 8b 49 08 e8 b5 c8 bc ff 8b 40 78 c3 cc"
+    },
+    "GetFloatGameState": {
+      "kind": "function", "rva": "0x003bc310", "conv": "cdecl",
+      "sig": "uint32_t(int state)",
+      "bytes": "8b 0d ?? ?? ?? ?? e8 45 bd fe ff 8b 54 24 04 83"
+    },
+    "COrder::GetTarget": {
+      "kind": "function", "rva": "0x00271680", "conv": "thiscall",
+      "sig": "CWidget*(COrder* this)",
+      "bytes": "8b 41 5c 23 41 58 83 c1 58 83 f8 ff 75 03 33 c0"
+    },
+    "CGameUI::DisplayChatMessage": {
+      "kind": "function", "rva": "0x002fb480", "conv": "thiscall",
+      "sig": "void(CGameUI* this, int player, const char* text, int recipient, float duration)",
+      "bytes": "81 ec a8 02 00 00 a1 ?? ?? ?? ?? 33 c4 89 84 24 a4 02 00 00 53 8b"
+    },
+    "CGameUI::SetPaused": {
+      "kind": "function", "rva": "0x002fa7e0", "conv": "thiscall",
+      "sig": "void(CGameUI* this, int pause, int player, int a3, int a4, int a5)",
+      "bytes": "81 ec 68 01 00 00 a1 ?? ?? ?? ?? 33 c4 89 84 24 64 01 00 00 53 8b"
+    },
+    "Movie::SetDisplayMode": {
+      "kind": "function", "rva": "0x0052b930", "conv": "fastcall",
+      "sig": "void(int cinematic, const int* mode)",
+      "bytes": "81 ec ac 00 00 00 a1 ?? ?? ?? ?? 33 c4 89 84 24 a8 00 00 00 84"
+    },
+    "Movie.cinematic_mode": { "kind": "data", "rva": "0x00acc698" },
+    "Movie.gamma_call": { "kind": "data", "rva": "0x0052c910" },
+    "Movie.gamma_restore": { "kind": "data", "rva": "0x0052b850" },
+    "PresentFrame": {
+      "kind": "function", "rva": "0x005264f0", "conv": "fastcall",
+      "sig": "void(int flags)",
+      "bytes": "8b c1 8b 0d ?? ?? ?? ?? 8b 11 50 8b 42 44 ff d0"
+    },
+
+    "CObserver.vtable": { "kind": "data", "rva": "0x00970780" },
+    "CObserver.vtable.OnEvent": { "kind": "offset", "value": "0x0c" },
+    "CFrame::SetFocus": {
+      "kind": "function", "rva": "0x005faf10", "conv": "thiscall",
+      "sig": "void(CFrame* this, int focus, int, CFrame* other)",
+      "bytes": "83 3d ?? ?? ?? ?? 00 56 8b f1 75 53 8b 0d ?? ??"
+    },
+    "FocusedFrame": { "kind": "data", "rva": "0x00ace67c" },
+    "CControl::SetListener": {
+      "kind": "function", "rva": "0x00601840", "conv": "thiscall",
+      "sig": "void(CControl* this, int command, CObserver* listener, int enable)",
+      "bytes": "83 7c 24 0c 00 8b 44 24 08 74 1f 85 c0 74 1b 8b 11 8b 52 08 89 44 24 0c 8b 44 24 04 89 44 24 08 c7 44 24 04 64 00 09"
+    },
+    "CControl::HasState": {
+      "kind": "function", "rva": "0x00601e40", "conv": "thiscall",
+      "sig": "bool(CControl* this, uint32_t flags)",
+      "bytes": "8b 44 24 04 8b 89 d4 01 00 00 23 c8 33 d2 3b c8"
+    },
+    "CControl::AddState": {
+      "kind": "function", "rva": "0x00601de0", "conv": "thiscall",
+      "sig": "void(CControl* this, uint32_t flags)",
+      "bytes": "8b 91 d4 01 00 00 8b 81 d8 01 00 00 0b c2 0b 44"
+    },
+    "CControl::RemoveState": {
+      "kind": "function", "rva": "0x00601e10", "conv": "thiscall",
+      "sig": "void(CControl* this, uint32_t flags)",
+      "bytes": "8b 91 d4 01 00 00 8b 44 24 04 f7 d0 23 c2 0b 81"
+    },
+    "CControlState.enabled": { "kind": "constant", "value": "0x1" },
+    "CControlState.checked": { "kind": "constant", "value": "0x20" },
+    "CSlider.value": { "kind": "offset", "value": "0x1f4" },
+    "CPopupMenu::SetItem": {
+      "kind": "function", "rva": "0x006130f0", "conv": "thiscall",
+      "sig": "void(CPopupMenu* this, int item)",
+      "bytes": "8b 44 24 04 56 8b f1 8b 8e ec 01 00 00 50 89 86"
+    },
+    "CPopupMenu::AddItem": {
+      "kind": "function", "rva": "0x00613260", "conv": "thiscall",
+      "sig": "int(CPopupMenu* this, const char* text, int value)",
+      "bytes": "8b 44 24 08 53 8b 5c 24 08 56 57 8b f1 8b 8e ec"
+    },
+    "CPopupMenu.menu": { "kind": "offset", "value": "0x1ec" },
+    "CMenu.item_count": { "kind": "offset", "value": "0x1f0" },
+    "CPopupMenu.item": { "kind": "offset", "value": "0x1f0" },
+    "CControl::Click": {
+      "kind": "function", "rva": "0x00601f20", "conv": "thiscall",
+      "sig": "void(CControl* this, int button)",
+      "bytes": "56 68 64 00 09 40 8b f1 e8 53 86 02 00 85 c0 74"
+    },
+    "CObserver::HasEvent": {
+      "kind": "function", "rva": "0x0062a580", "conv": "thiscall",
+      "sig": "int(void* this, uint32_t event)",
+      "bytes": "8b 49 08 33 c0 85 c9 74 0b 50 8b 44 24 08 50 e8"
+    },
+    "ControlEvent.click": { "kind": "constant", "value": "0x40090064" },
+    "CLayoutFrame::ClearAllPoints": {
+      "kind": "function", "rva": "0x00606160", "conv": "thiscall",
+      "sig": "void(CLayoutFrame* this)",
+      "bytes": "53 56 8b d9 57 8b 7b 04 85 ff 8d 73 08 74 31 90"
+    },
+    "CreateSimpleFrame": {
+      "kind": "function", "rva": "0x005c9610", "conv": "fastcall",
+      "sig": "CSimpleFrame*(const char* template_name, CSimpleFrame* parent, int context)",
+      "bytes": "56 51 b9 ?? ?? ?? ?? 8b f2 e8 02 e3 ff ff 85 c0"
+    },
+    "CSimpleFrame.level": { "kind": "offset", "value": "0x84" },
+    "CSimpleFrame.shown": { "kind": "offset", "value": "0x94" },
+    "CSimpleFrame.show_flag": { "kind": "offset", "value": "0x90" },
+    "CSimpleFrame.children": { "kind": "offset", "value": "0xd8" },
+    "CSimpleFrame.vtable.OnHide": { "kind": "offset", "value": "0x30" },
+    "CSimpleFrame.vtable.Hide": { "kind": "offset", "value": "0x64" },
+    "CSimpleFrame.vtable.Show": { "kind": "offset", "value": "0x68" },
+    "CLayoutFrame::SetHeight": {
+      "kind": "function", "rva": "0x00605db0", "conv": "thiscall",
+      "sig": "void(CLayoutFrame* this, float height)",
+      "bytes": "d9 44 24 04 c7 44 24 04 00 00 00 00 d9 59 5c e9"
+    },
+    "CSimpleFontString::SetScale": {
+      "kind": "function", "rva": "0x0060dcd0", "conv": "thiscall",
+      "sig": "void(CSimpleFontString* this, float scale)",
+      "bytes": "81 ec 88 00 00 00 a1 ?? ?? ?? ?? 33 c4 89 84 24 84 00 00 00 d9"
+    },
+    "CSimpleFontString::SetFont": {
+      "kind": "function", "rva": "0x0060da20", "conv": "thiscall",
+      "sig": "int(CSimpleFontString* this, const char* font, float height, int flags)",
+      "bytes": "d9 44 24 08 56 8b f1 8b 8e a0 00 00 00 d9 9e 90"
+    },
+    "CSimpleFontString.height": { "kind": "offset", "value": "0x90" },
+    "CMinimap::ReleaseResources": {
+      "kind": "function", "rva": "0x0036a520", "conv": "thiscall",
+      "sig": "void(CMinimap* this)",
+      "bytes": "53 56 57 8b f1 e8 16 04 fd ff 8b 8e 7c 01 00 00"
+    },
+    "CLayoutFrame.width": { "kind": "offset", "value": "0x58" },
+    "CLayoutFrame::SetWidth": {
+      "kind": "function", "rva": "0x00605d90", "conv": "thiscall",
+      "sig": "void(CLayoutFrame* this, float width)",
+      "bytes": "d9 44 24 04 c7 44 24 04 00 00 00 00 d9 59 58 e9"
+    },
+
+    "CEscMenuMainPanel::Setup": {
+      "kind": "function", "rva": "0x003506c0", "conv": "thiscall",
+      "sig": "int(CEscMenuMainPanel* this, int, int)",
+      "bytes": "51 53 55 56 8b f1 57 33 d2 b9 ?? ?? ?? ?? e8 9d"
+    },
+    "CEscMenuMainPanel::SetPanel": {
+      "kind": "function", "rva": "0x00342d20", "conv": "thiscall",
+      "sig": "void(CEscMenuMainPanel* this, int panel)",
+      "bytes": "81 ec 04 04 00 00 a1 ?? ?? ?? ?? 33 c4 89 84 24 00 04 00 00 56 8b f1 8b 86 68"
+    },
+    "EscMenuPanel.main": { "kind": "constant", "value": 1 },
+    "CEditBox::GetText": {
+      "kind": "function", "rva": "0x00613ea0", "conv": "thiscall",
+      "sig": "const char*(CEditBox* this)",
+      "bytes": "8b 81 e4 01 00 00 c3 cc cc cc cc cc cc cc cc cc 8b 01"
+    },
+    "CEditBox::SetText": {
+      "kind": "function", "rva": "0x00615b50", "conv": "thiscall",
+      "sig": "void(CEditBox* this, const char* text, int notify)",
+      "bytes": "53 8b 5c 24 08 56 57 8b f1 8b 86 f0 01 00 00 53"
+    },
+    "CGameUI::SetMode": {
+      "kind": "function", "rva": "0x002fb7e0", "conv": "thiscall",
+      "sig": "void(CGameUI* this, void* mode, int push)",
+      "bytes": "53 56 8b f1 8b 86 fc 03 00 00 83 b8 dc 01 00 00"
+    },
+    "CGameUI.paused_by_player": { "kind": "offset", "value": "0x258" },
+    "CGameUI.paused_by_trigger": { "kind": "offset", "value": "0x260" },
+    "CGameUI.mode": { "kind": "offset", "value": "0x1b4" },
+    "CGameUI.camera": { "kind": "offset", "value": "0x254" },
+    "GameCamera::SetField": {
+      "kind": "function", "rva": "0x00305a60", "conv": "thiscall",
+      "sig": "void(GameCamera* this, int field, float value, float duration, int unknown)",
+      "bytes": "83 ec 58 d9 44 24 64 56 dc 25 ?? ?? ?? ?? 57 8b"
+    },
+    "GameCamera::GetField": {
+      "kind": "function", "rva": "0x003027b0", "conv": "thiscall",
+      "sig": "float(GameCamera* this, int field)",
+      "bytes": "8b 44 24 04 83 ec 24 83 f8 09 0f 87 09 01 00 00"
+    },
+    "CameraField.target_distance": { "kind": "constant", "value": "0x0" },
+    "CameraField.farz": { "kind": "constant", "value": "0x1" },
+    "CGameUI.world_frame": { "kind": "offset", "value": "0x3bc" },
+    "CGameUI.console": { "kind": "offset", "value": "0x428" },
+    "CGameUI.console_upper": { "kind": "offset", "value": "0x420" },
+    "CGameUI.minimap_layer": { "kind": "offset", "value": "0x41c" },
+    "CGameUI.portrait_layer": { "kind": "offset", "value": "0x424" },
+    "CGameUI.resource_bar": { "kind": "offset", "value": "0x3cc" },
+    "CGameUI.hero_bar": { "kind": "offset", "value": "0x3dc" },
+    "CGameUI.peon_bar": { "kind": "offset", "value": "0x3e0" },
+    "CGameUI.minimap": { "kind": "offset", "value": "0x3c0" },
+    "CGameUI.portrait": { "kind": "offset", "value": "0x3f4" },
+    "CGameUI.time_of_day": { "kind": "offset", "value": "0x3f8" },
+    "CGameUI.command_card": { "kind": "offset", "value": "0x3c8" },
+    "CGameUI.info_panel": { "kind": "offset", "value": "0x3c4" },
+    "CInfoPanel.inventory": { "kind": "offset", "value": "0x148" },
+    "CInventoryBar.slots": { "kind": "offset", "value": "0x130" },
+    "CFrameGrid.rows": { "kind": "offset", "value": "0x154" },
+    "CCommandButton.data": { "kind": "offset", "value": "0x190" },
+    "CCommandButtonData.ability": { "kind": "offset", "value": "0x6d4" },
+    "CCommandButtonData.command": { "kind": "offset", "value": "0x8" },
+    "CGameUI.esc_menu": { "kind": "offset", "value": "0x228" },
+    "CEscMenu::Reset": {
+      "kind": "function", "rva": "0x00368a70", "conv": "thiscall",
+      "sig": "void(CEscMenu* this)",
+      "bytes": "56 6a 00 8b f1 e8 26 ff ff ff 8b 4e 18 6a 01 e8"
+    },
+    "CEscMenu.main_panel": { "kind": "offset", "value": "0x18" },
+    "EscMenuPanel.help": { "kind": "constant", "value": 4 },
+    "GlueScreen.game_chatroom": { "kind": "constant", "value": 11 },
+    "CGameChatroom::OnChatReceived": {
+      "kind": "function", "rva": "0x0057b180", "conv": "thiscall",
+      "sig": "void(CGameChatroom* this, CNetEventLobby* event)",
+      "bytes": "81 ec 54 02 00 00 a1 ?? ?? ?? ?? 33 c4 89 84 24 50 02 00 00 53 56 8b b4 24 60 02 00 00 57 68 ff 00 00 00 8d 44 24 10 50 8d 7e 18 57 8b d9 e8 b3"
+    },
+    "CGameChatroom::StartGame": {
+      "kind": "function", "rva": "0x00589c40", "conv": "thiscall",
+      "sig": "void(CGameChatroom* this)",
+      "bytes": "81 ec 0c 02 00 00 a1 ?? ?? ?? ?? 33 c4 89 84 24 08 02 00 00 89"
+    },
+    "CGameChatroom.net_index": { "kind": "offset", "value": "0x168" },
+    "CGameChatroom.chat_area": { "kind": "offset", "value": "0x1fc" },
+    "CTextArea::AddText": {
+      "kind": "function", "rva": "0x0061d640", "conv": "thiscall",
+      "sig": "void(CTextArea* this, const char* text)",
+      "bytes": "53 8b 5c 24 08 85 db 56 8b f1 0f 84 80 00 00 00"
+    },
+    "CNetEventLobby::Init": {
+      "kind": "function", "rva": "0x0053db50", "conv": "thiscall",
+      "sig": "void(CNetEventLobby* this, int type)",
+      "bytes": "8b c1 8a 4c 24 04 56 0f b6 f1 33 d2 81 e6 ff ff 00 00 81 ce 00 00 0b"
+    },
+    "CNetEventLobby.sender": { "kind": "offset", "value": "0x15" },
+    "CNetEventLobby.text": { "kind": "offset", "value": "0x18" },
+    "CNetEventLobby.size": { "kind": "constant", "value": "0x118" },
+    "LobbyEvent.chat": { "kind": "constant", "value": "0x10" },
+    "NetSendLobbyEvent": {
+      "kind": "function", "rva": "0x0059e950", "conv": "fastcall",
+      "sig": "void(int recipient, CNetEventLobby* event, int net_index)",
+      "bytes": "51 8b 44 24 08 50 88 4c 24 04 52 ba 01 00 00 00 8d 4c 24 08 e8 f7"
+    },
+    "NetGetPlayerName": {
+      "kind": "function", "rva": "0x0053ee00", "conv": "fastcall",
+      "sig": "const char*(int player, int net_index)",
+      "bytes": "56 57 8b f9 b9 0d 00 00 00 8b f2 e8 c0 46 f8 ff"
+    },
+    "NetGetLocalPlayer": {
+      "kind": "function", "rva": "0x0053edd0", "conv": "fastcall",
+      "sig": "int(int net_index)",
+      "bytes": "56 8b f1 b9 0d 00 00 00 e8 f3 46 f8 ff 8b 40 10"
+    },
+    "NetIsHost": {
+      "kind": "function", "rva": "0x0053f110", "conv": "fastcall",
+      "sig": "int(int net_index)",
+      "bytes": "56 8b f1 57 b9 0d 00 00 00 e8 b2 43 f8 ff 8b 40"
+    },
+    "NetIsReplay": {
+      "kind": "function", "rva": "0x0053f160", "conv": "cdecl",
+      "sig": "int(void)",
+      "bytes": "b9 0d 00 00 00 e8 66 43 f8 ff 8b 40 10 8b 48 08"
+    },
+    "CNetEventSyncStoredInteger::Init": {
+      "kind": "function", "rva": "0x00441200", "conv": "thiscall",
+      "sig": "void(CNetEventSyncStoredInteger* this)",
+      "bytes": "8b c1 33 c9 89 48 04 c7 40 08 6b 00 0a 00 89 48"
+    },
+    "CNetEventSyncStoredInteger.sender": { "kind": "offset", "value": "0x15" },
+    "CNetEventSyncStoredInteger.file": { "kind": "offset", "value": "0x18" },
+    "CNetEventSyncStoredInteger.mission": { "kind": "offset", "value": "0x118" },
+    "CNetEventSyncStoredInteger.key": { "kind": "offset", "value": "0x218" },
+    "CNetEventSyncStoredInteger.value_object": { "kind": "offset", "value": "0x318" },
+    "CNetEventSyncStoredInteger.value": { "kind": "offset", "value": "0x330" },
+    "CNetEventSyncStoredInteger.size": { "kind": "constant", "value": "0x334" },
+    "SyncValue::Destroy": {
+      "kind": "function", "rva": "0x003ebe80", "conv": "thiscall",
+      "sig": "void(SyncValue* this)",
+      "bytes": "56 57 8b f9 8b 47 14 85 c0 74 12 6a 00 68 29 0a 00 00 68 ?? ?? ?? ?? 50 e8 bb f6"
+    },
+    "TextTags::Create": {
+      "kind": "function", "rva": "0x00428110", "conv": "thiscall",
+      "sig": "int(HandleManager* this)",
+      "bytes": "83 ec 14 d9 ee 6a ff 6a 01 d9 54 24 10 6a 01 d9"
+    },
+    "TextTags::Destroy": {
+      "kind": "function", "rva": "0x00426ce0", "conv": "thiscall",
+      "sig": "void(HandleManager* this, int id)",
+      "bytes": "81 c1 c8 02 00 00 e9 05 e2 0b 00 cc cc cc cc cc"
+    },
+    "TextTags::SetText": {
+      "kind": "function", "rva": "0x00426cf0", "conv": "thiscall",
+      "sig": "void(HandleManager* this, int id, const char* text, float height)",
+      "bytes": "d9 44 24 0c 8b 44 24 08 8b 54 24 04 51 d9 1c 24 50 52 81"
+    },
+    "TextTags::SetPosUnit": {
+      "kind": "function", "rva": "0x0042a630", "conv": "thiscall",
+      "sig": "void(HandleManager* this, int id, CUnit* unit, float z_offset)",
+      "bytes": "83 ec 0c 56 8b 74 24 18 85 f6 57 8b f9 74 6d 8b"
+    },
+    "TextTags::SetColor": {
+      "kind": "function", "rva": "0x00426d30", "conv": "thiscall",
+      "sig": "void(HandleManager* this, int id, const uint32_t* argb)",
+      "bytes": "81 c1 c8 02 00 00 e9 35 e3 0b 00 cc cc cc cc cc"
+    },
+    "TextTags::SetVelocity": {
+      "kind": "function", "rva": "0x00426d40", "conv": "thiscall",
+      "sig": "void(HandleManager* this, int id, const float* xy)",
+      "bytes": "81 c1 c8 02 00 00 e9 45 e3 0b 00 cc cc cc cc cc"
+    },
+    "TextTags::SetLifespan": {
+      "kind": "function", "rva": "0x00426db0", "conv": "thiscall",
+      "sig": "void(HandleManager* this, int id, float seconds)",
+      "bytes": "d9 44 24 08 8b 44 24 04 51 d9 1c 24 50 81 c1 c8 02 00 00 e8 68 e2 0b 00 c2 08 00 cc cc cc cc cc"
+    },
+    "TextTags::SetFadepoint": {
+      "kind": "function", "rva": "0x00426dd0", "conv": "thiscall",
+      "sig": "void(HandleManager* this, int id, float seconds)",
+      "bytes": "d9 44 24 08 8b 44 24 04 51 d9 1c 24 50 81 c1 c8 02 00 00 e8 68 e2 0b 00 c2 08 00 cc cc cc cc cc 8b"
+    },
+    "TextTags::SetVisible": {
+      "kind": "function", "rva": "0x00426d50", "conv": "thiscall",
+      "sig": "void(HandleManager* this, int id, int visible)",
+      "bytes": "33 c0 39 44 24 08 0f 94 c0 81 c1 c8 02 00 00 89"
+    },
+    "TextTags::SetPermanent": {
+      "kind": "function", "rva": "0x00426d80", "conv": "thiscall",
+      "sig": "void(HandleManager* this, int id, int permanent)",
+      "bytes": "81 c1 c8 02 00 00 e9 25 e2 0b 00 cc cc cc cc cc"
+    },
+    "GameData::LoadOverrides": {
+      "kind": "function", "rva": "0x0030b830", "conv": "thiscall",
+      "sig": "void(GameData* this, const char* path, void* table, int count, int flag)",
+      "bytes": "83 ec 14 56 57 8b f9 e8 94 60 1c 00 8b 54 24 20"
+    },
+    "NetScheduleAction": {
+      "kind": "function", "rva": "0x0054d970", "conv": "fastcall",
+      "sig": "void(CDataStore* action, int flags)",
+      "bytes": "83 ec 0c 53 56 8b d9 57 b9 0d 00 00 00 8b fa e8"
+    },
+    "CDataStore.buffer": { "kind": "offset", "value": "0x4" },
+    "CDataStore.base": { "kind": "offset", "value": "0x8" },
+    "CNetEvent.action": { "kind": "offset", "value": "0x14" },
+    "NetSendAction": {
+      "kind": "function", "rva": "0x0043dfc0", "conv": "fastcall",
+      "sig": "void(CNetEvent* action, int flags)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 81 ec d4 05 00 00 a1 ?? ?? ?? ?? 33 c4 89 84 24 d0 05 00 00 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 84 24 e0 05 00 00 64 a3 00 00 00 00 8b fa 8b f1 8d 4c 24"
+    },
+    "OnNetSyncStoredInteger": {
+      "kind": "function", "rva": "0x0043f100", "conv": "fastcall",
+      "sig": "int(CNetEventSyncStoredInteger* event)",
+      "bytes": "56 8b f1 8b 0d ?? ?? ?? ?? e8 d2 92 f6 ff 8d 8e"
+    },
+    "CPlayerWar3.controller": { "kind": "offset", "value": "0x268" },
+    "CPlayerWar3.race": { "kind": "offset", "value": "0x260" },
+
+    "Import.AIL_open_digital_driver": { "kind": "import", "rva": "0x0086d928", "conv": "stdcall", "sig": "void*(uint32_t frequency, int32_t bits, int32_t channels, uint32_t flags)", "target": "mss32.dll!_AIL_open_digital_driver@16" },
+    "Import.GetTickCount": { "kind": "import", "rva": "0x0086d230", "conv": "stdcall", "sig": "uint32_t(void)", "target": "kernel32.dll!GetTickCount" },
+    "PreloadGen::End": {
+      "kind": "function", "rva": "0x003f9060", "conv": "thiscall",
+      "sig": "void(void* gen, const char* filename)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 81 ec 28 03"
+    },
+    "__report_gsfailure": {
+      "kind": "function", "rva": "0x007e1b62", "conv": "cdecl",
+      "sig": "void(void)",
+      "bytes": "55 8b ec 81 ec 28 03 00 00 a3 ?? ?? ?? ?? 89 0d"
+    },
+    "Options::Get": {
+      "kind": "function", "rva": "0x00005720", "conv": "cdecl",
+      "sig": "void*(void)",
+      "bytes": "a1 ?? ?? ?? ?? 85 c0 75 2a 50 68 e1 00 00 00 68"
+    },
+    "Options::Apply": {
+      "kind": "function", "rva": "0x00005bb0", "conv": "thiscall",
+      "sig": "int(void* this, int option)",
+      "bytes": "b8 08 10 00 00 e8 d6 b5 7d 00 a1 ?? ?? ?? ?? 33"
+    },
+    "Option.maxfps": { "kind": "constant", "value": "0x16" },
+    "Options::GetInt": {
+      "kind": "function", "rva": "0x000059c0", "conv": "thiscall",
+      "sig": "bool(Options* this, int option, int* value)",
+      "bytes": "53 56 8b 74 24 0c 83 fe 4f 8b d9 7c 07 5e 33 c0 5b c2 08"
+    },
+    "Options::SetInt": {
+      "kind": "function", "rva": "0x000057f0", "conv": "thiscall",
+      "sig": "bool(Options* this, int option, int value)",
+      "bytes": "56 8b 74 24 08 83 fe 4f 7c 06 33 c0 5e c2 08 00"
+    },
+    "Options::Save": {
+      "kind": "function", "rva": "0x00005a90", "conv": "thiscall",
+      "sig": "bool(Options* this, int option)",
+      "bytes": "b8 0c 11 00 00 e8 f6 b6 7d 00 a1 ?? ?? ?? ?? 33"
+    },
+    "Options::ApplyValue": {
+      "kind": "function", "rva": "0x000028c0", "conv": "thiscall",
+      "sig": "bool(Options* this, int option, int value)",
+      "bytes": "8b 44 24 04 83 ec 08 83 f8 4f 7c 08 33 c0 83 c4"
+    },
+    "Option.all": { "kind": "constant", "value": "0x50" },
+    "Option.adapter": { "kind": "constant", "value": "0x3" },
+    "Option.reswidth": { "kind": "constant", "value": "0x0" },
+    "Option.resheight": { "kind": "constant", "value": "0x1" },
+    "Option.colordepth": { "kind": "constant", "value": "0x2" },
+    "Option.refreshrate": { "kind": "constant", "value": "0x4" },
+    "Option.allyFilter": { "kind": "constant", "value": "0x38" },
+    "Option.customkeys": { "kind": "constant", "value": "0x3d" },
+    "Option.herobar": { "kind": "constant", "value": "0x2e" },
+    "Option.multiboardon": { "kind": "constant", "value": "0x3c" },
+    "CGxDeviceD3d::BuildPresentParams": {
+      "kind": "function", "rva": "0x0052cae0", "conv": "thiscall",
+      "sig": "void(CGxDeviceD3d* this, D3DPRESENT_PARAMETERS* params)",
+      "bytes": "83 ec 10 56 8b 74 24 18 57 6a 34 6a 00 56 8b f9"
+    },
+    "CGxDeviceD3d::CanDraw": {
+      "kind": "function", "rva": "0x0052efc0", "conv": "thiscall",
+      "sig": "bool(CGxDeviceD3d* this)",
+      "bytes": "83 ec 44 56 8b f1 8b 86 84 05 00 00 8b 08 8b 51",
+      "doc": "1.26a: device vtable +0x38 (1.27b +0x3C: one slot fewer before it)."
+    },
+    "CGxDeviceD3d::RestoreState": {
+      "kind": "function", "rva": "0x0052ead0", "conv": "thiscall",
+      "sig": "void(CGxDeviceD3d* this)",
+      "bytes": "81 ec 84 00 00 00 53 55 56 57 6a 01 6a 07 8b f9"
+    },
+    "CGxDeviceD3d::SetGamma": {
+      "kind": "function", "rva": "0x0052d110", "conv": "thiscall",
+      "sig": "void(CGxDeviceD3d* this, float exponent, int force)",
+      "bytes": "81 ec 10 06 00 00 a1 ?? ?? ?? ?? 33 c4 89 84 24 0c 06 00 00 57 8b f9 d9"
+    },
+    "GxDevice.current": { "kind": "data", "rva": "0x00aae34c" },
+    "CGxDevice.gamma": { "kind": "offset", "value": "0xd8" },
+    "CGxDevice.display_mode": { "kind": "offset", "value": "0x98" },
+    "CGxDevice.fullscreen": { "kind": "offset", "value": "0x9c" },
+    "CGxDeviceD3d.window": { "kind": "offset", "value": "0x574" },
+    "CGxDeviceD3d.d3d": { "kind": "offset", "value": "0x580" },
+    "CGxDevice.adapter": { "kind": "offset", "value": "0x94" },
+    "CGxDeviceD3d.d3d_device": { "kind": "offset", "value": "0x584" },
+    "CGxDeviceD3d::ReleaseForReset": {
+      "kind": "function", "rva": "0x0052cba0", "conv": "thiscall",
+      "sig": "void(CGxDeviceD3d* this, int release_textures)",
+      "bytes": "81 ec 80 00 00 00 53 56 8b 74 24 0c 8b d9 57 89",
+      "doc": "1.26a: the state caches are at other offsets (render states +0x6E8, texture stages +0xEE8, lights +0x14F8); the device (+0x584) is where 1.27b has it."
+    },
+    "C44Matrix::Perspective": {
+      "kind": "function", "rva": "0x007b66f0", "conv": "thiscall",
+      "sig": "void(float* this, float fov, float aspect, float near, float far)",
+      "bytes": "51 d9 44 24 0c 56 dc c8 8b f1 dc 05 ?? ?? ?? ??",
+      "doc": "1.26a: x87 code, and SetupProjection calls it without the helper 1.27b calls first."
+    },
+    "CCamera::SetupProjection": {
+      "kind": "function", "rva": "0x004e6c80", "conv": "thiscall",
+      "sig": "void(void* this, const float* rect, int unused)",
+      "bytes": "81 ec cc 00 00 00 d9 e8 8b 84 24 d0 00 00 00 d9"
+    },
+    "WorldView::SetupCamera": {
+      "kind": "function", "rva": "0x00302980", "conv": "thiscall",
+      "sig": "void(void* this, float delta, const float* rect)",
+      "bytes": "56 8b f1 83 7e 38 01 75 14 d9 44 24 08 6a 00 51"
+    },
+    "CSpriteFrame::SetupCamera": {
+      "kind": "function", "rva": "0x006072c0", "conv": "thiscall",
+      "sig": "void(CSpriteFrame* this)",
+      "bytes": "8b 81 40 01 00 00 85 c0 75 05 e9 11 fc ff ff 8d"
+    },
+    "CGxDeviceOpenGl::CanDraw": {
+      "kind": "function", "rva": "0x00533010", "conv": "thiscall",
+      "sig": "bool(CGxDeviceOpenGl* this)",
+      "bytes": "51 d9 81 f0 0b 00 00 d8 a1 e8 0b 00 00 d9 1c 24",
+      "doc": "1.26a: device vtable +0x38 (1.27b +0x3C)."
+    },
+    "CGxDeviceOpenGl::ReleaseTextures": {
+      "kind": "function", "rva": "0x00531d90", "conv": "thiscall",
+      "sig": "void(CGxDeviceOpenGl* this)",
+      "bytes": "53 8b d9 55 8b ab 40 05 00 00 33 c0 3b e8 74 63"
+    },
+    "CGxDeviceOpenGl::DestroyContext": {
+      "kind": "function", "rva": "0x0052a550", "conv": "thiscall",
+      "sig": "void(CGxDeviceOpenGl* this)",
+      "bytes": "56 8b f1 83 be 80 05 00 00 00 74 1f e8 2f 78 00"
+    },
+    "CGxDeviceOpenGl::CreateContext": {
+      "kind": "function", "rva": "0x0052a690", "conv": "thiscall",
+      "sig": "bool(CGxDeviceOpenGl* this)",
+      "bytes": "56 8b f1 8b 86 78 05 00 00 50 ff 15 ?? ?? ?? ??"
+    },
+    "CGxDeviceOpenGl.texture_count": { "kind": "offset", "value": "0x540" },
+    "CGxDeviceOpenGl.textures": { "kind": "offset", "value": "0x544" },
+    "CGxOglTexture.gl_name": { "kind": "offset", "value": "0x30" },
+    "CBLPFile::Open": {
+      "kind": "function", "rva": "0x0078a800", "conv": "thiscall",
+      "sig": "int(void* this, const char* name, void* context)",
+      "bytes": "53 55 56 57 8b d9 e8 35 ff ff ff 8b 6c 24 14 8b"
+    },
+    "CBLPFile.buffer": { "kind": "offset", "value": "0x4a4" },
+    "CBLPFile.size": { "kind": "offset", "value": "0x4a8" },
+    "CBLPFile.header_copy": { "kind": "data", "rva": "0x0078a854", "doc": "1.26a: mov ecx,0x127 / mov edi,eax / rep movsd (9 bytes; blp-guard's 1.26a variant)." },
+    "CSound::InitMIDI": {
+      "kind": "function", "rva": "0x003dbde0", "conv": "thiscall",
+      "sig": "void(CSound* this, const char* label, int fade_in, int fade_out)",
+      "bytes": "56 8b f1 8b 4e 28 85 c9 74 05 e8 b1 82 0e 00 8b",
+      "doc": "1.26a still makes the MIDI sound here (CreateMIDISnd into CSound.midi): ambient-sound isn't for 1.26a."
+    },
+    "CreateMIDISnd": {
+      "kind": "function", "rva": "0x00324950", "conv": "fastcall",
+      "sig": "void*(const char* label, int open_arg, int fade_in, int fade_out, uint32_t category)",
+      "bytes": "53 55 56 57 6a 00 6a fe 68 ?? ?? ?? ?? 68 4c 01"
+    },
+    "CSound.sound": { "kind": "offset", "value": "0x24" },
+    "CSound.midi": { "kind": "offset", "value": "0x28" },
+    "SoundCategory.ambient": { "kind": "constant", "value": 8 }
+  }
+}

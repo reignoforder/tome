@@ -7,12 +7,19 @@
 // unloads it. Reports every problem Tome found, and every warning or error
 // it logged on the way (the mod's own lines too).
 //
-//   tome-check [--strict] <mod folder or .tome> [<the mods it needs>...]
+//   tome-check [--strict] [--edition roc|tft] <mod folder or .tome> [<the mods it needs>...]
+//
+// --edition: the game it runs as, Reign of Chaos or The Frozen Throne
+// (default: the mod's own "edition", else tft).
 //
 // Exit code: 0 fine (warnings are printed), 1 problems (or warnings with
 // --strict), 2 usage or a broken environment.
 
 #include "core/blp.h"
+#include "core/json.h"
+#include "core/metadata.h"
+#include "core/text.h"
+#include "core/zip.h"
 #include "core/mod_state.h"
 #include "log.h"
 #include "mod_manager.h"
@@ -44,6 +51,35 @@ struct Report {
         list.push_back(std::move(text));
     }
 };
+
+// The "edition" in the tome.mod.json of a mod folder or .tome, or Unknown.
+Edition declared_edition(std::wstring from) {
+    while (from.size() > 3 && from.back() == L'\\') from.pop_back();
+    const DWORD attributes = GetFileAttributesW(from.c_str());
+    if (attributes == INVALID_FILE_ATTRIBUTES) return Edition::Unknown;
+    std::string text;
+    if (attributes & FILE_ATTRIBUTE_DIRECTORY) {
+        if (!read_file(from + L"\\tome.mod.json", text)) return Edition::Unknown;
+    } else {
+        std::string archive, error;
+        std::vector<zip::Entry> entries;
+        if (!read_file(from, archive) || !zip::read_directory(archive, entries, error)) return Edition::Unknown;
+        // At the top, ASCII case ignored, as Tome takes it (package::check_entries).
+        bool found = false;
+        for (const zip::Entry& e : entries) {
+            if (!e.directory() && tome::text::iequals(e.name, "tome.mod.json")) {
+                found = zip::extract(archive, e, text, error);
+                break;
+            }
+        }
+        if (!found) return Edition::Unknown;
+    }
+    json::Value root;
+    ModMetadata meta;
+    if (!json::parse(text, root).ok) return Edition::Unknown;
+    parse_metadata(root, meta);
+    return meta.edition;
+}
 
 bool find(const std::string& folder, ModStatus& out) {
     for (ModStatus& s : mod_manager().status()) {
@@ -105,7 +141,7 @@ void check_icon(const ModStatus& mod, const std::string& icon, Report& report) {
 }
 
 int usage() {
-    std::fprintf(stderr, "usage: tome-check [--strict] <mod folder or .tome> [<the mods it needs>...]\n");
+    std::fprintf(stderr, "usage: tome-check [--strict] [--edition roc|tft] <mod folder or .tome> [<the mods it needs>...]\n");
     return 2;
 }
 
@@ -118,11 +154,17 @@ int main() {
     wchar_t** argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     if (!argv) return usage();
     bool strict = false;
+    Edition edition = Edition::Unknown;
     std::vector<std::wstring> paths;
     for (int i = 1; i < argc; ++i) {
         std::string arg = narrow(argv[i]);
         if (arg == "--strict") {
             strict = true;
+        } else if (arg == "--edition") {
+            if (i + 1 >= argc || !parse_edition(narrow(argv[++i]), edition)) {
+                LocalFree(argv);
+                return usage();
+            }
         } else if (arg.empty() || arg[0] == '-') {
             return usage();
         } else {
@@ -131,6 +173,8 @@ int main() {
     }
     LocalFree(argv);
     if (paths.empty()) return usage();
+    if (edition == Edition::Unknown) edition = declared_edition(paths[0]);
+    if (edition == Edition::Unknown) edition = Edition::FrozenThrone;
 
     testing::Home::remove_leftovers(L"tome-check");
     testing::Home home(L"tome-check");
@@ -149,7 +193,9 @@ int main() {
     testing::StartOptions options;
     options.events = true;
     options.fake_storm = true;
-    if (!game.create() || !testing::start(home, game.build(), options)) {
+    const bool created = game.create();
+    if (created) game.set_edition(edition);
+    if (!created || !testing::start(home, game.build(), options)) {
         std::fprintf(stderr, "tome-check: Tome didn't start (log: %s)\n", narrow(testing::log_path(home)).c_str());
         return 2;
     }

@@ -16,10 +16,13 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # MinGW's default printf family is msvcrt's, which lacks C99 formats like %zu.
 add_compile_definitions(__USE_MINGW_ANSI_STDIO=1)
 
-# The Warcraft III 1.27b files the tests read: input/ (input/README.md).
-# Nothing writes there. (Build folders made before input/ cached another one.)
+# The game folders the tests read: input/<version>/ (input/README.md).
+# Nothing writes there. TOME_GAME_DIR is the tests' default (1.27b); the
+# environment's TOME_GAME_DIR overrides it when they run (`make test <version>`).
+# (Build folders made before input/ cached another one.)
 unset(TOME_GAME_DIR CACHE)
-set(TOME_GAME_DIR "${CMAKE_SOURCE_DIR}/input")
+set(TOME_GAME_DIRS "${CMAKE_SOURCE_DIR}/input")
+set(TOME_GAME_DIR "${TOME_GAME_DIRS}/1.27b")
 
 # Where `cmake --build build --target deploy` copies tome.mix: a game folder
 # of your choice, given explicitly (empty: deploy only says so).

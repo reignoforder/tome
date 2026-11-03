@@ -62,7 +62,13 @@ bool identify_game_build(HMODULE game, GameBuild& out) {
     out.file_version = file_version_of(out.path);
     out.sha256 = sha256_file(out.path);
     out.known = find_build_by_sha256(out.sha256.c_str());
+    out.edition = read_edition(out.base, out.known);
     return true;
+}
+
+Edition read_edition(uintptr_t base, const BuildMappings* known) {
+    if (!base || !known || !known->game.expansion) return Edition::Unknown;
+    return edition_from_game(*reinterpret_cast<const volatile int32_t*>(base + known->game.expansion));
 }
 
 bool running_on_wine() {

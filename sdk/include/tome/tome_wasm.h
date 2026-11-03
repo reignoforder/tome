@@ -104,6 +104,8 @@ typedef struct tome_wasm_game_info {
     uint32_t size;
     const char* build_name;    /* e.g. "1.27b" */
     const char* file_version;  /* e.g. "1.27.1.7085"; no game_base: an address */
+    /* API version 15: check `size` (16) before reading this. */
+    int32_t edition;           /* TOME_EDITION_* */
 } tome_wasm_game_info;
 
 typedef struct tome_wasm_script_shadow {
@@ -132,7 +134,8 @@ TOME_WASM_CHECK(tome_wasm_event, destructable, 136);
 TOME_WASM_CHECK(tome_wasm_event, previous, 168);
 TOME_WASM_CHECK(tome_wasm_event, script_shadows, 176);
 _Static_assert(sizeof(tome_wasm_event) == 184, "tome_wasm_event");
-_Static_assert(sizeof(tome_wasm_game_info) == 12, "tome_wasm_game_info");
+TOME_WASM_CHECK(tome_wasm_game_info, edition, 12);
+_Static_assert(sizeof(tome_wasm_game_info) == 16, "tome_wasm_game_info");
 TOME_WASM_CHECK(tome_wasm_script_shadow, line, 16);
 _Static_assert(sizeof(tome_wasm_script_shadow) == 20, "tome_wasm_script_shadow");
 #undef TOME_WASM_CHECK

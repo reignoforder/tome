@@ -102,6 +102,7 @@ bool Session::start(const Home& home) {
         TOME_ERROR("Test: couldn't lay out the fake game image");
         return false;
     }
+    game.set_edition(edition);
     return start(home, game.build());
 }
 

@@ -315,7 +315,7 @@ static unsigned char g_info[256];
 const tome_wasm_game_info* tome_game_info(void) {
     const uint32_t n = tome_raw_game_info(g_info, sizeof(g_info));
     if (n == UINT32_MAX || n > sizeof(g_info)) {
-        static const tome_wasm_game_info none = {sizeof(tome_wasm_game_info), "", ""};
+        static const tome_wasm_game_info none = {sizeof(tome_wasm_game_info), "", "", -1};
         return &none;
     }
     return (const tome_wasm_game_info*)g_info;

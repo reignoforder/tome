@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // The loader against the real game.dll, loaded into this process but never
 // run: every check here is deterministic (no window, no clock, no rendering).
-// Needs the local 1.27b install (TOME_GAME_DIR); each test says "skipped"
-// without it. game.dll is loaded from the install as it is (only read); its
-// Mss32.dll doesn't load .mix files until the game starts its sound, so a
-// tome.mix deployed there stays out (checked).
+// Needs a local install of a build Tome maps (input/<version>: game_dir.h);
+// each test says "skipped" without it. game.dll is loaded from the install
+// as it is (only read); its Mss32.dll doesn't load .mix files until the game
+// starts its sound, so a tome.mix deployed there stays out (checked).
+#include "game_dir.h"
 #include "harness.h"
 #include "test.h"
 
@@ -23,6 +24,7 @@
 #include <windows.h>
 
 #include <cstdio>
+#include <cstdlib>
 
 using host::Home;
 using host::Session;
@@ -33,9 +35,9 @@ namespace {
 // game.dll loaded from the install, identified and verified; null (and the
 // test skipped or failed) otherwise.
 HMODULE load_game(tome::GameBuild& build) {
-    std::wstring dir = host::win_path(TOME_TEST_GAME_DIR);
+    std::wstring dir = host::win_path(test::game_dir());
     if (GetFileAttributesW((dir + L"\\game.dll").c_str()) == INVALID_FILE_ATTRIBUTES) {
-        std::printf("  skipped: no game.dll in %s\n", TOME_TEST_GAME_DIR);
+        std::printf("  skipped: no game.dll in %s\n", test::game_dir().c_str());
         return nullptr;
     }
     SetDllDirectoryW(dir.c_str());
@@ -61,8 +63,13 @@ TEST(game_dll_matches_its_mapping) {
     tome::GameBuild build;
     HMODULE game = load_game(build);
     if (!game) return;
-    CHECK_EQ(build.known->data->name, std::string("1.27b"));
-    CHECK_EQ(build.file_version, std::string("1.27.1.7085"));
+    CHECK_EQ(build.file_version, build.known->data->file_version);
+    // The folder's name is the build's (`make test 1.26a` reads input/1.26a).
+    // Only when make chose the folder too: GAME_VERSION alone (left in the
+    // shell, say) doesn't change what the tests read.
+    const char* version = std::getenv("GAME_VERSION");
+    const char* dir = std::getenv("TOME_GAME_DIR");
+    if (version && *version && dir && *dir) CHECK_EQ(build.known->data->name, std::string(version));
     // Loaded where Windows put it, usually not 0x6F000000: the RVAs have to hold.
     std::vector<std::string> errors;
     CHECK(tome::verify_loaded_build(game, *build.known, errors));
@@ -88,14 +95,24 @@ TEST(game_startup_patches_apply) {
     CHECK_EQ(report, std::string("redirected 3 of 3 InitNatives call sites"));
 
     CHECK(tome::patches::install(base, known, report));
-    CHECK(report.rfind(" applied, 0 skipped: ", std::string::npos) != std::string::npos);
-    for (const char* patch : {"memhack-guard applied", "path-sanitizer applied", "blp-guard applied",
-                              "d3d-reset-lights applied", "gl-context-restore applied", "background-mute applied",
-                              "widescreen applied", "ambient-sound applied", "movie-display-reset applied",
-                              "movie-frame-length applied"}) {
-        if (report.find(patch) == std::string::npos) test::fail(__FILE__, __LINE__, std::string(patch) + ": " + report);
+    // On 1.27b every patch applies; another build may leave one out, only
+    // for want of its symbols (mappings/<build>.json) or because the patch's
+    // variant for it says it isn't for that build.
+    const std::string& name = known.data->name;
+    if (name == "1.27b") CHECK(report.rfind(" applied, 0 skipped: ", std::string::npos) != std::string::npos);
+    for (const char* patch : {"memhack-guard", "path-sanitizer", "blp-guard", "d3d-reset-lights", "gl-context-restore",
+                              "background-mute", "widescreen", "ambient-sound", "movie-display-reset",
+                              "movie-frame-length"}) {
+        const std::string applied = std::string(patch) + " applied";
+        const std::string unmapped = std::string(patch) + " skipped (" + name + " has no mapping for ";
+        const std::string not_for = std::string(patch) + " skipped (not for " + name + ": ";  // its variant says why
+        if (report.find(applied) == std::string::npos && report.find(unmapped) == std::string::npos &&
+            report.find(not_for) == std::string::npos) {
+            test::fail(__FILE__, __LINE__, applied + ": " + report);
+        }
     }
     CHECK(report.find("failed") == std::string::npos);
+    if (report.find("unclamped") != std::string::npos) test::fail(__FILE__, __LINE__, "BLP header copy: " + report);
     if (report.find("gamma ramp left") != std::string::npos || report.find("gamma restore left") != std::string::npos) {
         test::fail(__FILE__, __LINE__, "movie gamma: " + report);
     }

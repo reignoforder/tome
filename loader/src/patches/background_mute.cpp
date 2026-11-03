@@ -140,7 +140,7 @@ void on_destroy() {
     apply(volume, g_mute.close(muted != FALSE), was_ours);
 }
 
-bool install_background_mute(uintptr_t, const BuildMappings&, std::string& report) {
+bool install_background_mute(uintptr_t, const BuildMappings&, const Variant&, std::string& report) {
     // Takes effect once the dispatcher subclasses the game window (bootstrap).
     main_thread::set_activate_hook(on_activate);
     main_thread::set_destroy_hook(on_destroy);
@@ -180,7 +180,7 @@ void background_mute_start(const std::wstring& tome_dir) {
 extern const Patch kBackgroundMute = {
     "background-mute",
     "mutes the game while it's in the background (after Alt+Tab it kept playing)",
-    nullptr,  // any build
+    {},  // the same on every build
     nullptr,  // no game.dll symbols
     nullptr,  // nothing to protect
     nullptr,  // needed everywhere

@@ -509,7 +509,7 @@ uint32_t w_game_info(wasm_exec_env_t env, uint32_t ptr, uint32_t capacity) {
     Impl* impl = impl_of(env);
     const tome_game_info* info = api()->game_info();
     return wasm::write_out(impl->memory(), ptr, capacity,
-                           wasm::encode_game_info(info->build_name, info->file_version, ptr));
+                           wasm::encode_game_info(info->build_name, info->file_version, info->edition, ptr));
 }
 
 int32_t w_register_command(wasm_exec_env_t env, uint32_t ptr, uint32_t len, uint32_t callback) {

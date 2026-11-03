@@ -18,12 +18,13 @@ struct ResolveInput {
 struct ResolveEnvironment {
     SemVer tome_version;
     GameVersion game_version;
+    Edition edition = Edition::Unknown;  // the running game; Unknown takes every mod
 };
 
 enum class ModState {
     Active,
     DisabledByUser,
-    IncompatibleGame,   // "game" range doesn't include this build
+    IncompatibleGame,   // "game" range doesn't include this build, or "edition" isn't this game
     IncompatibleTome,   // "tome" range doesn't include this Tome version
     MissingDependency,  // not installed, or installed in a version outside the range
     DependencyInactive, // installed but disabled or itself unable to load

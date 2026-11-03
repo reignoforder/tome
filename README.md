@@ -1,16 +1,20 @@
 # Tome
 
-A mod loader for Warcraft III: The Frozen Throne, in the spirit of Fabric for
-Minecraft. Mods are built against Tome's stable API instead of each one
+A mod loader for Warcraft III (Reign of Chaos and The Frozen Throne), in the
+spirit of Fabric for Minecraft. Mods are built against Tome's stable API instead of each one
 reverse-engineering the game.
 
 > **Unofficial.** Tome is a fan project, not affiliated with or endorsed by
 > Blizzard Entertainment. It includes no game files: you need your own copy
-> of Warcraft III 1.27b. It changes the game in memory, which online
+> of Warcraft III 1.27b or 1.26a. It changes the game in memory, which online
 > services may not allow, and mods run with full access to your computer.
 > Use it at your own risk: read [`DISCLAIMER.md`](DISCLAIMER.md).
 
-Status: early development. Target build: **1.27b** (game.dll 1.27.1.7085).
+Status: early development. Target builds: **1.27b** (game.dll 1.27.1.7085)
+and **1.26a** (game.dll 1.26.0.6401), each as Reign of Chaos and as The
+Frozen Throne: one `game.dll` runs both (`Warcraft III.exe` starts it with
+`-classic` for Reign of Chaos). A mod works in both unless its
+`tome.mod.json` names one (`"edition": "roc"` or `"tft"`).
 See [`docs/ROADMAP.md`](docs/ROADMAP.md) for what's next and
 [`docs/research.md`](docs/research.md) for the design.
 
@@ -204,16 +208,19 @@ make game                          # the build in the game, to try things (tools
 `make test` includes two deterministic suites that drive the real loader
 in a test process, each test in a process of its own: `tome_host_tests`
 against a fake game image (no game files), and `tome_game_tests` against the
-real `game.dll` loaded but never run (skipped without the game in `input/`). They take
+real `game.dll` loaded but never run (skipped without the game in `input/1.27b/`). They take
 seconds and give the same result every run; see `docs/architecture.md`,
 "Testing".
 
 The tests on `game.dll` and the end-to-end test need the files of a
-Warcraft III 1.27b install in `input/` (or `input` as a link to such a
-folder; `input/README.md`). They only read them. Each launch runs from a
-temporary folder of links to those files, with the build's `tome.mix`, a test
-map (made from one of your melee maps when `tome-mpq` is built) and its own
-`tome/`, `save/` and `replay/`. The game runs in a Wine prefix of the
+Warcraft III 1.27b install in `input/1.27b/` (or `input/1.27b` as a link to
+such a folder; `input/README.md`). They only read them. Other versions go
+in their own folders and are picked by name: `make test 1.26a`. The game
+runs as The Frozen Throne unless `roc` is named too (`make e2e roc`,
+`make e2e 1.26a roc`: Reign of Chaos, `war3.exe -classic`). Each
+launch runs from a temporary folder of links to those files, with the
+build's `tome.mix`, a test map (made from one of your melee maps when
+`tome-mpq` is built) and its own `tome/`, `save/` and `replay/`. The game runs in a Wine prefix of the
 test's own, made once in `build/test-env/wine` with fixed settings (800x600,
 a profile called Tome), so it looks the same on every machine whatever your
 own prefix's settings are.
@@ -254,8 +261,10 @@ your computer. Details: [`DISCLAIMER.md`](DISCLAIMER.md),
 
 ## Known issues
 
-- **Only 1.27b** (game.dll 1.27.1.7085). On any other build Tome logs it and
-  stays idle; the game runs unmodified.
+- **Only 1.27b and 1.26a** (game.dll 1.27.1.7085 and 1.26.0.6401). On any
+  other build Tome logs it and stays idle; the game runs unmodified. On
+  1.26a the ambient-sound patch is skipped: 1.26a doesn't have that bug
+  (`docs/reverse-engineering.md`, "1.26a").
 - **Tested under Wine so far.** Everything ran under Wine with Mesa's
   OpenGL; a pass on Windows 10/11 with Direct3D is still to come.
 - **Online play:** LAN games, hosting and replays are tested (two instances

@@ -117,6 +117,7 @@ add_library(tome_core STATIC
     src/core/frames.cpp
     src/core/game_lock.cpp
     src/core/handshake.cpp
+    src/core/edition.cpp
     src/core/hash_cache.cpp
     src/core/hooks.cpp
     src/core/intermod.cpp
@@ -245,9 +246,17 @@ target_link_libraries(tome_runtime PUBLIC bcrypt version ole32 wamr)
 # Linking an object library adds its objects (and its definitions) to tome.mix.
 target_link_libraries(tome_loader PRIVATE tome_runtime)
 
+# Not input/ or any of its version folders (each may be a link elsewhere).
 get_filename_component(_tome_install "${TOME_INSTALL_DIR}" REALPATH)
-get_filename_component(_tome_input "${TOME_GAME_DIR}" REALPATH)
-if(TOME_INSTALL_DIR AND NOT _tome_install STREQUAL _tome_input)
+set(_tome_into_input FALSE)
+file(GLOB _tome_inputs LIST_DIRECTORIES true "${TOME_GAME_DIRS}" "${TOME_GAME_DIRS}/*")
+foreach(_dir IN LISTS _tome_inputs)
+    get_filename_component(_dir "${_dir}" REALPATH)
+    if(_tome_install STREQUAL _dir)
+        set(_tome_into_input TRUE)
+    endif()
+endforeach()
+if(TOME_INSTALL_DIR AND NOT _tome_into_input)
     add_custom_target(deploy
         COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:tome_loader> "${TOME_INSTALL_DIR}/tome.mix"
         DEPENDS tome_loader

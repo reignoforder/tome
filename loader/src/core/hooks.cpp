@@ -33,6 +33,18 @@ std::vector<std::string> words(const std::string& type) {
 
 enum class Type { Void, Int32, Float, Double, Wide };
 
+// The 64-bit integer types by name, Windows' typedefs included: a wide
+// result comes back in edx:eax, and a hook gives the caller its own edx
+// back for any other (tome_hook_dispatch), so a missed one loses its high half.
+bool is_wide_name(const std::string& word) {
+    static const char* const kWide[] = {"int64_t", "uint64_t", "__int64", "INT64",   "UINT64",    "LONG64",
+                                        "ULONG64", "DWORD64",  "LONGLONG", "ULONGLONG", "QWORD"};
+    for (const char* name : kWide) {
+        if (word == name) return true;
+    }
+    return false;
+}
+
 // Classifies one parameter or return type ("const char* text", "float x",
 // "int"). Pointers are 32-bit whatever they point to; a named type that
 // isn't a known wide one is taken as 32-bit (ints, enums, handles).
@@ -42,7 +54,7 @@ Type classify(const std::string& text) {
     int longs = 0;
     for (const std::string& word : w) {
         if (word == "double") return Type::Double;  // also long double: 64-bit in MSVC
-        if (word == "int64_t" || word == "uint64_t" || word == "__int64") return Type::Wide;
+        if (is_wide_name(word)) return Type::Wide;
         if (word == "long") ++longs;
     }
     if (longs >= 2) return Type::Wide;
@@ -155,7 +167,8 @@ bool layout_for(mappings::Convention convention, const std::string& signature, L
     }
     switch (classify(result)) {
     case Type::Void: out.result = Result::None; break;
-    case Type::Int32: case Type::Wide: out.result = Result::Int; break;
+    case Type::Int32: out.result = Result::Int; break;
+    case Type::Wide: out.result = Result::Int; out.wide_result = true; break;
     case Type::Float: out.result = Result::Float; break;
     case Type::Double: out.result = Result::Double; break;
     }

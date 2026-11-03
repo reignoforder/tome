@@ -50,8 +50,9 @@
 // rest. It runs mid-function with ebx = the CBLPFile (this), esi = the file
 // buffer, edi = this+8 (the header destination); the size the loader stored
 // is at this+size_offset, passed in through a variable so no offset is baked
-// into the assembly. It clobbers only eax/ecx/edx/esi/edi (all dead after the
-// copy) and preserves ebx; the game's `cmp [ebx+8], 'BLP1'` runs next.
+// into the assembly. It clobbers only ecx/edx/esi/edi (dead after the copy)
+// and preserves ebx and eax: the game's magic check runs next, on [ebx+8]
+// (1.27b) or [eax] (1.26a, which keeps this+8 there).
 // The CBLPFile.size offset the detour reads, and the detour itself. Both have
 // C linkage so the assembly can name them without C++ mangling. Set at install.
 extern "C" {
@@ -64,6 +65,7 @@ asm(R"(
     .text
     .globl _tome_blp_header_copy
 _tome_blp_header_copy:
+    push eax
     cld
     mov ecx, [_tome_blp_size_offset]
     mov ecx, [ebx + ecx]        # ecx = file size in bytes
@@ -77,6 +79,7 @@ _tome_blp_header_copy:
     mov ecx, edx
     xor eax, eax
     rep stosb                   # zero the remaining header bytes
+    pop eax
     ret
     .att_syntax prefix
 )");
@@ -115,33 +118,52 @@ void TOME_CALL on_blp_open(tome_mod*, tome_hook_call* call, void*) {
     }
 }
 
-// The header-copy site is `mov ecx,0x127; rep movsd` (7 bytes). Replace it
-// with an absolute indirect call through g_detour_ptr (FF 15 <&ptr>, 6 bytes)
-// plus a NOP, so the call reaches the detour whatever the distance between
-// game.dll and tome.mix (a rel32 call might not). The detour returns to the
-// NOP, then the game's magic check runs.
-const uint8_t kCopyExpected[7] = {0xb9, 0x27, 0x01, 0x00, 0x00, 0xf3, 0xa5};
+// The header-copy site (CBLPFile.header_copy) as each build compiled it.
+// The patch replaces it with `keep` (instructions from the site that must
+// still run, moved in front), an absolute indirect call through
+// g_detour_ptr (FF 15 <&ptr>, 6 bytes: it reaches the detour whatever the
+// distance between game.dll and tome.mix, which a rel32 call might not),
+// and NOPs to the end of the site. The detour returns to them, then the
+// game's magic check runs.
+struct CopySite {
+    const uint8_t* expected;  // the site's bytes, checked before patching
+    size_t size;
+    const uint8_t* keep;  // instructions from the site that stay, in front of the call
+    size_t keep_size;
+};
+// 1.27b: mov ecx,0x127; rep movsd.
+const uint8_t kCopy127b[] = {0xb9, 0x27, 0x01, 0x00, 0x00, 0xf3, 0xa5};
+const CopySite kSite127b = {kCopy127b, sizeof(kCopy127b), nullptr, 0};
+// 1.26a: mov ecx,0x127; mov edi,eax; rep movsd. The destination comes from
+// eax, so `mov edi,eax` stays: moved to the front, it still sets edi.
+const uint8_t kCopy126a[] = {0xb9, 0x27, 0x01, 0x00, 0x00, 0x8b, 0xf8, 0xf3, 0xa5};
+const uint8_t kKeep126a[] = {0x8b, 0xf8};
+const CopySite kSite126a = {kCopy126a, sizeof(kCopy126a), kKeep126a, sizeof(kKeep126a)};
 void* g_detour_ptr = reinterpret_cast<void*>(&tome_blp_header_copy);
 
 // Clamps the fixed header copy to the file's length. Best-effort: if the
 // mapping doesn't locate the site, or its bytes aren't what's expected, the
 // AFTER guard still refuses malformed files (only the pre-magic over-read of
 // a short file is left), so this never fails the patch.
-std::string install_copy_clamp(uintptr_t base, const BuildMappings& build) {
+std::string install_copy_clamp(uintptr_t base, const BuildMappings& build, const CopySite& site) {
     if (!build.blp.header_copy) return "header copy unclamped (site not mapped)";
     tome_blp_size_offset = g_size_offset;
-    uint8_t replacement[7] = {0xff, 0x15};
+    uint8_t replacement[16];
+    std::memset(replacement, 0x90, sizeof(replacement));  // NOPs after the call
+    if (site.keep_size + 6 > site.size || site.size > sizeof(replacement)) return "header copy unclamped (site too short)";
+    if (site.keep_size) std::memcpy(replacement, site.keep, site.keep_size);
+    replacement[site.keep_size] = 0xff;
+    replacement[site.keep_size + 1] = 0x15;
     void* ptr = &g_detour_ptr;
-    std::memcpy(replacement + 2, &ptr, 4);
-    replacement[6] = 0x90;  // NOP: the call is 6 bytes, the site is 7
+    std::memcpy(replacement + site.keep_size + 2, &ptr, 4);
     std::string error;
-    if (!patch_bytes(base + build.blp.header_copy, kCopyExpected, replacement, sizeof(replacement), error)) {
+    if (!patch_bytes(base + build.blp.header_copy, site.expected, replacement, site.size, error)) {
         return "header copy unclamped (" + error + ")";
     }
     return "";
 }
 
-bool install_blp_guard(uintptr_t base, const BuildMappings& build, std::string& report) {
+bool install_blp_guard(uintptr_t base, const BuildMappings& build, const Variant& variant, std::string& report) {
     g_buffer_offset = build.blp.buffer_offset;
     g_size_offset = build.blp.size_offset;
     std::string error;
@@ -155,7 +177,7 @@ bool install_blp_guard(uintptr_t base, const BuildMappings& build, std::string& 
     after.priority = INT32_MIN;  // after any mod's handler; the guard has the last word
     after.fn = on_blp_open;
     hooks::add(open, after);
-    std::string clamp = install_copy_clamp(base, build);
+    std::string clamp = install_copy_clamp(base, build, *static_cast<const CopySite*>(variant.params));
     report = "validates BLP textures before the game decodes them";
     if (!clamp.empty()) report += "; " + clamp;
     return true;
@@ -163,13 +185,18 @@ bool install_blp_guard(uintptr_t base, const BuildMappings& build, std::string& 
 
 const char* const kSymbols[] = {"CBLPFile::Open", "CBLPFile.buffer", "CBLPFile.size", nullptr};
 const char* const kReserve[] = {"CBLPFile::Open", nullptr};
+const char* const k126a[] = {"1.26a", nullptr};
+const Variant kVariants[] = {
+    {k126a, nullptr, nullptr, &kSite126a},
+    {nullptr, nullptr, nullptr, &kSite127b},
+};
 
 } // namespace
 
 extern const Patch kBlpGuard = {
     "blp-guard",
     "refuses malformed BLP textures so the game's loader can't read past them",
-    nullptr,    // any build that maps the symbols below
+    kVariants,  // the header copy's bytes
     kSymbols,
     kReserve,   // a mod mustn't be able to drop the guard (file header)
     nullptr,    // needed everywhere

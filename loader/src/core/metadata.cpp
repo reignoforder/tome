@@ -15,7 +15,7 @@ const char* const kReservedFields[] = {"links", "$schema"};
 
 const char* const kKnownFields[] = {
     "schema", "id", "version", "name", "description", "authors", "license", "icon",
-    "game", "tome", "depends", "recommends", "conflicts", "breaks", "entry", "wasm", "assets",
+    "game", "edition", "tome", "depends", "recommends", "conflicts", "breaks", "entry", "wasm", "assets",
     "requires", "natives", "provides", "sync", "reload", "load", "config", "keybinds",
 };
 
@@ -196,6 +196,9 @@ MetadataResult parse_metadata(const json::Value& root, ModMetadata& out) {
     std::string err;
     if (r.string("game", text, true) && !parse_game_range(text, m.game, err)) {
         r.error("\"game\": " + err);
+    }
+    if (r.string("edition", text, false) && !parse_edition(text, m.edition)) {
+        r.error("\"edition\" must be \"roc\" (Reign of Chaos) or \"tft\" (The Frozen Throne); leave it out for both");
     }
     if (r.string("tome", text, true) && !parse_semver_range(text, m.tome, err)) {
         r.error("\"tome\": " + err);

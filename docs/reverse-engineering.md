@@ -23,6 +23,62 @@ find more. The addresses Tome actually uses live in `mappings/1.27b.json`
 Below, "RVA" means offset from game.dll's base; `0x6Fxxxxxx` addresses are
 VAs at the preferred base (RVA = VA − `0x6F000000`).
 
+### 1.26a
+
+Tome also maps 1.26a (`mappings/1.26a.json`; `make test 1.26a`, `make e2e 1.26a`).
+Everything below is about 1.27b; RVAs in this document are 1.27b's.
+
+| File | Version | PE timestamp | SizeOfImage | SHA-256 |
+|------|---------|--------------|-------------|---------|
+| game.dll | 1.26.0.6401 (1.26a) | `0x4d83bb00` | `0x00bb5000` | `6d21bd9a0f9fbc8446f455c9e89ac994fed68174426fe608fcb9baefd4dec53c` |
+| war3.exe | 1.26.0.6401 | `0x4d83baa9` | | `28173101fcbeb4cdcac0f83e0e724aa444209b479a2ac1c1784e0d4310889909` |
+| Storm.dll | | `0x4d83b8d2` | | `eecc42b05a91413dee10588a654c6cca05836e7513af6c7c568a56124bf97d0a` |
+
+- MSVC 2005 (msvcr80), no frame pointers (`[esp+n]` where 1.27b has
+  `[ebp-n]`), x87 floating point where 1.27b has SSE, and no ASLR (it
+  loads at `0x6F000000`; Tome still uses RVAs). `.text` `0x1000`, `.rdata`
+  `0x86D000`, `.data` `0xA4F000`. RTTI as in 1.27b.
+- **How it was mapped:** both builds register the same 1,291 natives by
+  name (the BindNative calls in InitNatives) and have the same RTTI classes;
+  pairing those, then every pair's callees and globals in the order the
+  code uses them, matched about 40,000 functions. Each symbol was then
+  checked: constants, strings, call order and `ret N` against 1.27b's, and
+  by hand where the match was weak (the code below). The struct offsets are
+  1.27b's: the same fields at the same displacements in the matched code,
+  except the Direct3D device's.
+- **Differences that matter:**
+  - **No local-only variable constructor.** 1.26a has one constructor for
+    every JASS variable kind, `JassVarDesc::ctor` (RVA `0x4641F0`, kind as
+    its first stack argument, `ret 0x14`); the compiler's local declaration
+    calls it with `0x29` (`0x4648DE`), and it writes `sym+0x18` as 1.27b's
+    `JassLocalVarDesc::ctor` does. The local-only wrapper (`0x464260`) has
+    no callers. memhack-guard hooks the shared one on 1.26a, for kind
+    `0x29` only (its 1.26a variant).
+  - **Direct3D device layout:** the fields Tome uses are where 1.27b has
+    them (`+0x574`, `+0x580`, `+0x584`, `+0x594`, `+0xD8`), but the state
+    caches moved (render states `+0x6E8`, texture stages `+0xEE8`, lights
+    `+0x14F8`), and the device vtable has one slot fewer before CanDraw
+    (`+0x38`, 1.27b `+0x3C`), for Direct3D and OpenGL.
+  - **BLP header copy** (`CBLPFile.header_copy`, `0x78A854`): `mov
+    ecx,0x127; mov edi,eax; rep movsd` (9 bytes, 1.27b's has no `mov`), and
+    the magic check after it reads `[eax]`. blp-guard's 1.26a variant keeps
+    the `mov edi,eax` in front of its call, and the detour preserves eax.
+  - **No ambient-sound bug:** 1.26a's `CSound::InitMIDI` (`0x3DBDE0`) still
+    makes the MIDI sound (CreateMIDISnd into `CSound.midi`), so
+    ambient-sound's 1.26a variant skips it.
+  - **Movie mode:** `Movie.cinematic_mode` is `0xACC698`; SetDisplayMode
+    stores width, height and bits in a different order than 1.27b.
+  - **Registers kept across calls:** the compiler knows when a leaf
+    function leaves ecx alone and keeps a value there across the call:
+    `0x4C5DD0` calls RCString::GetText with `this` in ecx and passes it on to
+    `0x4C5CF0` without reloading it. A hook must give back the caller's
+    ecx and edx, and pass its eax into the original (the hook engine does:
+    `architecture.md`, hooks).
+- **Not mapped (no use in Tome):** COptionsMenu::SetPanel and ::Save,
+  CBattleNetGateways::LoadRegistry, CSlider::SetValue, CameraPresets (not a
+  table in 1.26a), CrashHandler::*, Scheduler::SetPeriod,
+  CGxDeviceD3d::WndProc.
+
 ## How Tome gets in
 
 `Mss32.dll` (Miles Sound System) `LoadLibrary`s every `*.mix` file in the game
@@ -126,6 +182,22 @@ therefore limits a `PreloadGenEnd` name to what fits after that prefix
 (`path_guard::max_name_after`). Other path natives get `kMaxPathLen` (259),
 and `Preload` has no limit (its native at `0x20FA40` keeps the string in a
 heap string via `0x2407C0`).
+
+**The preload list (1.27b).** `0x231DF0` returns the process's one preload
+generator (global `0xD68A24`, kept across maps). `Preload` (`0x20FA40`)
+only adds an entry to its list (`0x2407C0`, ret 4: the name at entry+8,
+flags for a model, `.mdx`/`.mdl`, at +0x14 and a texture, `.blp`/`.tga`, at
++0x18); it opens nothing. The files are opened by the natives that work the
+list: `PreloadStart` (`0x20FB90`) and `PreloadEnd` (`0x20FA70`) through
+`0x249B80`, and `PreloadEnd`, `PreloadEndEx` (`0x20FAC0`) and
+`PreloadRefresh` (`0x20FB80`) through `0x2441B0`, which loads each entry as
+a model (`0x17DF00`), a texture (`0x1B55A0`) or another file (`0x65DA0`)
+and removes it. `PreloadGenClear` (`0x20FB10`) frees the whole list
+(`0x229A30`, by its `jmp` thunk `0x229B50`), as does `0x2441B0` past its
+time budget. `PreloadGenEnd` writes the list out. So the path sanitizer lets
+`Preload` record any string (maps use it as data) and, while the list holds
+one that isn't a safe path, refuses the four natives that open it until
+`PreloadGenClear`.
 
 ### JASS compiler (Jass2), for the memhack guard
 
@@ -967,7 +1039,7 @@ block at `client + index * 0x304`: `+0x278` its state (3 and up: in a game),
 | NetSendAction | `0x26CE10` | `void __fastcall(action, int flags)`, plain `ret`. Writes the action byte and data into a data store and hands it to `0x32C920`, which schedules it for every player and the replay. The builders pass 0. `SyncValue::Destroy` (`0x221080`, thiscall on `action+0x318`) runs after it. |
 | OnNetSyncStoredInteger | `0x26F7D0` | `int __fastcall(event)`, plain `ret`. Runs on every client and in replays: `0x24A420` stores the value, **creating** the game cache if no cache has that name (`0x2322B0(name, 1)`), so a client without Tome just keeps an unused cache. Sender at `+0x15`. |
 | CPlayerWar3 controller | `+0x268` | mapcontrol (0 user), as GetPlayerController (`0x201710`) reads it. GetPlayerSlotState reads `+0x270` (`CPlayerWar3.game_state`). |
-| Edition | `.data 0xCD52F0` | `Game.expansion`: 1 for The Frozen Throne, 0 for Reign of Chaos. `0x2DF4A0` turns it into the product code (`W3XP`/`WAR3`), found from the game name table `0xAA9874` ("Warcraft III: Reign of Chaos", "...: The Frozen Throne"), which `0x2DF470` indexes. `Frozen Throne.exe` is a launcher, so the program's name says nothing about it. |
+| Edition | `.data 0xCD52F0` | `Game.expansion`: 1 for The Frozen Throne, 0 for Reign of Chaos. `0x2DF4A0` turns it into the product code (`W3XP`/`WAR3`), found from the game name table `0xAA9874` ("Warcraft III: Reign of Chaos", "...: The Frozen Throne"), which `0x2DF470` indexes. `Frozen Throne.exe` is a launcher, so the program's name says nothing about it. Set once at startup by `0x046800` (called from `0x04515C`, before Mss32 loads `tome.mix`): 0 when the product it reads is `'WAR3'`, else 1; `-1` in the file until then. `war3.exe -classic` (what `Warcraft III.exe` passes) gives 0 on 1.27b and 1.26a (checked in game). |
 | CPlayerWar3 race | `+0x260` | `GetPlayerRace` (`0x2017C0`, found from the native table's name string) maps the handle with `0x1EDE10` and returns this int, or 1 for no player: 1 human, 2 orc, 3 undead, 4 night elf. The player array's length is `CGameWar3+0x54` (`CGameWar3.player_count`). |
 
 Net ids in a LAN lobby: the host had 128 and the joining player 129 (the
@@ -1308,14 +1380,14 @@ and by a unit test against the local file.
 
 ## Methods and tools
 
-- **Disassembly:** `objdump -d -M intel --start-address=0x6f… --stop-address=0x6f… input/game.dll`.
+- **Disassembly:** `objdump -d -M intel --start-address=0x6f… --stop-address=0x6f… input/1.27b/game.dll`.
   For repeated searches, dump `.text` once to a scratch file and grep it.
-- **String → code:** `python3 -I tools/re/xrefs.py input/game.dll CreditsButton`.
+- **String → code:** `python3 -I tools/re/xrefs.py input/1.27b/game.dll CreditsButton`.
   Shows `push`/`mov ecx` uses and data tables. Strings used as FDF frame
   names lead straight to the code that looks those frames up.
-- **Class → vtable:** `python3 -I tools/re/rtti.py input/game.dll CTextFrame --base CFrame`.
+- **Class → vtable:** `python3 -I tools/re/rtti.py input/1.27b/game.dll CTextFrame --base CFrame`.
   Prints the overridden slots, which narrows down where a class's own code is.
-- **Byte signatures:** `python3 -I tools/re/signatures.py input/game.dll mappings/1.27b.json [--write]`.
+- **Byte signatures:** `python3 -I tools/re/signatures.py input/1.27b/game.dll mappings/1.27b.json [--write]`.
   Prints each function's signature (relocated bytes masked as `??`), compares
   it with the file and, with `--write`, fills in `bytes`. Exits non-zero if a
   stored signature differs.

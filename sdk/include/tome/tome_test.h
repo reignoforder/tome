@@ -73,6 +73,12 @@ TOME_TEST_API int TOME_CALL tome_test_install(const char* path);
  * file to one before tome_test_start. */
 TOME_TEST_API const char* TOME_CALL tome_test_folder(void);
 
+/* Which game the fake game.dll runs as, before tome_test_start:
+ * TOME_EDITION_FROZEN_THRONE (the default) or TOME_EDITION_REIGN_OF_CHAOS,
+ * for a mod whose tome.mod.json has "edition": "roc". 1 if set; 0 for
+ * another value or after tome_test_start. */
+TOME_TEST_API int TOME_CALL tome_test_set_edition(int32_t edition);
+
 /* Starts Tome: it finds the installed mods, and each one is allowed (as
  * if the player had said yes) and turned on, so mods with code load and
  * their tome_mod_load and tome_mod_enable run. 1 if Tome started; whether

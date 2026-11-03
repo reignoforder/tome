@@ -115,7 +115,7 @@ void add_handler(hooks::Target* target, int phase, tome_hook_fn fn) {
     hooks::add(target, handler);
 }
 
-bool install_widescreen(uintptr_t base, const BuildMappings& build, std::string& report) {
+bool install_widescreen(uintptr_t base, const BuildMappings& build, const Variant&, std::string& report) {
     // Every target first, so a failure leaves no handler behind.
     hooks::Target* camera = find_target("WorldView::SetupCamera", report);
     if (!camera) return false;
@@ -142,7 +142,7 @@ const char* const kSymbols[] = {"WorldView::SetupCamera", "CSpriteFrame::SetupCa
 extern const Patch kWidescreen = {
     "widescreen",
     "shows more of the map instead of stretching the 3D view in a window that isn't 4:3 (Tome > Settings)",
-    nullptr,  // any build that maps the symbols below
+    {},  // the same on every build
     kSymbols,
     nullptr,  // nothing to protect: a mod may adjust the projection after it
     nullptr,  // always installed; the setting is checked every frame

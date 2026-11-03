@@ -131,6 +131,9 @@ TEST(hooks_layout_per_convention) {
     CHECK_EQ(l.pop_bytes, 8u);
     l = layout(C::Cdecl, "uint64_t(int a)");  // edx:eax
     CHECK(l.result == hooks::Result::Int);
+    CHECK(l.wide_result);
+    CHECK(layout(C::Cdecl, "ULONGLONG(void)").wide_result);  // Windows' names too
+    CHECK(!layout(C::Cdecl, "int(int a)").wide_result);      // edx goes back to the caller as it came
     CHECK(layout(C::Cdecl, "float(int)").result == hooks::Result::Float);
     CHECK(layout(C::Cdecl, "double(void)").result == hooks::Result::Double);
     CHECK(layout(C::Cdecl, "float*(void)").result == hooks::Result::Int);

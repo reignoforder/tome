@@ -33,8 +33,9 @@ extern "C" {
  * 12: more events (spells, damage, target acquired, decay, detection, Esc and arrow keys,
  * destructable and item deaths, dialog clicks, skill and build menus, level end, units
  * created and removed, hero experience, player resources, day and night).
- * 13: the map script's memhack pattern (script_shadows, map_script_shadows). */
-#define TOME_API_VERSION 14
+ * 13: the map script's memhack pattern (script_shadows, map_script_shadows).
+ * 14: the game's files (read_game_file). 15: the game's edition (tome_game_info.edition). */
+#define TOME_API_VERSION 15
 
 #define TOME_CALL __cdecl
 /* C linkage in C++ too: Tome looks the lifecycle functions up by their plain names. */
@@ -90,11 +91,21 @@ typedef enum tome_log_level {
     TOME_LOG_ERROR = 3
 } tome_log_level;
 
+/* API version 15: which game game.dll runs as. One game.dll runs both;
+ * war3.exe -classic (what "Warcraft III.exe" starts) is Reign of Chaos. */
+typedef enum tome_edition {
+    TOME_EDITION_UNKNOWN = -1,         /* the game hadn't decided yet (Tome loaded early) */
+    TOME_EDITION_REIGN_OF_CHAOS = 0,
+    TOME_EDITION_FROZEN_THRONE = 1
+} tome_edition;
+
 typedef struct tome_game_info {
     uint32_t size;               /* sizeof(tome_game_info) as known to Tome */
     const char* build_name;      /* e.g. "1.27b" */
     const char* file_version;    /* e.g. "1.27.1.7085" */
     uintptr_t game_base;         /* load address of game.dll; add RVAs to this */
+    /* API version 15: check `size` before reading this. */
+    int32_t edition;             /* tome_edition */
 } tome_game_info;
 
 /*

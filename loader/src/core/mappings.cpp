@@ -467,6 +467,7 @@ bool bind_build(const mappings::Build& build, BuildMappings& out, std::vector<st
     bind("OnNetGameTick", Kind::Function, game.game_tick);
     bind("CNetEventGameTick.step", Kind::Offset, game.game_tick_step_offset);
     bind("GameShutdown", Kind::Function, game.game_shutdown);
+    bind("Game.expansion", Kind::Data, game.expansion);
 
     auto& play = out.play;
     bind("MapInfo.description", Kind::Offset, play.map_description_offset);

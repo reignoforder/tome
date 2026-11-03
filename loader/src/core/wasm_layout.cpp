@@ -135,11 +135,12 @@ std::string encode_units(const tome_unit* units, uint32_t count, const Handles& 
     return b.take();
 }
 
-std::string encode_game_info(const char* build_name, const char* file_version, uint32_t base) {
+std::string encode_game_info(const char* build_name, const char* file_version, int32_t edition, uint32_t base) {
     Block b(base, kGameInfoSize);
     b.u32(0, kGameInfoSize);
     b.str(4, build_name);
     b.str(8, file_version);
+    b.i32(12, edition);
     return b.take();
 }
 

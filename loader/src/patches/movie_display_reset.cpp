@@ -179,7 +179,7 @@ std::string install_gamma_skip(uintptr_t base, const BuildMappings& build) {
     return "";
 }
 
-bool install_movie_display_reset(uintptr_t base, const BuildMappings& build, std::string& report) {
+bool install_movie_display_reset(uintptr_t base, const BuildMappings& build, const Variant&, std::string& report) {
     g_cinematic_mode = base + build.movie.cinematic_mode;
     std::string error;
     hooks::Target* set_mode = hooks::find_or_install("Movie::SetDisplayMode", error);
@@ -207,7 +207,7 @@ extern const Patch kMovieDisplayReset = {
     "movie-display-reset",
     "plays movies (intro, campaign cinematics) full screen in the desktop's mode, at their own gamma, and keeps them "
     "from hanging on a black screen when Wine refuses a display mode reset",
-    nullptr,  // any build that maps the symbols below
+    {},  // the same on every build
     kSymbols,
     nullptr,  // nothing to protect: a mod can't reopen a hole through it
     only_under_wine,

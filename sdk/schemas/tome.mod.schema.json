@@ -30,6 +30,10 @@
       "type": "string",
       "description": "Supported game builds: a range such as \"1.27b\", \">=1.26a <1.29\" or \"*\". Aliases: 1.24e, 1.26a, 1.27a, 1.27b."
     },
+    "edition": {
+      "enum": ["roc", "tft"],
+      "description": "The one game the mod is for: \"roc\" (Reign of Chaos) or \"tft\" (The Frozen Throne). Leave it out for both."
+    },
     "tome": { "type": "string", "description": "Supported Tome versions: a semver range such as \">=0.1.0 <0.2.0\"." },
     "depends": { "$ref": "#/definitions/dependencies", "description": "Must be installed and enabled first: { \"id\": \"range\" }." },
     "recommends": { "$ref": "#/definitions/dependencies", "description": "Mentioned in the mod's warnings when missing." },

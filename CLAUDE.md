@@ -1,7 +1,8 @@
 # Tome: notes for working in this repo
 
 Tome is a Fabric-style mod loader for Warcraft III **1.27b** (game.dll
-1.27.1.7085, 32-bit). Start with `docs/ROADMAP.md` (what's next), then
+1.27.1.7085, 32-bit) and 1.26a, Reign of Chaos and The Frozen Throne (one
+game.dll runs both; `war3.exe -classic` is Reign of Chaos). Start with `docs/ROADMAP.md` (what's next), then
 `docs/architecture.md` (how it works) and `docs/reverse-engineering.md`
 (game internals, addresses, methods). `docs/research.md` is the original
 design document.
@@ -11,6 +12,8 @@ design document.
 ```sh
 make                                     # configure (once: Ninja, mingw toolchain, dev tools) and build
 make test                                # unit tests + loader tests without the game (tests/host) and on game.dll (tests/game)
+make test 1.26a / make e2e 1.26a         # the same on another game version: the folder input/1.26a/ (GAME_VERSION; default 1.27b)
+make e2e roc / make e2e 1.26a roc        # as Reign of Chaos (EDITION=roc: war3.exe -classic; default tft); also tools/game.sh
 make e2e                                 # real game, 6 launches (~2.5 min), off screen in Xvfb, then:
 make e2e-multiplayer                     # two instances in a LAN game (tools/e2e-multiplayer.sh, network namespaces)
 make coverage                            # line coverage of make test + make e2e by section (tools/coverage.sh, build-cov/; fails below 90%)
@@ -25,14 +28,15 @@ make deploy INSTALL_DIR=<game folder>    # copy tome.mix into a game folder (nev
 ```
 
 The game for testing (`tools/test-env.sh`) runs from a folder of links to
-`input/` (the game's files, only read: `input/README.md`) in a Wine prefix of its own
+`input/<version>/` (the game's files, a folder per version, default
+`input/1.27b/`; only read: `input/README.md`) in a Wine prefix of its own
 (`build/test-env/wine`: 800x600, profile Tome). `HEADLESS=1` (the e2e
 default) puts it in its own Xvfb; `tools/game.sh` shows it on screen unless
 `HEADLESS=1`. Its folder is `build/test-env/game/` (`tools/game.sh dir`).
 
 ## Rules
 
-- **Never commit game files.** `input/` holds the game's files and is
+- **Never commit game files.** `input/<version>/` holds the game's files and is
   gitignored (all but its README), along with game data and binary types. Don't describe where
   the game files came from in committed text.
 - Store **RVAs**, not absolute addresses (ASLR). Add every new address to

@@ -83,6 +83,16 @@ static void missing_dependency(void) {
     TOME_EXPECT_STR(tome_test_state("nobody"), "missing");
 }
 
+/* A mod for Reign of Chaos only, tested in that game. */
+static void reign_of_chaos(void) {
+    TOME_EXPECT(tome_test_install(TOME_TEST_SOURCE_DIR "/tests/e2e/mods/roc-only"));
+    TOME_EXPECT(!tome_test_set_edition(7));
+    TOME_EXPECT(tome_test_set_edition(TOME_EDITION_REIGN_OF_CHAOS));
+    TOME_EXPECT(tome_test_start());
+    TOME_EXPECT(!tome_test_set_edition(TOME_EDITION_FROZEN_THRONE)); /* after start */
+    TOME_EXPECT_STATE("roc-only", "active");
+}
+
 /* The smaller helpers, on the crash fixture in a mode that doesn't crash. */
 static void helpers(void) {
     uint32_t result = 0;
@@ -139,6 +149,7 @@ static const tome_test_case cases[] = {
     {"crash_in_native", crash_in_native},
     {"crash_in_enable", crash_in_enable},
     {"missing_dependency", missing_dependency},
+    {"reign_of_chaos", reign_of_chaos},
 };
 
 int main(int argc, char** argv) {

@@ -12,8 +12,8 @@ owners'. Tome uses them only to say which game it works with; that doesn't
 mean any of their owners is involved.
 
 **No game files.** Tome contains none of the game's files, code or art, and
-doesn't download any. You need your own copy of Warcraft III: The Frozen
-Throne at version 1.27b. Tome doesn't remove or get around the game's copy
+doesn't download any. You need your own copy of Warcraft III (Reign of
+Chaos, The Frozen Throne or both) at version 1.27b or 1.26a. Tome doesn't remove or get around the game's copy
 protection or CD key checks, and isn't meant to.
 
 **What it does to the game.** Tome is loaded by the game and changes the

@@ -47,6 +47,8 @@ public:
     GameBuild build() const;
     uintptr_t base() const { return base_; }
     uintptr_t address(const char* symbol) const;
+    // Which game it runs as (Game.expansion): The Frozen Throne after create().
+    void set_edition(Edition edition) const;
 
     // Runs InitNatives through call site `n` (0-2), as a map load does, and
     // from then on a game is running (CGameWar3's instance is set), so

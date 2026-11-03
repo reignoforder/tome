@@ -3,9 +3,13 @@
 # the place the game runs in for testing, kept apart from your own install
 # and desktop.
 #
-# - Game folder: a folder of links to the game's files in input/ (which is
-#   only ever read; input/README.md), with its own tome.mix, tome/, Maps/,
-#   save/ and replay/. Nothing is copied into input/.
+# - Game folder: a folder of links to the game's files in input/<version>/
+#   (GAME_VERSION, default 1.27b; input/ is only ever read: input/README.md),
+#   with its own tome.mix, tome/, Maps/, save/ and replay/. Nothing is
+#   copied into input/.
+# - Edition: EDITION=tft (default) runs The Frozen Throne, EDITION=roc Reign
+#   of Chaos (war3.exe -classic, as "Warcraft III.exe" starts it; the same
+#   game.dll). EDITION_ARGS holds what war3.exe gets for it.
 # - Wine prefix: its own (TEST_PREFIX, default <build>/test-env/wine), made
 #   on first use with fixed settings (800x600, a profile called Tome, no
 #   intro movie), so the game looks the same on every machine and
@@ -26,7 +30,14 @@
 # Wine's ALSA driver (SOUND=0: wine-alsa).
 
 # BUILD and ROOT are set by the script that sources this.
-GAME_DIR="$ROOT/input"
+GAME_VERSION="${GAME_VERSION:-1.27b}"
+GAME_DIR="$ROOT/input/$GAME_VERSION"
+EDITION="${EDITION:-tft}"
+case "$EDITION" in
+    tft) EDITION_ARGS=() EDITION_NAME="The Frozen Throne" ;;
+    roc) EDITION_ARGS=(-classic) EDITION_NAME="Reign of Chaos" ;;
+    *) echo "test-env: EDITION is roc or tft, not $EDITION" >&2; exit 2 ;;
+esac
 TEST_PREFIX="$(realpath -m "${TEST_PREFIX:-$BUILD/test-env/wine}")"  # Wine wants it absolute
 HEADLESS="${HEADLESS:-0}"
 SOUND="${SOUND:-$([[ "$HEADLESS" == 1 ]] && echo 0 || echo 1)}"
@@ -42,7 +53,7 @@ env_check() {
     command -v wine >/dev/null || env_die "wine not found"
     command -v winepath >/dev/null || env_die "winepath not found"
     [[ "$HEADLESS" != 1 ]] || command -v Xvfb >/dev/null || env_die "HEADLESS=1 needs Xvfb"
-    [[ -f "$GAME_DIR/war3.exe" ]] || env_die "no war3.exe in $GAME_DIR (put a Warcraft III 1.27b folder's files there: input/README.md)"
+    [[ -f "$GAME_DIR/war3.exe" ]] || env_die "no war3.exe in $GAME_DIR (put the files of a Warcraft III $GAME_VERSION folder there: input/README.md)"
 }
 
 # What the prefix was made with: Wine copies its DLLs into a prefix when it
@@ -86,11 +97,27 @@ env_link() {
     [[ -L "$2" || ! -e "$2" ]] && ln -sfn "$1" "$2"
 }
 
+# env_mods_for_game <tome.mod.json>...: the example and fixture mods declare
+# 1.27b, the default game; on another version (GAME_VERSION) these copies
+# declare that one too, so they run. A mod declaring anything else is left as it is.
+env_mods_for_game() {
+    [[ "$GAME_VERSION" == 1.27b ]] && return 0
+    sed -i "s/\"game\": \"1\.27b\"/\"game\": \"1.27b || $GAME_VERSION\"/" "$@"
+}
+
 # env_game <folder> <tome.mix>: makes (or refreshes) a game folder there.
-# Links to everything in input/ except what the game or Tome writes.
+# Links to everything in input/<version>/ except what the game or Tome writes.
 env_game() {
     local dir="$1" mix="$2" entry name
     mkdir -p "$dir/Maps" "$dir/save" "$dir/replay"
+    # Links to another folder of input/ (the version used last) go.
+    for entry in "$dir"/* "$dir"/Maps/*; do
+        [[ -L "$entry" ]] || continue
+        case "$(readlink "$entry")" in
+        "$GAME_DIR"/*) ;;
+        "$ROOT"/input/*) rm "$entry" ;;
+        esac
+    done
     for entry in "$GAME_DIR"/*; do
         name="$(basename "$entry")"
         case "${name,,}" in

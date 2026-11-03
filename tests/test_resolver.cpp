@@ -353,3 +353,44 @@ TEST(resolver_waiting_dependents) {
     CHECK(waiting_dependents(f.inputs, r, {req}) == std::vector<size_t>({hud, top}));
     CHECK(waiting_dependents(f.inputs, r, {}).empty());
 }
+
+TEST(resolver_edition) {
+    Fixture f;
+    f.env.edition = Edition::FrozenThrone;
+    size_t both = f.add("both");
+    size_t tft = f.add("tft-only", R"("edition":"tft")");
+    size_t roc = f.add("roc-only", R"("edition":"roc")");
+    size_t needs = f.add("needs-roc", R"("depends":{"roc-only":"*"})");
+    auto r = f.run();
+    CHECK(r.mods[both].state == ModState::Active);
+    CHECK(r.mods[tft].state == ModState::Active);
+    CHECK(r.mods[roc].state == ModState::IncompatibleGame);
+    CHECK_EQ(r.mods[roc].reason, std::string("is for Reign of Chaos, this is The Frozen Throne"));
+    CHECK(r.mods[needs].state == ModState::DependencyInactive);
+
+    f.env.edition = Edition::ReignOfChaos;
+    r = f.run();
+    CHECK(r.mods[tft].state == ModState::IncompatibleGame);
+    CHECK(r.mods[roc].state == ModState::Active);
+    CHECK(r.mods[needs].state == ModState::Active);
+
+    // Not read yet (Tome attached before the game decided): every mod.
+    f.env.edition = Edition::Unknown;
+    r = f.run();
+    CHECK(r.mods[tft].state == ModState::Active);
+    CHECK(r.mods[roc].state == ModState::Active);
+}
+
+TEST(edition_helpers) {
+    CHECK(edition_from_game(0) == Edition::ReignOfChaos);
+    CHECK(edition_from_game(1) == Edition::FrozenThrone);
+    CHECK(edition_from_game(-1) == Edition::Unknown);  // game.dll's value before it decides
+    CHECK(edition_from_game(7) == Edition::Unknown);
+    Edition e = Edition::Unknown;
+    CHECK(parse_edition("roc", e) && e == Edition::ReignOfChaos);
+    CHECK(!parse_edition("Roc", e));  // lowercase, as the schema says
+    CHECK(!parse_edition("", e) && !parse_edition("frozen", e));
+    CHECK_EQ(std::string(edition_name(Edition::ReignOfChaos)), std::string("Reign of Chaos"));
+    CHECK(edition_matches(Edition::Unknown, Edition::ReignOfChaos));
+    CHECK(!edition_matches(Edition::FrozenThrone, Edition::ReignOfChaos));
+}

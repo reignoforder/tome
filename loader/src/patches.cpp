@@ -36,7 +36,6 @@ const Patch* const kAll[] = {
 namespace {
 
 bool build_listed(const char* const* builds, const std::string& name) {
-    if (!builds) return true;  // any build
     for (const char* const* b = builds; *b; ++b) {
         if (name == *b) return true;
     }
@@ -52,7 +51,23 @@ const char* first_missing(const char* const* symbols, const mappings::Build& bui
     return nullptr;
 }
 
+// The variant of a patch that lists none: needs nothing more, changes nothing.
+const Variant kPlain{};
+
 } // namespace
+
+const Variant* variant_for(const Patch& patch, const std::string& build) {
+    if (patch.variants.empty()) return &kPlain;
+    const Variant* fallback = nullptr;
+    for (const Variant& v : patch.variants) {
+        if (!v.builds) {
+            if (!fallback) fallback = &v;
+        } else if (build_listed(v.builds, build)) {
+            return &v;
+        }
+    }
+    return fallback;
+}
 
 bool only_under_wine(std::string& report) {
     if (running_on_wine()) return true;
@@ -72,12 +87,16 @@ bool install(uintptr_t base, const BuildMappings& build, std::string& report) {
     std::string detail;
     auto note = [&](const std::string& clause) { detail += (detail.empty() ? "" : "; ") + clause; };
     for (const Patch* p : kAll) {
-        if (!build_listed(p->builds, name)) {
-            note(std::string(p->name) + " skipped (not for " + name + ")");
+        const Variant* variant = variant_for(*p, name);
+        if (!variant || variant->skip) {
+            note(std::string(p->name) + " skipped (not for " + name + (variant ? std::string(": ") + variant->skip : "") +
+                 ")");
             ++skipped;
             continue;
         }
-        if (const char* missing = first_missing(p->symbols, *build.data)) {
+        const char* missing = first_missing(p->symbols, *build.data);
+        if (!missing) missing = first_missing(variant->symbols, *build.data);
+        if (missing) {
             note(std::string(p->name) + " skipped (" + name + " has no mapping for " + missing + ")");
             ++skipped;
             continue;
@@ -88,10 +107,10 @@ bool install(uintptr_t base, const BuildMappings& build, std::string& report) {
             ++skipped;
             continue;
         }
-        if (p->install(base, build, r)) {
+        if (p->install(base, build, *variant, r)) {
             // Lock the patch's functions against mod hooks, now that it's live.
-            if (p->reserve) {
-                for (const char* const* s = p->reserve; *s; ++s) hooks::reserve(*s);
+            for (const char* const* list : {p->reserve, variant->reserve}) {
+                for (const char* const* s = list; s && *s; ++s) hooks::reserve(*s);
             }
             note(std::string(p->name) + " applied" + (r.empty() ? "" : " (" + r + ")"));
             ++applied;

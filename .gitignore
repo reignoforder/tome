@@ -18,9 +18,9 @@ __pycache__/
 # Local editor configuration (machine-specific toolchain paths)
 .clangd
 
-# The Warcraft III 1.27b files the tests read (input/README.md).
-# Game files are Blizzard's and must never be committed. input may also be a
-# link to a game folder (ignored too); only the folder's README is kept.
+# The Warcraft III files the tests read, a folder per version (input/1.27b/:
+# input/README.md). Game files are Blizzard's and must never be committed.
+# A version folder may also be a link to a game folder; only the README is kept.
 /input
 !/input/
 /input/*

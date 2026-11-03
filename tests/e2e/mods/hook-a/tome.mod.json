@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "name": "Hook test A",
   "description": "e2e fixture: hooks RCString::GetText alongside hook-b.",
-  "game": "1.27b",
+  "game": "*",
   "tome": "*",
   "entry": "hook-a.dll",
   "sync": "client",

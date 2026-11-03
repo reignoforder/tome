@@ -168,6 +168,10 @@ void init_api(const GameBuild& build) {
     g_game_info.build_name = g_build_name.c_str();
     g_game_info.file_version = g_file_version.c_str();
     g_game_info.game_base = build.base;
+    static_assert(static_cast<int32_t>(Edition::Unknown) == TOME_EDITION_UNKNOWN &&
+                  static_cast<int32_t>(Edition::ReignOfChaos) == TOME_EDITION_REIGN_OF_CHAOS &&
+                  static_cast<int32_t>(Edition::FrozenThrone) == TOME_EDITION_FROZEN_THRONE);
+    g_game_info.edition = static_cast<int32_t>(build.edition);
 
     // The strings point into the database, which lives as long as the process.
     g_symbols.clear();

@@ -13,13 +13,19 @@
 #               --coverage)
 #   INSTALL_DIR a Warcraft III 1.27b folder `make deploy` copies tome.mix
 #               into (no default; never input/)
+#   GAME_VERSION the game the tests and the game targets use: the folder
+#               input/<version>/ (1.27b). Also a goal: `make test 1.26a`
+#   EDITION     the game the e2e test and the game targets run as: tft (The
+#               Frozen Throne, default) or roc (Reign of Chaos: war3.exe
+#               -classic). Also a goal: `make e2e roc`, `make e2e 1.26a roc`
 #   HEADLESS    e2e and game: 1 runs the game in its own X server (Xvfb),
 #               0 on your screen (e2e: 1, game: 0)
 #   ENGINE      container tool: podman or docker (the first one found)
 #   IMAGE_READY 1: the container targets use the $(IMAGE) image as it is,
 #               without rebuilding it first (CI builds it with a cache)
 #
-# The tests read the game from input/ (input/README.md) and never write there.
+# The tests read the game from input/<version>/ (input/README.md) and never
+# write there.
 
 BUILD      ?= build
 BUILD_TYPE ?= Release
@@ -31,6 +37,37 @@ IMAGE      ?= tome-dev
 RELEASE_BUILD ?= build-release
 E2E_KEEP   ?= 0
 
+# The game version: a goal like `1.26a` (make test 1.26a) or GAME_VERSION.
+# One named either way must be in input/; the default (1.27b) may be missing
+# (the tests skip what needs the game).
+GAME_VERSIONS = $(patsubst input/%/war3.exe,%,$(wildcard input/*/war3.exe))
+VERSION_GOALS := $(filter 1.%,$(MAKECMDGOALS))
+ifneq ($(word 2,$(VERSION_GOALS)),)
+$(error one game version at a time, not $(VERSION_GOALS))
+endif
+ifneq ($(VERSION_GOALS),)
+GAME_VERSION := $(VERSION_GOALS)
+endif
+ifneq ($(VERSION_GOALS)$(filter command line,$(origin GAME_VERSION)),)
+ifeq ($(wildcard input/$(GAME_VERSION)/war3.exe),)
+$(error no game for $(GAME_VERSION): input/$(GAME_VERSION)/war3.exe isn't there (input/ has: $(or $(GAME_VERSIONS),nothing); input/README.md))
+endif
+endif
+GAME_VERSION ?= 1.27b
+export GAME_VERSION
+# The edition: a goal `roc` or `tft` (make e2e roc), or EDITION.
+EDITION_GOALS := $(filter roc tft,$(MAKECMDGOALS))
+ifneq ($(word 2,$(EDITION_GOALS)),)
+$(error one edition at a time, not $(EDITION_GOALS))
+endif
+ifneq ($(EDITION_GOALS),)
+EDITION := $(EDITION_GOALS)
+endif
+EDITION ?= tft
+export EDITION
+# For the tests (tests/game_dir.h, tests/tools/test_mpq.cmake).
+export TOME_GAME_DIR = $(CURDIR)/input/$(GAME_VERSION)
+
 CMAKE_FLAGS = -G "$(GENERATOR)" -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-i686-mingw.cmake \
               -DCMAKE_BUILD_TYPE=$(BUILD_TYPE) -DTOME_BUILD_DEV_TOOLS=$(DEV_TOOLS) -DTOME_DEV=$(DEV) $(CMAKE_EXTRA)
 
@@ -39,10 +76,17 @@ CMAKE_FLAGS = -G "$(GENERATOR)" -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-i686-ming
 
 all: build
 
+# A version or edition goal only names the game version or edition (above).
+ifneq ($(VERSION_GOALS)$(EDITION_GOALS),)
+.PHONY: $(VERSION_GOALS) $(EDITION_GOALS)
+$(VERSION_GOALS) $(EDITION_GOALS):
+	@:
+endif
+
 help:
 	@echo "make build          configure (first time) and build into $(BUILD)/"
 	@echo "make test           unit tests (ctest, under Wine)"
-	@echo "make e2e            end-to-end test in the real game (needs the game in input/; Xvfb, about 4 min):"
+	@echo "make e2e            end-to-end test in the real game (needs the game in input/<version>/; Xvfb, about 4 min):"
 	@echo "                    tools/e2e-test.sh, then tools/e2e-multiplayer.sh"
 	@echo "make e2e-multiplayer  only the two-instance LAN game test (about 1.5 min)"
 	@echo "make coverage       line coverage of the tests and e2e tests, by section (tools/coverage.sh; build-cov/,"
@@ -59,6 +103,10 @@ help:
 	@echo "make container-fuzz the fuzz targets, built and run inside it (build-container-fuzz/; FUZZ_SECONDS)"
 	@echo "make container-dist the player download, built inside it ($(CONTAINER_RELEASE_BUILD)/)"
 	@echo "make clean          remove $(BUILD)/"
+	@echo ""
+	@echo "Game versions: input/<version>/ (input/README.md); name one after the target,"
+	@echo "e.g. make test 1.27b or make e2e 1.26a. Default 1.27b. In input/: $(or $(GAME_VERSIONS),nothing)"
+	@echo "Editions: make e2e roc runs Reign of Chaos (war3.exe -classic), tft (default) The Frozen Throne"
 
 $(BUILD)/CMakeCache.txt:
 	cmake -S . -B $(BUILD) $(CMAKE_FLAGS)
@@ -136,12 +184,18 @@ CONTAINER_BUILD = build-container
 # container-dist's: a folder of its own, or $(CONTAINER_BUILD) when that's
 # already a release build (CI: DEV=OFF), so it isn't built twice.
 CONTAINER_RELEASE_BUILD ?= $(CONTAINER_BUILD)-release
-HAVE_GAME     = $(shell test -f input/war3.exe && echo yes)
+HAVE_GAME     = $(if $(GAME_VERSIONS),yes)
+# A version folder that's a link (input/README.md) points outside the mounts:
+# its folder is also mounted where the link points, so it resolves inside.
+game_link_target = $(if $(filter /%,$(1)),$(1),$(abspath /src/input/$(1)))
+GAME_LINK_MOUNTS = $(foreach v,$(GAME_VERSIONS),$(if $(shell test -L "input/$(v)" && echo link), \
+                   -v "$(realpath input/$(v)):$(call game_link_target,$(shell readlink "input/$(v)")):ro"))
 CONTAINER_RUN = $(ENGINE) run --rm -i $(if $(shell test -t 0 && echo yes),-t) \
                 --security-opt label=disable -v "$(CURDIR):/src" -w /src -e HOME=/src/$(CONTAINER_BUILD)/home -e TMPDIR=/src/$(CONTAINER_BUILD)/tmp \
                 -e XDG_RUNTIME_DIR=/src/$(CONTAINER_BUILD)/run \
                 $(if $(filter podman,$(ENGINE)),--userns=keep-id,--user $$(id -u):$$(id -g)) \
-                $(if $(HAVE_GAME),-v "$(realpath input):/src/input:ro") $(IMAGE)
+                -e GAME_VERSION=$(GAME_VERSION) -e EDITION=$(EDITION) \
+                $(if $(HAVE_GAME),-v "$(realpath input):/src/input:ro" $(GAME_LINK_MOUNTS)) $(IMAGE)
 
 container:
 	@test -n "$(ENGINE)" || { echo "needs podman or docker"; exit 1; }

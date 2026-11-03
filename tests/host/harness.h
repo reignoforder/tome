@@ -60,6 +60,7 @@ struct Session {
     FakeGame game;
     std::string safe_mode;  // set before start: why safe mode is on (as from DllMain)
     bool events = false;    // set before start: install the event hooks too (chat commands)
+    tome::Edition edition = tome::Edition::FrozenThrone;  // set before start: the game it runs as
     // Against the fake game image.
     bool start(const Home& home);
     // Against another image, such as the real game.dll (tests/game).
