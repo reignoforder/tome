@@ -1103,9 +1103,26 @@ keys `GlueSpriteLayerTopLeft` / `GlueSpriteLayerTopRight` /
 `GlueSpriteLayerBackground`. Each model has one animation set per screen
 (list them with `tools/re/mdx_info.py`).
 
+The model depends on the edition. The sprite layers (`0x2E0930`) format the
+skin key with `%s_V%d` and `Game.expansion` (`GlueSpriteLayerTopLeft_V0` in
+Reign of Chaos, `_V1` in The Frozen Throne), look it up with
+`Skin::GetString` and pass the value to SetModel. `war3skins.txt` in
+War3Patch.mpq (read in both editions) and War3xlocal.mpq has `_V0` =
+`TopLeftPanel.mdl` and `_V1` = `Expansion\TopLeftPanel-Expansion.mdl`;
+war3.mpq's only the plain key, `TopLeftPanel.mdl`. The values name `.mdl`
+files; the game loads the `.mdx`. Both models have the same sequences and
+timings (Options Morph 1000 ms, Morph Alternate 667 ms), so Tome's chains do
+the same lookup (`chains_model()` in `mod_menu.cpp`, `ui::chains_skin_key`,
+`ui::skin_model_path`) and fall back to the edition's model
+(`ui::default_chains_model`) without a usable entry. The rest of Tome's UI
+inherits the game's templates, which each edition reads from its own
+archives; the glue popup's `bnet-dialoguebox-*` textures are the game's own
+`DialogWar3` backdrop, only in war3.mpq, so the same in both.
+
 | What | RVA | Notes |
 |------|-----|-------|
 | CSpriteFrame::SetModel | vtable `+0xE8` | `__thiscall(const char* path, -1, 0)` |
+| Skin::GetString | `0x342220` (1.26a `0x31F530`) | `const char* __fastcall(const char* key, const char* section)`, plain `ret`: the map's `CustomSkin` section (table at `.data 0xD6A0C4`) first, then `section` (null: the current one, `0xD6A0D8`), then `Default`. Returns the game's own string or null; the hash tables return null while empty (mask -1), so it's safe before they load. |
 | CSpriteFrame::GetInstance | `0x0F7060` | `void* __thiscall()`; returns `*[sprite+0x178]` when `[sprite+0x174]` is set |
 | SetAnimation | `0x1A42B0` | `void __fastcall(instance, const int* tags, int count, int flags)`, `ret 8`. Picks the sequence matching the tag set. |
 | Tag registration | `0x352A60` | Tag ids in order: birth 0, death 1, stand 2, morph 3, alternate 4, found 5, mainmenu 6, singleplayer 7, singleplayerskirmish 8, campaign 9, multiplayer `0xA`, multiplayerpregamechat `0xB`, viewreplay `0xC`, battlenetchatroom `0xD`, battlenetcustom `0xE`, battlenetcustomcreate `0xF`, battlenetwelcome `0x10`, battlenetamm `0x11`, battlenetadvancedoptions `0x12`, battlenetchannel `0x13`, battlenetprofile `0x14`, battlenetteamchat `0x15`, battlenetuserlist `0x16`, options `0x17`, realmselection `0x18`, maincancelpanel `0x19` (names at `.rdata` `0x6FAB7EA0` on). |

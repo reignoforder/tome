@@ -399,6 +399,7 @@ bool bind_build(const mappings::Build& build, BuildMappings& out, std::vector<st
     bind("CLayoutFrame::SetPoint", Kind::Function, ui.layout_set_point);
     bind("CFrame.layout", Kind::Offset, ui.layout_offset);
     bind("CSpriteFrame::GetInstance", Kind::Function, ui.sprite_get_instance);
+    bind("Skin::GetString", Kind::Function, ui.skin_get_string);
     bind("SetAnimation", Kind::Function, ui.model_set_animation);
     bind("AnimTag.stand", Kind::Constant, ui.anim_tag_stand);
     bind("AnimTag.morph", Kind::Constant, ui.anim_tag_morph);

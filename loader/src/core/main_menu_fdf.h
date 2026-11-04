@@ -11,7 +11,10 @@
 //         panel that takes the Help panel's place, built from the Esc menu's
 //         templates
 
+#include "edition.h"
+
 #include <string>
+#include <string_view>
 
 namespace tome::ui {
 
@@ -54,7 +57,31 @@ std::string menu_row_frame(MenuStyle style, int row, const char* part);
 // Footer button `index` (0-3), or its text frame.
 std::string menu_footer_frame(MenuStyle style, int index, bool text = false);
 
-// The complete FDF file, with CRLF line endings like the game's own files.
-std::string mod_menu_fdf();
+// The chained panel behind the glue panel is the model the game's own glue
+// screens show: the one war3skins.txt names for the skin key
+// GlueSpriteLayerTopLeft_V<edition>, looked up the way the glue manager does
+// (Skin::GetString), so a skin that overrides it changes Tome's panel too.
+constexpr const char* kChainsSkinKey = "GlueSpriteLayerTopLeft";
+
+// The key for `edition`: kChainsSkinKey + "_V0" (Reign of Chaos) or "_V1"
+// (The Frozen Throne), the game's "%s_V%d" with Game.expansion; the plain key
+// (war3.mpq's) for Unknown.
+std::string chains_skin_key(Edition edition);
+
+// The model to put in the FDF for a skin value: war3skins.txt names .mdl
+// files, which the game loads as .mdx, so a .mdl extension becomes .mdx.
+// Empty for null, empty or anything that isn't printable ASCII or holds a
+// quote (it goes into an FDF string; a map's CustomSkin can set it).
+std::string skin_model_path(const char* value);
+
+// The model when the skin has no usable entry: TopLeftPanel.mdx in Reign of
+// Chaos, TopLeftPanel-Expansion.mdx in The Frozen Throne (also for Unknown).
+const char* default_chains_model(Edition edition);
+
+// The complete FDF file with `chains_model` behind the glue panel, with CRLF
+// line endings like the game's own files. Only the chains model differs
+// between editions; everything else inherits the game's templates, which
+// each edition loads from its own archives.
+std::string mod_menu_fdf(std::string_view chains_model);
 
 } // namespace tome::ui

@@ -891,6 +891,14 @@ key:Esc;until:Mod menu page: Tome settings;key:Esc;until:Mod menu page: Tome;key
 key:Esc;until:Mod menu closed;settle;key:Ctrl+F10;until:Mod menu opened" launch
 MAP_ARG=("${SAVED_MAP_ARG[@]}")
 check "Main menu set up; Mods button added" "Mods button added to the main menu" 30
+# The chained panel behind Tome's comes from the game's skin, as the game's own does.
+if [[ "$EDITION" == roc ]]; then
+    check "Mod menu: chains model UI\\\\Glues\\\\SpriteLayers\\\\TopLeftPanel\.mdx \(skin GlueSpriteLayerTopLeft_V0\)" \
+        "the mod menu's chains are Reign of Chaos's, from the skin"
+else
+    check "Mod menu: chains model UI\\\\Glues\\\\SpriteLayers\\\\Expansion\\\\TopLeftPanel-Expansion\.mdx \(skin GlueSpriteLayerTopLeft_V1\)" \
+        "the mod menu's chains are The Frozen Throne's, from the skin"
+fi
 check "Quit moved to the lower slot" "Quit shares the bottom box with Mods"
 check "\[hello\] loaded frame definitions from ui/hello\.fdf" "mod loaded its own FDF"
 check "\[hello\] added a Hello button to the main menu" "mod added its own button to the main menu"
@@ -902,6 +910,7 @@ check "\[hello\] disabled" "mod disabled live"
 check "Mod menu: enabling hello" "row button enables it again" 10
 check "\[hello\] enabled \(2 times" "mod re-enabled live"
 check "Mod menu closed" "Done closes the panel" 10
+check_absent "Mod menu: chains model not loaded" "the chains model loaded and animates"
 check_count "\[hello\] added a Hello button" 2 "re-enabling recreated the mod's button right away"
 check "\[hello\] Hello button clicked \(1\)" "the mod's click callback ran" 10
 check "Popup 1 shown: \"Hello Tome\", 4 options" "a mod's popup shows on the main menu (its keybind)" 10

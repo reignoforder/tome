@@ -144,6 +144,12 @@
       "sig": "CModelInstance*(CSpriteFrame* this)",
       "bytes": "83 b9 74 01 00 00 00 74 09 8b 81 78 01 00 00 8b"
     },
+    "Skin::GetString": {
+      "kind": "function", "rva": "0x00342220", "conv": "fastcall",
+      "sig": "const char*(const char* key, const char* section)",
+      "bytes": "53 56 57 8b f9 33 f6 8b 0d ?? ?? ?? ?? 8b da 85 c9 74 25 57 68 ?? ?? ?? ??",
+      "doc": "Looks up a skin key (war3skins.txt, UI\\war3skins.txt in the archives): the map's CustomSkin section first, then `section` (null: the current one), then Default. Returns the value (the game's own string) or null; the tables are empty (null) before they load. The glue manager's sprite layers (0x2E0930) look up \"GlueSpriteLayerTopLeft_V%d\" with Game.expansion and pass the value to SetModel."
+    },
     "SetAnimation": {
       "kind": "function", "rva": "0x001a42b0", "conv": "fastcall",
       "sig": "void(CModelInstance* instance, const int* tags, int count, int flags)",

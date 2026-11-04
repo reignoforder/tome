@@ -259,7 +259,12 @@ logs each error with the symbol's name.
   yet (Tome attached before game.dll), every mod counts as fitting. Mods read
   it in `tome_game_info.edition` (API version 15). `tome-check` runs a mod
   in its own edition (`--edition` to choose); the e2e test runs either one
-  (`EDITION=roc`, `make e2e roc`).
+  (`EDITION=roc`, `make e2e roc`). Tome's own UI follows the edition in one
+  place: the mod menu's chained panel is the model the game's skin names
+  for the edition (`GlueSpriteLayerTopLeft_V<edition>`, looked up with the
+  game's `Skin::GetString` when the overlay is built, `mod_menu.cpp`
+  `chains_model()`), so a skin that changes the game's panel changes Tome's
+  too; without a usable entry, the edition's own model (`ui::default_chains_model`).
 - State: `<home>/tome/state.json` (`{"schema":3,"mods":{"id":{"enabled":bool,
   "approved":"<sha256>","approved_from":"<folder>","approved_key":"<base64>"}}}`,
   the key only for a signed mod), parsed and written by

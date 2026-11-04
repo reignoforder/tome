@@ -102,6 +102,7 @@ struct BuildMappings {
         uint32_t layout_set_point;        // CLayoutFrame::SetPoint
         uint32_t layout_offset;           // CFrame.layout
         uint32_t sprite_get_instance;     // CSpriteFrame::GetInstance
+        uint32_t skin_get_string;         // Skin::GetString
         uint32_t model_set_animation;     // SetAnimation
         uint32_t anim_tag_stand, anim_tag_morph, anim_tag_alternate, anim_tag_options;  // AnimTag.*
         uint32_t get_frame_by_name;       // GetFrameByName

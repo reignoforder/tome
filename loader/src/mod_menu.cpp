@@ -48,6 +48,7 @@ using MenuSetupFn = int(__thiscall*)(void* menu, int a, int b);
 using SetPanelFn = void(__thiscall*)(void* esc_panel, int panel);
 using SetModeFn = void(__thiscall*)(void* game_ui, void* mode, int push);
 using EscMenuResetFn = void(__thiscall*)(void* esc_menu);
+using SkinGetStringFn = const char*(__fastcall*)(const char* key, const char* section);
 
 using ui::MenuStyle;
 
@@ -58,6 +59,7 @@ constexpr int kCmdOpen = 0x7100;
 
 LoadTocFn g_load_toc = nullptr;
 const BuildMappings* g_build = nullptr;
+uintptr_t g_base = 0;  // game.dll, for the chains model when the overlay is built
 BindControlFn g_bind_control = nullptr;
 MenuEventFn g_menu_event = nullptr;
 MenuSetupFn g_menu_setup = nullptr;
@@ -401,7 +403,9 @@ void animate_chains(std::initializer_list<int> tags) {
 }
 
 // Timings of the panel model's "Options Morph" and "Options Morph Alternate"
-// sequences (TopLeftPanel-Expansion.mdx: 1000 ms and 667 ms).
+// sequences (1000 ms and 667 ms in both editions' models, chains_model()).
+// Closing hides the panel (and shows the logo) a little after the raise's
+// 667 ms, so the chains never vanish before the sequence has ended.
 constexpr unsigned kLowerMs = 1000;
 constexpr unsigned kRaiseMs = 700;
 unsigned g_sequence = 0;  // invalidates pending animation steps on every click
@@ -556,9 +560,30 @@ void close_panel(Panel& p) {
 
 // --- hooks -------------------------------------------------------------------
 
+// The chained panel model the game's glue screens show (ui::kChainsSkinKey).
+// Read when the overlay is built, not at install_hooks: Tome may be attached
+// before the game sets Game.expansion (game_build.h), but not before it
+// reads FrameDef.toc. The skin tables are loaded by then too; if they aren't
+// (or the entry isn't usable), the edition's own model.
+std::string chains_model() {
+    Edition edition = read_edition(g_base, g_build);
+    std::string key = ui::chains_skin_key(edition);
+    auto get = reinterpret_cast<SkinGetStringFn>(g_base + g_build->ui.skin_get_string);
+    const char* value = get(key.c_str(), nullptr);
+    std::string model = ui::skin_model_path(value);
+    if (!model.empty()) {
+        TOME_INFO("Mod menu: chains model %s (skin %s)", model.c_str(), key.c_str());
+        return model;
+    }
+    model = ui::default_chains_model(edition);
+    TOME_WARN("Mod menu: chains model %s (%s: skin %s %s)", model.c_str(), edition_name(edition), key.c_str(),
+              value ? "isn't a usable path" : "not found");
+    return model;
+}
+
 void build_overlay() {
     g_overlay_ready = overlay::put_generated({
-        {ui::kModMenuFdfPath, ui::mod_menu_fdf()},
+        {ui::kModMenuFdfPath, ui::mod_menu_fdf(chains_model())},
         {popup::kFdfPath, popup::popup_fdf()},
         {"UI\\FrameDef\\Tome.toc",
          std::string(ui::kModMenuFdfPath) + "\r\n" + popup::kFdfPath + "\r\n\r\n"},
@@ -738,6 +763,7 @@ bool install_hooks(uintptr_t base, const BuildMappings& build, std::string& repo
     const auto& ui = build.ui;
     g_load_toc = reinterpret_cast<LoadTocFn>(base + ui.load_framedef_toc);
     g_build = &build;
+    g_base = base;
     g_bind_control = reinterpret_cast<BindControlFn>(base + ui.glue_bind_control);
     g_set_panel = reinterpret_cast<SetPanelFn>(base + ui.esc_menu_set_panel);
     g_game_ui_get = game_ui_get(base, build);
