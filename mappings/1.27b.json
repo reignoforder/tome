@@ -147,7 +147,7 @@
     "Skin::GetString": {
       "kind": "function", "rva": "0x00342220", "conv": "fastcall",
       "sig": "const char*(const char* key, const char* section)",
-      "bytes": "53 56 57 8b f9 33 f6 8b 0d ?? ?? ?? ?? 8b da 85 c9 74 25 57 68 ?? ?? ?? ??",
+      "bytes": "53 56 57 8b f9 33 f6 8b 0d ?? ?? ?? ?? 8b da 85",
       "doc": "Looks up a skin key (war3skins.txt, UI\\war3skins.txt in the archives): the map's CustomSkin section first, then `section` (null: the current one), then Default. Returns the value (the game's own string) or null; the tables are empty (null) before they load. The glue manager's sprite layers (0x2E0930) look up \"GlueSpriteLayerTopLeft_V%d\" with Game.expansion and pass the value to SetModel."
     },
     "SetAnimation": {
@@ -1128,17 +1128,17 @@
     },
     "CrashHandler::Install": {
       "kind": "function", "rva": "0x000199f0", "conv": "fastcall", "sig": "void(const char* path)",
-      "bytes": "56 57 8b f9 e8 57 3a 02 00 b8 ?? ?? ?? ?? c7 05 ?? ?? ?? ??",
+      "bytes": "56 57 8b f9 e8 57 3a 02 00 b8 ?? ?? ?? ?? c7 05",
       "doc": "game.dll's own crash handler: stores the handler (0x019AB0, .data 0xD78520) and sets CrashHandler::Filter as the unhandled-exception filter (keeping the one before at .data 0xD78524), then copies `path` (the game folder) to .data 0xD78570. Called early in the game's main function (0x045080, at 0x0450F6), before Miles loads tome.mix. Plain ret. Not hooked: Tome's crash handler (crash_handler.h) puts its own filter in front of this one."
     },
     "CrashHandler::Filter": {
       "kind": "function", "rva": "0x0003b590", "conv": "stdcall", "sig": "int32_t(void* exception_pointers)",
-      "bytes": "55 8b ec 81 ec 20 03 00 00 a1 ?? ?? ?? ?? 33 c5 89 45 fc",
+      "bytes": "55 8b ec 81 ec 20 03 00 00 a1 ?? ?? ?? ?? 33 c5 89 45 fc 83",
       "doc": "The unhandled-exception filter CrashHandler::Install sets: calls the handler at .data 0xD78520 (0x019AB0: the game's error log and minidump, then BlizzardError.exe and its dialog) and maps its result to EXCEPTION_* values. ret 4."
     },
     "CrashHandler::Remove": {
       "kind": "function", "rva": "0x0003b670", "conv": "cdecl", "sig": "void(void)",
-      "bytes": "a1 ?? ?? ?? ?? 85 c0 74 11 50 ff 15 ?? ?? ?? ?? c7 05 ?? ?? ?? ??",
+      "bytes": "a1 ?? ?? ?? ?? 85 c0 74 11 50 ff 15 ?? ?? ?? ?? c7 05 ?? ?? ?? ?? 00 00 00 00 c3 cc cc cc cc cc 56",
       "doc": "Puts back the filter CrashHandler::Install replaced (.data 0xD78524), if any. Plain ret."
     },
     "PreloadGen::End": {
@@ -1207,12 +1207,12 @@
     },
     "CGxDeviceD3d::CanDraw": {
       "kind": "function", "rva": "0x00140410", "conv": "thiscall", "sig": "bool(CGxDeviceD3d* this)",
-      "bytes": "55 8b ec 83 ec 4c a1 ?? ?? ?? ?? 33 c5 89 45 fc 56 8b f1 57",
+      "bytes": "55 8b ec 83 ec 4c a1 ?? ?? ?? ?? 33 c5 89 45 fc 56 8b f1 57 8b",
       "doc": "Device vtable +0x3C, called before every frame (0x1365C0). TestCooperativeLevel; on D3DERR_DEVICENOTRESET (or a pending resize, +0x730) releases resources (0x13FDC0), BuildPresentParams, IDirect3DDevice9::Reset, then RestoreState. False while the device is lost or the window has no area. Plain ret."
     },
     "CGxDeviceD3d::RestoreState": {
       "kind": "function", "rva": "0x00142e50", "conv": "thiscall", "sig": "void(CGxDeviceD3d* this)",
-      "bytes": "55 8b ec 83 e4 f8 83 ec 7c a1 ?? ?? ?? ?? 33 c4 89 44 24 78",
+      "bytes": "55 8b ec 83 e4 f8 83 ec 7c a1 ?? ?? ?? ?? 33 c4",
       "doc": "Sets the device's render states, lights and so on again: called after CreateDevice (0x13FC9A) and after a successful Reset (0x1404FA). Ends with SetGamma(gamma, force 1), so the ramp is sent again after every Reset. Plain ret."
     },
     "CGxDeviceD3d::SetGamma": {
@@ -1247,7 +1247,7 @@
     },
     "CGxDeviceD3d::ReleaseForReset": {
       "kind": "function", "rva": "0x0013fdc0", "conv": "thiscall", "sig": "void(CGxDeviceD3d* this, int release_textures)",
-      "bytes": "55 8b ec 81 ec 84 00 00 00 8b 55 fc 53 8b d9 b9 00 01 00 00",
+      "bytes": "55 8b ec 81 ec 84 00 00 00 8b 55 fc 53 8b d9 b9",
       "doc": "Clears the device's state caches (render states +0x748, 256 x 12 bytes; texture stages +0x1348/+0x1358; lights +0x1B58, 8 x 0x74) and releases the 7 surfaces at +0x6C0..+0x6D8; with release_textures != 0 also the textures (0x143B00). Called with 0 before IDirect3DDevice9::Reset (0x1404D2) and with 1 by the teardown (0x13FD2B). The d3d-reset-lights patch hooks it (BEFORE). ret 4."
     },
     "C44Matrix::Perspective": {
@@ -1343,6 +1343,153 @@
     "SoundCategory.ambient": {
       "kind": "constant", "value": 8,
       "doc": "Sound object category bit (+0x1C) for ambient sounds: such a sound plays only while the global sound flags (.data 0xCE5518) have 0x400, the Ambient sounds option."
-    }
+    },
+    "CUnit::GetState": {
+      "kind": "function", "rva": "0x00687270", "conv": "thiscall", "sig": "float*(CUnit* this, float* out, int state)",
+      "bytes": "55 8b ec 8b 45 0c 56 83 f8 03 77 5f ff 24 85 ??",
+      "doc": "A unit's life (state 0), max life (1), mana (2) or max mana (3) into *out; returns out. What GetUnitState (0x204050) calls after checking state < 4. ret 8."
+    },
+    "CUnit::SetState": {
+      "kind": "function", "rva": "0x006999e0", "conv": "thiscall", "sig": "void(CUnit* this, int state, const float* value)",
+      "bytes": "55 8b ec 8b 45 08 83 e8 00 74 17 83 e8 02 75 1d",
+      "doc": "Sets a unit's life (state 0) or mana (2); max life and mana (1, 3) do nothing, as in JASS. What SetUnitState (0x215710) calls; life <= 0 kills the unit. ret 8."
+    },
+    "CUnit::GetMoveSpeed": {
+      "kind": "function", "rva": "0x00685310", "conv": "thiscall", "sig": "float*(CUnit* this, float* out)",
+      "bytes": "55 8b ec 8b 89 ec 01 00 00 85 c9 75 0f 8b 45 08",
+      "doc": "The unit's current move speed into *out; returns out. GetUnitMoveSpeed (0x203D30) calls it once ObjectLookup says the unit is live. ret 4."
+    },
+    "CUnit::SetMoveSpeed": {
+      "kind": "function", "rva": "0x00698af0", "conv": "thiscall", "sig": "void(CUnit* this, const float* speed)",
+      "bytes": "55 8b ec 8b 89 ec 01 00 00 85 c9 74 06 5d e9 5d",
+      "doc": "Sets the unit's move speed (through its move ability at +0x1EC; nothing without one). SetUnitMoveSpeed (0x2154E0). ret 4."
+    },
+    "CUnit::GetLevel": {
+      "kind": "function", "rva": "0x00684830", "conv": "thiscall", "sig": "int(CUnit* this)",
+      "bytes": "53 8b d9 56 57 8b 4b 30 e8 63 ab ff ff 6a 01 6a",
+      "doc": "A non-hero unit's level (its type's level); GetUnitLevel (0x203C60) calls CUnit::GetHeroLevel for heroes and this for the rest."
+    },
+    "CPosition::Get": {
+      "kind": "function", "rva": "0x00058900", "conv": "thiscall", "sig": "float*(void* this, float* out)",
+      "bytes": "55 8b ec 56 8b 75 08 56 c7 46 08 00 00 00 00 c7",
+      "doc": "Writes a widget position's x, y and z (three floats) to out and returns out. GetUnitX (0x204100) and SetUnitX (0x215900) call it on CUnit.vtable.GetPosition's result. ret 4."
+    },
+    "CPosition::Set": {
+      "kind": "function", "rva": "0x00058810", "conv": "thiscall", "sig": "void*(void* this, const float* xyz)",
+      "bytes": "55 8b ec 56 6a 01 ff 75 08 8b f1 e8 e0 39 00 00",
+      "doc": "Moves a widget position to x, y, z (three floats; SetUnitX passes z = 0) without a pathing check. SetUnitX (0x215900) keeps y and SetUnitY keeps x. ret 4."
+    },
+    "CPlayerWar3::SetState": {
+      "kind": "function", "rva": "0x001e98e0", "conv": "thiscall", "sig": "void(CPlayerWar3* this, int state, int value)",
+      "bytes": "55 8b ec 56 8b f1 ba 01 00 00 00 8b 4d 08 8d 41",
+      "doc": "Sets a player state (playerstate ids: 1 gold, 2 lumber, 4 food cap, 5 food used...). SetPlayerState (0x213FB0) passes states 15 and 16 (gold and lumber gathered) times 10 and the rest as they are. ret 8."
+    },
+    "JassVM::Get": {
+      "kind": "function", "rva": "0x0090ab10", "conv": "fastcall", "sig": "void*(int index)",
+      "bytes": "56 8b f1 b9 05 00 00 00 e8 63 16 76 ff 56 8b c8",
+      "doc": "The JASS virtual machine with this index ([[instance table 5]+0x90][index]); CGameWar3::CreateString passes CGameWar3.vm_index. Read only."
+    },
+    "HandleManager.count": { "kind": "offset", "value": "0x198", "doc": "uint32_t: how many handle ids have been handed out (the handle table's length): ids run from HandleId.first to HandleId.first + count - 1. A new handle takes the last free one (HandleManager.free_count) or this one, which then grows." },
+    "HandleManager.free_count": { "kind": "offset", "value": "0x188", "doc": "uint32_t: how many freed handle ids wait to be reused (their array at +0x18C)." },
+    "HandleEntry.size": { "kind": "constant", "value": 12, "doc": "Bytes per handle table entry: a reference count at +0 (0 for a free id), the object at HandleEntry.object." },
+    "HandleEntry.object": { "kind": "offset", "value": "0x4", "doc": "The object a handle id stands for (what the generic lookup returns)." },
+    "AgentRecord.tag": { "kind": "offset", "value": "0xc", "doc": "uint32_t: the record ObjectLookup returns for an agent's CAgent.id has '+agl' here." },
+    "AgentRecord.dying": { "kind": "offset", "value": "0x20", "doc": "uint32_t: non-zero once the agent is being destroyed; the unit natives treat it as gone." },
+    "AgentTag.agent": { "kind": "constant", "value": "0x2b61676c", "doc": "'+agl': AgentRecord.tag of a live agent." },
+    "CUnit.vtable.GetPosition": { "kind": "offset", "value": "0xb8", "doc": "vtable slot: void*(CUnit* this), thiscall: the unit's position object (CPosition::Get, CPosition::Set)." },
+    "CWidget.vtable.GetLife": { "kind": "offset", "value": "0x12c", "doc": "vtable slot: float*(CWidget* this, float* out), thiscall: the widget's life into *out (GetWidgetLife, 0x204180)." },
+    "CWidget.vtable.SetLife": { "kind": "offset", "value": "0x124", "doc": "vtable slot: void(CWidget* this, const float* life), thiscall: sets the widget's life; <= 0 kills or destroys it (SetWidgetLife, 0x215A40)." },
+    "CItem.charges": { "kind": "offset", "value": "0x84", "doc": "int: the item's charges (GetItemCharges, 0x200630)." },
+    "CGameWar3.vm_index": { "kind": "offset", "value": "0x8", "doc": "int: the map script's JASS VM index, for JassVM::Get." },
+    "JassVM.strings": { "kind": "offset", "value": "0x2874", "doc": "The VM's string table (a JassStringTable*): a JASS string result is an index into it, and a string argument is a pointer to its entry." },
+    "JassStringTable.count": { "kind": "offset", "value": "0x4", "doc": "uint32_t: the table's length; string ids run from 0 to count - 1." },
+    "JassStringTable.entries": { "kind": "offset", "value": "0x8", "doc": "The entries: JassString.size bytes each, an RCString (what natives get as a string argument; RCString::GetText reads it) and a reference count at +0xC." },
+    "JassString.size": { "kind": "constant", "value": 16, "doc": "Bytes per string table entry." },
+    "FloatMultiply": {
+      "kind": "function", "rva": "0x0006f9c0", "conv": "fastcall", "sig": "float*(float* out, const float* a, const float* b)",
+      "bytes": "55 8b ec 8b 45 08 53 8b 1a 56 8b 10 8b f2 57 8b",
+      "doc": "The game's own float multiply (integer arithmetic, no FPU): *out = *a * *b; returns out. GetUnitFacing and SetUnitFacing convert radians and degrees with it. ret 4."
+    },
+    "CPosition::SetFacing": {
+      "kind": "function", "rva": "0x0005a7a0", "conv": "thiscall", "sig": "void(void* this, const float* radians, int flag)",
+      "bytes": "55 8b ec 8b 51 0c 8b 49 08 56 e8 81 9d ff ff ff",
+      "doc": "Turns a widget position to face `radians` (SetUnitFacing passes flag 0). ret 8."
+    },
+    "CUnit::FindAbility": {
+      "kind": "function", "rva": "0x0048cb80", "conv": "thiscall", "sig": "void*(CUnit* this, uint32_t id, int a, int b, int c, int d)",
+      "bytes": "55 8b ec 56 8b 75 08 81 fe 75 62 4e 41 7f 44 74",
+      "doc": "The unit's ability of this type id, or NULL. GetUnitAbilityLevel, SetUnitAbilityLevel, UnitAddAbility and UnitRemoveAbility pass (id, 0, 1, 1, 1). ret 0x14."
+    },
+    "CAbility::GetMaxLevel": {
+      "kind": "function", "rva": "0x00415e00", "conv": "thiscall", "sig": "int(CAbility* this)",
+      "bytes": "56 8b f1 83 7e 54 00 75 0d 8b 4e 34 33 d2 e8 1d",
+      "doc": "The ability's number of levels; SetUnitAbilityLevel clamps to it."
+    },
+    "CUnit::GetAcquireRange": {
+      "kind": "function", "rva": "0x00684150", "conv": "thiscall", "sig": "float*(CUnit* this, float* out)",
+      "bytes": "55 8b ec 8b 89 e8 01 00 00 8b 45 08 85 c9 75 0c",
+      "doc": "The unit's acquisition range into *out (GetUnitAcquireRange). ret 4."
+    },
+    "CUnit::SetAcquireRange": {
+      "kind": "function", "rva": "0x00697ea0", "conv": "thiscall", "sig": "void(CUnit* this, const float* range)",
+      "bytes": "55 8b ec 8b 89 e8 01 00 00 85 c9 74 19 8b 45 08",
+      "doc": "Sets the acquisition range (SetUnitAcquireRange). ret 4."
+    },
+    "CUnit::GetHeroXP": {
+      "kind": "function", "rva": "0x00687440", "conv": "thiscall", "sig": "int(CUnit* this)",
+      "bytes": "8b 81 f0 01 00 00 85 c0 75 01 c3 8b 80 8c 00 00",
+      "doc": "A hero's experience; GetHeroXP jumps here for heroes only."
+    },
+    "CUnit::GetHeroStr": {
+      "kind": "function", "rva": "0x00686720", "conv": "thiscall", "sig": "int(CUnit* this, int include_bonuses)",
+      "bytes": "55 8b ec 81 ec c8 00 00 00 a1 ?? ?? ?? ?? 33 c5 89 45 fc 53 8b d9 56 57 8b 8b f0 01 00 00 8b 81 d4",
+      "doc": "A hero's strength, with item and aura bonuses if include_bonuses (GetHeroStr). ret 4."
+    },
+    "CUnit::GetHeroAgi": {
+      "kind": "function", "rva": "0x006841a0", "conv": "thiscall", "sig": "int(CUnit* this, int include_bonuses)",
+      "bytes": "55 8b ec 81 ec c8 00 00 00 a1 ?? ?? ?? ?? 33 c5 89 45 fc 53 8b d9 56 57 8b 8b f0 01 00 00 8b 81 e4",
+      "doc": "A hero's agility (GetHeroAgi). ret 4."
+    },
+    "CUnit::GetHeroInt": {
+      "kind": "function", "rva": "0x00684f20", "conv": "thiscall", "sig": "int(CUnit* this, int include_bonuses)",
+      "bytes": "55 8b ec 81 ec cc 00 00 00 a1 ?? ?? ?? ?? 33 c5 89 45 fc 8b c1",
+      "doc": "A hero's intelligence (GetHeroInt). ret 4."
+    },
+    "CUnit::SetHeroStr": {
+      "kind": "function", "rva": "0x006997c0", "conv": "thiscall", "sig": "void(CUnit* this, int value, int permanent)",
+      "bytes": "55 8b ec 56 8b b1 f0 01 00 00 6a 00 e8 4f cf fe",
+      "doc": "Sets a hero's base strength (SetHeroStr). ret 8."
+    },
+    "CUnit::SetHeroAgi": {
+      "kind": "function", "rva": "0x00697ef0", "conv": "thiscall", "sig": "void(CUnit* this, int value, int permanent)",
+      "bytes": "55 8b ec 56 8b b1 f0 01 00 00 6a 00 e8 9f c2 fe",
+      "doc": "Sets a hero's base agility (SetHeroAgi). ret 8."
+    },
+    "CUnit::SetHeroInt": {
+      "kind": "function", "rva": "0x00698860", "conv": "thiscall", "sig": "void(CUnit* this, int value, int permanent)",
+      "bytes": "55 8b ec 56 8b b1 f0 01 00 00 6a 00 e8 af c6 fe",
+      "doc": "Sets a hero's base intelligence (SetHeroInt). ret 8."
+    },
+    "CPosition.vtable.GetFacing": { "kind": "offset", "value": "0x1c", "doc": "vtable slot: float*(void* this, float* out), thiscall: the position's facing in radians (GetUnitFacing multiplies it by 180/pi)." },
+    "CUnit.fly_height": { "kind": "offset", "value": "0x208", "doc": "float: the unit's current flying height (GetUnitFlyHeight)." },
+    "CAbility.level": { "kind": "offset", "value": "0x50", "doc": "int: the ability's level minus one (GetUnitAbilityLevel adds 1)." },
+    "CAbility.vtable.LevelUp": { "kind": "offset", "value": "0x2e4", "doc": "vtable slot: void(CAbility* this), thiscall: one level up; SetUnitAbilityLevel calls it once per level." },
+    "CAbility.vtable.LevelDown": { "kind": "offset", "value": "0x2e8", "doc": "vtable slot: void(CAbility* this), thiscall: one level down." },
+    "CUnit.armor": { "kind": "offset", "value": "0xe0", "doc": "float: the unit's armor, with a hero's agility (what the info panel shows before the bonus; CInfoPanelIconArmor's vtable +0x6C gets it). Found in the game: Town Hall 5, Peasant 0." },
+    "CUnit.armor_type": { "kind": "offset", "value": "0xe4", "doc": "int: the armor type in UnitBalance.slk defType order: 0 small, 1 medium, 2 large, 3 fortified, 4 normal, 5 hero, 6 divine, 7 none (Peasant 1, Town Hall 3, a hero 5)." },
+    "CUnit.attack": { "kind": "offset", "value": "0x1e8", "doc": "CAbilityAttack*: the unit's attack ability, or NULL for a unit without an attack (GetUnitAcquireRange and CUnit::GetAcquireRange read it)." },
+    "CAbilityAttack.damage_base": { "kind": "offset", "value": "0xa0", "doc": "int: the first weapon's base damage (dmgplus1, plus a hero's primary attribute); the second weapon's at +4." },
+    "CAbilityAttack.damage_dice": { "kind": "offset", "value": "0x88", "doc": "int: the first weapon's number of dice (dice1); the second weapon's at +4." },
+    "CAbilityAttack.damage_sides": { "kind": "offset", "value": "0x94", "doc": "int: the first weapon's sides per die (sides1); the second weapon's at +4." },
+    "CAbilityAttack.cooldown": { "kind": "offset", "value": "0x158", "doc": "float: the first weapon's cooldown in seconds (cool1); the second weapon's at +8." },
+    "CAbilityAttack.range": { "kind": "offset", "value": "0x258", "doc": "float: the first weapon's range (rangeN1); the second weapon's at +8. The acquisition range is at +0x244." },
+    "ForEachAgent": {
+      "kind": "function", "rva": "0x0004c410", "conv": "fastcall", "sig": "void(uint32_t type_tag, void* callback, void* context, int subclasses)",
+      "bytes": "55 8b ec 83 ec 08 53 8b 1d ?? ?? ?? ?? 89 4d fc",
+      "doc": "Calls callback (int __fastcall(void* agent, void* context): 0 stops the walk, non-zero goes on) for every live agent of a class, by its type tag (AgentTag.*): the class's instance list, skipping dying ones and checking each agent record as the natives do; with subclasses, its subclasses' too. GroupEnumUnitsOfPlayer (0x22F150) passes AgentTag.unit and 0. ret 8."
+    },
+    "AgentTag.unit": { "kind": "constant", "value": "0x2b773375", "doc": "'+w3u': CUnit's type tag (what ForEachAgent takes; CUnit's type-tag function returns it)." },
+    "AgentTag.item": { "kind": "constant", "value": "0x2b773369", "doc": "'+w3i': CItem's type tag." },
+    "AgentTag.destructable": { "kind": "constant", "value": "0x2b773364", "doc": "'+w3d': CDestructable's type tag." }
   }
 }

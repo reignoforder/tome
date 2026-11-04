@@ -5,5 +5,5 @@
   "game": "1.27b",
   "tome": "*",
   "sync": "client",
-  "requires": ["GetFrameByName", "event:frame", "CUnit.armor"]
+  "requires": ["GetFrameByName", "event:frame", "CUnit.wings", "property:mana", "property:wings"]
 }

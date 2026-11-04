@@ -74,4 +74,15 @@ constexpr size_t kMaxModuleSize = 16u << 20;
     X(config_write, "(iiii)i") \
     X(register_native, "(iii)i") \
     X(jass_code_call, "(ii)i") \
-    X(jass_code_execute, "(i)i")
+    X(jass_code_execute, "(i)i") \
+    X(object_type, "(i)i") \
+    X(object_of, "(ii)i") \
+    X(handle_of, "(i)i") \
+    X(player_object, "(i)i") \
+    X(unit_info, "(iii)i") \
+    X(get_property, "(iii)i") \
+    X(set_property, "(iiF)i") \
+    X(get_keyed_property, "(iiii)i") \
+    X(set_keyed_property, "(iiiF)i") \
+    X(list_objects, "(iii)i") \
+    X(jass_call, "(iiiiiii)i")

@@ -164,6 +164,21 @@ static_assert(offsetof(tome_api, subscribe) == 204);
 static_assert(offsetof(tome_api, publish) == 208);
 static_assert(offsetof(tome_api, map_script_shadows) == 212);
 static_assert(offsetof(tome_api, read_game_file) == 216);
+static_assert(offsetof(tome_api, object_type) == 220);
+static_assert(offsetof(tome_api, object_of) == 224);
+static_assert(offsetof(tome_api, handle_of) == 228);
+static_assert(offsetof(tome_api, player_object) == 232);
+static_assert(offsetof(tome_api, unit_info) == 236);
+static_assert(offsetof(tome_api, get_property) == 240);
+static_assert(offsetof(tome_api, set_property) == 244);
+static_assert(offsetof(tome_api, jass_call) == 248);
+static_assert(offsetof(tome_api, get_keyed_property) == 252);
+static_assert(offsetof(tome_api, set_keyed_property) == 256);
+static_assert(offsetof(tome_api, list_objects) == 260);
+
+// tome_jass_value (API version 16): one 32-bit word, like a native's argument.
+static_assert(sizeof(tome_jass_value) == 4);
+static_assert(TOME_OBJECT_OTHER == 5 && TOME_PROPERTY_FOOD_USED == 16 && TOME_PROPERTY_ABILITY_LEVEL == 24 && TOME_PROPERTY_ATTACK_RANGE == 31);
 
 TEST(abi_layout_is_append_only) {
     // Everything is checked at compile time; this only keeps the file in the list.

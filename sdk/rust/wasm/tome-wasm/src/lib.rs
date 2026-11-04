@@ -325,6 +325,149 @@ pub fn selection() -> (Vec<OwnedUnit>, Option<usize>) {
     (units, usize::try_from(leader).ok())
 }
 
+// --- game objects (API version 16) -------------------------------------------
+//
+// Units, items, destructables and players are handles of this module (like
+// `OwnedUnit::object`); properties are `consts::TOME_PROPERTY_*`, values
+// f64. Changing the game in a multiplayer game needs a "sync": "required" mod.
+
+/// What an object is now (`consts::TOME_OBJECT_*`); `TOME_OBJECT_NONE` if it's gone.
+pub fn object_type(object: u32) -> i32 {
+    unsafe { raw::object_type(object) }
+}
+
+/// The object a JASS handle id stands for and its type, if it's a unit,
+/// item, destructable or player.
+pub fn object_of(jass_handle: u32) -> Option<(u32, i32)> {
+    let mut kind = consts::TOME_OBJECT_NONE;
+    let object = unsafe { raw::object_of(jass_handle, &mut kind) };
+    (object != 0).then_some((object, kind))
+}
+
+/// The JASS handle id the map script has for an object, or 0 (Tome never makes one).
+pub fn handle_of(object: u32) -> u32 {
+    unsafe { raw::handle_of(object) }
+}
+
+/// The player in a slot (0 = Player 1).
+pub fn player_object(slot: i32) -> Option<u32> {
+    let object = unsafe { raw::player_object(slot) };
+    (object != 0).then_some(object)
+}
+
+/// A unit as the selection describes it, if it's a live unit.
+pub fn unit_info(unit: u32) -> Option<OwnedUnit> {
+    let block = read_out(256, |out, cap| unsafe { raw::unit_info(unit, out, cap) })?;
+    let raw = block.get(..core::mem::size_of::<events::RawUnit>())?;
+    Some(Unit::from_raw(events::read_struct(raw)).to_owned())
+}
+
+/// A property's value (`consts::TOME_PROPERTY_*`).
+pub fn get_property(object: u32, property: i32) -> Result<f64> {
+    let mut value = 0.0;
+    check(unsafe { raw::get_property(object, property, &mut value) }).map(|()| value)
+}
+
+/// Changes a property, as its JASS native would.
+pub fn set_property(object: u32, property: i32, value: f64) -> Result<()> {
+    check(unsafe { raw::set_property(object, property, value) })
+}
+
+/// A property that takes a key (an ability's type id; 1 for a hero's
+/// attribute with bonuses).
+pub fn get_keyed_property(object: u32, property: i32, key: u32) -> Result<f64> {
+    let mut value = 0.0;
+    check(unsafe { raw::get_keyed_property(object, property, key, &mut value) }).map(|()| value)
+}
+
+/// Changes a property that takes a key.
+pub fn set_keyed_property(object: u32, property: i32, key: u32, value: f64) -> Result<()> {
+    check(unsafe { raw::set_keyed_property(object, property, key, value) })
+}
+
+/// Every unit, item, destructable or player there is now
+/// (`consts::TOME_OBJECT_*`), as handles; empty outside a game.
+pub fn list_objects(kind: i32) -> Vec<u32> {
+    let total = unsafe { raw::list_objects(kind, core::ptr::null_mut(), 0) };
+    if total <= 0 {
+        return Vec::new();
+    }
+    let mut out = vec![0u32; total as usize];
+    let n = unsafe { raw::list_objects(kind, out.as_mut_ptr(), total) };
+    out.truncate(n.clamp(0, total) as usize);
+    out
+}
+
+/// One argument of `jass_call`, as the native's signature has it. Handles
+/// are JASS handle ids (`handle_of`), not this module's object handles.
+#[derive(Clone, Copy, Debug)]
+pub enum JassArg<'a> {
+    Int(i32),
+    Bool(bool),
+    Real(f32),
+    Handle(u32),
+    Code(u32),
+    /// `None` is JASS null.
+    Str(Option<&'a str>),
+}
+
+/// What a native returned: the word as the signature has it, and the text
+/// of a string result.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct JassValue {
+    pub word: u32,
+    pub text: Option<String>,
+}
+
+impl JassValue {
+    pub fn int(&self) -> i32 {
+        self.word as i32
+    }
+    pub fn real(&self) -> f32 {
+        f32::from_bits(self.word)
+    }
+    pub fn boolean(&self) -> bool {
+        self.word != 0
+    }
+}
+
+/// Runs a JASS native by name (Tome checks the arguments as for DLL mods).
+pub fn jass_call(name: &str, args: &[JassArg]) -> Result<JassValue> {
+    let mut texts = Vec::new();
+    for arg in args {
+        if let JassArg::Str(Some(s)) = arg {
+            let mut bytes = s.as_bytes().to_vec();
+            bytes.push(0);
+            texts.push(bytes);
+        }
+    }
+    let mut next_text = texts.iter();
+    let words: Vec<u32> = args
+        .iter()
+        .map(|arg| match *arg {
+            JassArg::Int(v) => v as u32,
+            JassArg::Bool(v) => v as u32,
+            JassArg::Real(v) => v.to_bits(),
+            JassArg::Handle(v) | JassArg::Code(v) => v,
+            JassArg::Str(None) => 0,
+            JassArg::Str(Some(_)) => next_text.next().map_or(0, |t| t.as_ptr() as usize as u32),
+        })
+        .collect();
+    let (ptr, len) = str_arg(name);
+    let mut word = 0u32;
+    let mut text = vec![0u8; 4096];
+    let count = i32::try_from(words.len()).unwrap_or(i32::MAX);
+    check(unsafe {
+        raw::jass_call(ptr, len, words.as_ptr(), count, &mut word, text.as_mut_ptr(), text.len() as u32)
+    })?;
+    // A string result's word points at `text`.
+    let text_result = (word != 0 && word as usize == text.as_ptr() as usize).then(|| {
+        let end = text.iter().position(|&b| b == 0).unwrap_or(text.len());
+        String::from_utf8_lossy(&text[..end]).into_owned()
+    });
+    Ok(JassValue { word, text: text_result })
+}
+
 /// A global of the map script that a function's local hides
 /// (`tome_script_shadow`).
 #[derive(Clone, Debug, PartialEq, Eq)]

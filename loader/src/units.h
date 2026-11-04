@@ -18,6 +18,16 @@ namespace tome::units {
 // Called by events::install.
 void init(uintptr_t game_base, const BuildMappings& build);
 
+// The current game (CGameWar3), or null; its handle manager
+// (CGameWar3.handles), or null.
+void* game_object();
+void* handle_manager();
+
+// The player in a slot (CGameWar3::GetPlayer), or null outside a game.
+void* player_at(int32_t slot);
+// Whether `object` is one of the game's players (only compared with them).
+bool is_player(const void* object);
+
 // The local player's selection right now; empty outside a game.
 Selection read_selection();
 
@@ -40,6 +50,14 @@ void describe_unit(const void* unit, tome_unit& out);
 // A CPlayerWar3's slot, and its CPlayerWar3.game_state (1 while in the game).
 int32_t player_slot(const void* player);
 int32_t player_state(const void* player);
+
+// A unit's tome_unit_flag bits.
+uint32_t unit_flags(const void* unit);
+
+// Copies a described unit into a mod's tome_unit of `unit_size` bytes (a
+// mod built against an older tome.h passes a smaller struct): zeroed, as
+// much as both have, `size` set to that.
+void copy_unit(const tome_unit& described, void* out, uint32_t unit_size);
 
 // A hero's level (0 for other units).
 int32_t hero_level(const void* unit);

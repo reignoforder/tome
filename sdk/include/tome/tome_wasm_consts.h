@@ -4,7 +4,7 @@
 
 /* tome.h's enums for WebAssembly mods (tome_wasm.h). */
 
-#define TOME_API_VERSION 15
+#define TOME_API_VERSION 16
 #define TOME_POPUP_CLOSED (-1)
 
 typedef enum tome_result {
@@ -311,3 +311,100 @@ typedef enum tome_chat_recipient {
     TOME_CHAT_OBSERVERS = 2,  /* observers or referees */
     TOME_CHAT_PRIVATE = 3
 } tome_chat_recipient;
+
+/*
+ * Game objects (API version 16).
+ *
+ * Units, items, destructables and players are the game's own objects,
+ * passed as `void*`: tome_unit.object in events and the selection,
+ * object_of(handle) for a JASS handle id, player_object(slot) for a player.
+ * Tome checks every object it's given (object_type: its class, and that the
+ * game still counts it as alive): one that's gone or of the wrong kind fails
+ * the call with TOME_ERR_INVALID_ARGUMENT instead of being used. An object
+ * keeps its pointer while it exists, but the check reads the pointer, so
+ * don't keep one for long after the object may be gone: a removed unit's
+ * memory can be reused for a new object. To keep track of an object over
+ * time, keep its JASS handle id (handle_of, then object_of) where the
+ * script has one, and get pointers again from events and the selection.
+ *
+ * Properties read and change objects by name on every build Tome maps
+ * (get_property, set_property), with every value as a double. A property
+ * a build doesn't map yet fails with TOME_ERR_UNAVAILABLE; list the ones
+ * a mod can't do without in tome.mod.json "requires" as "property:<name>"
+ * (e.g. "property:mana"), so Tome tells the player why it won't load.
+ *
+ * jass_call runs any JASS native by name (the game's, Tome's or a mod's),
+ * for everything properties don't cover yet.
+ *
+ * Changing the game (set_property, and natives that change something)
+ * must happen the same way on every computer in a multiplayer game, or the
+ * game desyncs: do it from a "sync": "required" mod in response to synced
+ * events (unit events, game ticks, chat), never local ones (the selection,
+ * keybinds, clicks, popups). In a multiplayer game or a replay,
+ * set_property and jass_call refuse mods that aren't required (Tome can't
+ * tell which natives only read). get_property reads at any time.
+ */
+typedef enum tome_object_type {
+    TOME_OBJECT_NONE = 0,          /* NULL, gone, or not an object Tome knows */
+    TOME_OBJECT_UNIT = 1,
+    TOME_OBJECT_ITEM = 2,
+    TOME_OBJECT_DESTRUCTABLE = 3,
+    TOME_OBJECT_PLAYER = 4,
+    TOME_OBJECT_OTHER = 5          /* another handle's object (trigger, timer, group...): object_of only */
+} tome_object_type;
+
+/*
+ * What get_property and set_property read and change (API version 16):
+ * "get" can be read, "set" changed too. What each one is on (units, items,
+ * destructables, players; "heroes" are units that are heroes); any other
+ * object fails with TOME_ERR_INVALID_ARGUMENT. Some take a key
+ * (get_keyed_property, set_keyed_property): the plain functions pass 0.
+ * Appended to, never renumbered. The comment's first word is the
+ * property's name for "requires".
+ */
+typedef enum tome_property {
+    TOME_PROPERTY_LIFE = 1,        /* life: units, items, destructables; get, set (<= 0 kills, like SetWidgetLife) */
+    TOME_PROPERTY_MAX_LIFE = 2,    /* max_life: units; get */
+    TOME_PROPERTY_MANA = 3,        /* mana: units; get, set */
+    TOME_PROPERTY_MAX_MANA = 4,    /* max_mana: units; get */
+    TOME_PROPERTY_X = 5,           /* x: units, items, destructables; get; set on units (like SetUnitX: no pathing check) */
+    TOME_PROPERTY_Y = 6,           /* y: units, items, destructables; get; set on units */
+    TOME_PROPERTY_MOVE_SPEED = 7,  /* move_speed: units; get, set (nothing for a unit that can't move) */
+    TOME_PROPERTY_LEVEL = 8,       /* level: units; get (a hero's level, the unit type's level for others) */
+    TOME_PROPERTY_TYPE_ID = 9,     /* type_id: units, items, destructables; get ('hpea'; tome_type_code) */
+    TOME_PROPERTY_OWNER = 10,      /* owner: units; get (the owner's player slot, 0 = Player 1) */
+    TOME_PROPERTY_CHARGES = 11,    /* charges: items; get */
+    TOME_PROPERTY_SLOT = 12,       /* slot: players; get (0 = Player 1) */
+    TOME_PROPERTY_GOLD = 13,       /* gold: players; get, set */
+    TOME_PROPERTY_LUMBER = 14,     /* lumber: players; get, set */
+    TOME_PROPERTY_FOOD_CAP = 15,   /* food_cap: players; get, set (food provided, as GetPlayerState says) */
+    TOME_PROPERTY_FOOD_USED = 16,  /* food_used: players; get, set */
+    TOME_PROPERTY_FACING = 17,     /* facing: units; get, set (degrees, as GetUnitFacing; set turns it at once,
+                                      where SetUnitFacing turns it at its turn speed) */
+    TOME_PROPERTY_FLY_HEIGHT = 18, /* fly_height: units; get */
+    TOME_PROPERTY_ACQUIRE_RANGE = 19, /* acquire_range: units; get, set */
+    TOME_PROPERTY_HERO_XP = 20,    /* hero_xp: heroes; get */
+    /* Key 0: the hero's own (base) value, get and set; key 1: with bonuses
+     * from items and auras, get. */
+    TOME_PROPERTY_STRENGTH = 21,   /* strength: heroes */
+    TOME_PROPERTY_AGILITY = 22,    /* agility: heroes */
+    TOME_PROPERTY_INTELLIGENCE = 23, /* intelligence: heroes */
+    /* Key: the ability's type id ('AHbz'). Get: its level, 0 if the unit
+     * doesn't have it. Set: a level from 1 to the ability's last (clamped,
+     * as SetUnitAbilityLevel does); adding and removing abilities is
+     * jass_call's (UnitAddAbility, UnitRemoveAbility). */
+    TOME_PROPERTY_ABILITY_LEVEL = 24, /* ability_level: units; get, set */
+    TOME_PROPERTY_ARMOR = 25,      /* armor: units; get (with a hero's agility, as the info panel's first number) */
+    /* armor_type: units; get. 0 small, 1 medium, 2 large, 3 fortified, 4 normal, 5 hero, 6 divine, 7 none
+     * (UnitBalance.slk defType). */
+    TOME_PROPERTY_ARMOR_TYPE = 26,
+    /* A unit's attack. Key: the weapon, 0 (the first, the default) or 1. Units
+     * without an attack fail with TOME_ERR_INVALID_ARGUMENT. Base damage
+     * includes a hero's primary attribute; an attack does base + dice
+     * rolls of 1 to sides each. */
+    TOME_PROPERTY_DAMAGE_BASE = 27,     /* damage_base: units; get */
+    TOME_PROPERTY_DAMAGE_DICE = 28,     /* damage_dice: units; get */
+    TOME_PROPERTY_DAMAGE_SIDES = 29,    /* damage_sides: units; get */
+    TOME_PROPERTY_ATTACK_COOLDOWN = 30, /* attack_cooldown: units; get (seconds between attacks) */
+    TOME_PROPERTY_ATTACK_RANGE = 31     /* attack_range: units; get */
+} tome_property;

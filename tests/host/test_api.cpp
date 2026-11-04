@@ -631,6 +631,50 @@ TEST(host_api_basics_and_refusals) {
     CHECK(!tome::hooks::is_reserved("JassVarDesc::ctor"));
 }
 
+// Game objects (API version 16) outside a game: nothing is an object, and
+// properties and natives are unavailable instead of touching anything.
+TEST(host_objects_outside_a_game) {
+    Home home;
+    Session session;
+    const tome_api* api = start(home, session);
+    CHECK(api != nullptr);
+    if (!api) return;
+    CHECK(tome_has_objects(api));
+    tome_mod* mod = make_mod("plain");
+    uint32_t not_an_object[8] = {};
+    int32_t type = -1;
+    CHECK_EQ(api->object_type(nullptr), int32_t(TOME_OBJECT_NONE));
+    CHECK_EQ(api->object_type(not_an_object), int32_t(TOME_OBJECT_NONE));
+    CHECK(api->object_of(0x100000, &type) == nullptr);
+    CHECK_EQ(type, int32_t(TOME_OBJECT_NONE));
+    CHECK_EQ(api->handle_of(not_an_object), 0u);
+    CHECK(api->player_object(0) == nullptr);
+    tome_unit unit;
+    CHECK(tome_get_unit_info(api, not_an_object, &unit) != TOME_OK);
+    CHECK_EQ(api->unit_info(not_an_object, nullptr, sizeof(unit)), TOME_ERR_INVALID_ARGUMENT);
+    double value = 1;
+    CHECK(api->get_property(not_an_object, TOME_PROPERTY_LIFE, &value) != TOME_OK);
+    CHECK(value == 0);
+    CHECK_EQ(api->get_property(not_an_object, TOME_PROPERTY_LIFE, nullptr), TOME_ERR_INVALID_ARGUMENT);
+    CHECK(tome_property_value(api, not_an_object, TOME_PROPERTY_MANA, -1) == -1);
+    CHECK_EQ(api->set_property(nullptr, not_an_object, TOME_PROPERTY_LIFE, 1), TOME_ERR_INVALID_ARGUMENT);
+    CHECK(api->set_property(mod, not_an_object, TOME_PROPERTY_LIFE, 1) != TOME_OK);
+    tome_jass_value args[1] = {tome_jass_int(42)};
+    tome_jass_value result = tome_jass_int(7);
+    CHECK(api->jass_call(mod, "I2S", args, 1, &result) != TOME_OK);
+    CHECK(result.string == nullptr);  // zeroed whatever happens
+    CHECK_EQ(api->jass_call(mod, nullptr, args, 1, &result), TOME_ERR_INVALID_ARGUMENT);
+    CHECK_EQ(api->jass_call(mod, "I2S", nullptr, 1, &result), TOME_ERR_INVALID_ARGUMENT);
+    CHECK_EQ(api->jass_call(nullptr, "I2S", args, 1, &result), TOME_ERR_INVALID_ARGUMENT);
+    void* listed[4];
+    // No game (0), or the session didn't install the objects hooks (-1): nothing either way.
+    CHECK(api->list_objects(TOME_OBJECT_UNIT, listed, 4) <= 0);
+    CHECK(api->list_objects(TOME_OBJECT_PLAYER, nullptr, 0) <= 0);
+    CHECK_EQ(api->list_objects(TOME_OBJECT_OTHER, listed, 4), -1);
+    CHECK_EQ(api->list_objects(TOME_OBJECT_UNIT, nullptr, 4), -1);
+    CHECK_EQ(api->list_objects(TOME_OBJECT_UNIT, listed, -1), -1);
+}
+
 // Keybinds: a broken keybinds.json, the game's CustomKeys.txt, keys asked
 // for by name, one the mod never declared, and resetting every key.
 TEST(host_keybinds_files_and_reset) {

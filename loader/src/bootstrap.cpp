@@ -17,6 +17,7 @@
 #include "mod_menu.h"
 #include "mods_ready.h"
 #include "natives.h"
+#include "objects.h"
 #include "overlay.h"
 #include "patches.h"
 #include "paths.h"
@@ -48,6 +49,8 @@ std::string g_events_report;
 
 bool g_patches_ok = false;
 std::string g_patches_report;
+bool g_objects_ok = false;
+std::string g_objects_report;
 bool g_sound_wait_ok = false;
 std::string g_sound_wait_report;
 bool g_esc_hooks_ok = false;
@@ -281,6 +284,11 @@ DWORD bootstrap() {
             TOME_ERROR("Multiplayer handshake unavailable: %s", g_handshake_report.c_str());
         }
         if (g_patches_ok) TOME_INFO("Patches: %s", g_patches_report.c_str());
+        if (g_objects_ok) {
+            TOME_INFO("Game objects: %s", g_objects_report.c_str());
+        } else if (!g_objects_report.empty()) {
+            TOME_ERROR("Game objects unavailable: %s", g_objects_report.c_str());
+        }
         if (g_sound_wait_ok) {
             TOME_INFO("Sound start-up: %s", g_sound_wait_report.c_str());
         } else {
@@ -383,6 +391,8 @@ void start_bootstrap(HMODULE self) {
             // Built-in fixes (always on, independent of events and of Tome's
             // folders): applied to whichever ones fit this build. See patches.h.
             g_patches_ok = patches::install(reinterpret_cast<uintptr_t>(game), *g_early_build, g_patches_report);
+            // After the patches: they set up the hook engine (and may wrap natives, which jass_call then calls).
+            g_objects_ok = objects::install(reinterpret_cast<uintptr_t>(game), *g_early_build, g_objects_report);
             g_sound_wait_ok = mods_ready::install_sound_wait(g_sound_wait_report);
             if (g_paths_ok) {
                 frames::init(reinterpret_cast<uintptr_t>(game), *g_early_build, g_attach_thread);

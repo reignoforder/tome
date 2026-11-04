@@ -39,6 +39,8 @@ loader/
     main_menu_fdf.*       generates TomeModMenu.fdf (main menu and Esc menu layouts)
     mod_menu_model.*      the mod menu's pages and what their buttons do
     mod_status.h          ModStatus, one row of the mod list
+    objects.*             game objects: the property table, "property:" requirements, the
+                          handle table (an id's object, new ids), jass_call's checks
     settings.*            config.schema.json subset, settings values, menu steps
     signature.*           tome.sig: Ed25519 signatures of mods (Monocypher), base64
     wasm_abi.*            Wasm mods (wasm-mods.md): checked reads/writes of a module's memory, handles
@@ -64,6 +66,7 @@ loader/
                           d3d_reset_lights: Direct3D lights across a reset;
                           gl_context_restore: the OpenGL context after Alt+Tab)
     natives.*             native registry, thunks, InitNatives hook, JASS strings and code
+    objects.*             game objects for mods: checks, properties, handles, jass_call
     hooks.*               inline hooks on mapped functions: patch, entry stub, dispatcher
     mod_manager.*         discovery, state.json, lifecycle, hot reload, crashed mods, safe mode
     mod_handle.h          tome_mod, the handle mods get
@@ -614,6 +617,87 @@ calls: a mod's own threads, the game's code, Tome's own code.
   target: mov eax, [slot.target] ; test eax, eax ; jz ret0 ; jmp eax
   ret0: xor eax, eax ; ret
   ```
+
+## Game objects (API version 16)
+
+`loader/src/objects.cpp`, with the portable parts in `core/objects.*`
+(`tome.h`, "Game objects"). Mods get the game's objects (`tome_unit.object`
+in events and the selection, `object_of`, `player_object`) and read and
+change them through Tome, which calls the same game functions the JASS
+natives call, found by reading each native's code on both builds
+(`reverse-engineering.md`, "Game objects").
+
+- **Every object is checked before use** (`objects::type_of`): a player
+  is one of `CGameWar3::GetPlayer`'s results (compared, never read); a
+  unit, item or destructable has the class's vtable and an agent record
+  that says it's alive (`ObjectLookup` on `CAgent.id`, the record's tag
+  `'+agl'`, not dying): what the unit natives check. A gone object fails
+  the call with `TOME_ERR_INVALID_ARGUMENT`.
+- **Properties** (`get_property`, `set_property`, by `tome_property`, all
+  values doubles) are a table in `core/objects.cpp`: the kinds of object
+  each is on, whether it can be set, and the mapped names it needs. At
+  install Tome marks each property available if all its names are mapped
+  (`objects` in `BuildMappings`, all optional), so a build that lacks one
+  fails just that property with `TOME_ERR_UNAVAILABLE` and logs "Game
+  objects: N of M properties mapped". `tome.mod.json` `"requires":
+  ["property:<name>"]` is checked against the same table when mods are
+  read (`capability_met`): the first capability Tome checks.
+- **Keys:** some properties take a key (`get_keyed_property`): an ability's
+  type id (required), a hero attribute's base (0) or total with bonuses
+  (1, read only), or a unit's weapon (0 or 1). The plain functions pass 0.
+  `PropertyInfo` says what each takes (`Key`), where it can be read (`on`)
+  and set (`set_on`, e.g. x and y on units only), and whether only heroes
+  have it; `check_access` decides from that.
+- **Listing objects** (`list_objects`): units, items and destructables
+  through the game's own walker (ForEachAgent with the class's type tag,
+  what GroupEnumUnitsOfPlayer uses; items and destructables with its
+  subclass walk, filtered by vtable), so it lists every live one, handle or
+  not, in the game's order; a callback of Tome's collects them and the mod
+  gets an array, so no mod code runs during the walk. Players: every slot
+  CGameWar3::GetPlayer gives.
+- **Changing the game** from one computer only desyncs a multiplayer game.
+  `set_property` refuses (`TOME_ERR_UNAVAILABLE`, a warning once per mod)
+  while the game lock is on (a multiplayer game or replay,
+  `core/game_lock.h`) unless the mod is `"sync": "required"`
+  (`tome_mod.sync_required`, set at each resolve).
+- **Handles:** `object_of` reads the handle table itself
+  (`core/objects.cpp`, `handle_object`), checking the id against the
+  number handed out (`HandleManager.count`) and the entry's reference
+  count; the game's own lookup (`0x285FE0`) checks only the lower bound.
+  `handle_of` is the existing read-only lookup (`units::handle_of`), which
+  never makes a handle.
+- **`jass_call`** runs any native by name. An AFTER handler on `BindNative`
+  (`last`, after mods' handlers) records each native's address and
+  signature as the engine binds it at every map load: the game's (with the
+  path sanitizer's wrappers where it put them), Tome's and mods' thunks. The
+  arguments are converted by the signature (`wasm::parse_signature`): reals
+  go as pointers to floats, strings are made with `CreateJassString` and
+  passed as their string table entry (`JassVM::Get`, `JassVM.strings`:
+  16-byte entries, an RCString each; made first and looked up last, since
+  making one may move the table), handles are checked against the handle
+  table, and code values must be ones the map script passed to a Tome
+  native (`natives::code_seen`). Types made by a `Convert*` native from one
+  integer (`unitstate`, `playerstate`, `race`...) are integers, not table
+  entries: they're learned from the same BindNative calls. The call goes
+  through `hooks::call_with_stack` (cdecl); a real result comes back as
+  float bits, a string result as an id whose entry's text Tome returns.
+- **Multiplayer:** a native that returns an agent may make its first
+  handle (`0x282E30` with 1), which shifts every later id on that computer,
+  and Tome can't tell which natives only read. So in a locked game (a
+  multiplayer game or a replay) `jass_call` refuses mods that aren't
+  required, as `set_property` does (warned once per mod).
+- **Texttags** are indices (0 to 99), not handle table entries: every
+  texttag native checks the id against the texttag count itself, so
+  `jass_call` passes them as integers (`objects::handle_is_index`). Images
+  and ubersplats are indices too, but their natives index an array with
+  the id unchecked: those stay refused (not live handles).
+- **Handle types:** besides being live, a handle argument must fit its
+  parameter (`handle_type_fits`): unit, item, destructable and player
+  take their own kind, widget any of the three, handle and agent anything,
+  other types only objects Tome doesn't classify, which the game's
+  converter then type-checks itself (`reverse-engineering.md`).
+- **WebAssembly mods** get all of it, `jass_call` too, with strings copied
+  in and out of the module's memory (`wasm-mods.md`).
 
 ## Frames for mods
 

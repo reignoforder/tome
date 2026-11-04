@@ -331,6 +331,14 @@ tome_result TOME_CALL api_jass_code_execute(tome_jass_code code) {
 
 } // namespace
 
+uint32_t create_string(const char* text) {
+    return api_jass_string_create(text);
+}
+
+bool code_seen(uint32_t code) {
+    return g_codes_seen.count(code) != 0;
+}
+
 const char* string_text(const void* jass_string) {
     return jass_string && g_string_text ? g_string_text(jass_string) : nullptr;
 }

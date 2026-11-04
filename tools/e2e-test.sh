@@ -332,8 +332,8 @@ check_absent() {
 # O on a worker and a hero the map selects on "-build" and "-skill" (menu
 # events; Esc closes the build menu first, or O isn't a hotkey there), once
 # the map's own Peasant is trained (the two new units would use up the food
-# it needs). Then
-# the Rust and C++ examples' chat commands, and the same commands making
+# it needs). Then hello's /helloobj on that hero (game objects: properties,
+# handles and natives), the Rust and C++ examples' chat commands, and the same commands making
 # them panic and throw. "-e2e-done" last starts the map's victory check
 # (its dialog takes the keyboard).
 if ((${#MAP_ARG[@]})); then
@@ -348,6 +348,7 @@ if ((${#MAP_ARG[@]})); then
 key:T;until:clicked dialog;key:Left;until:pressed Left;\
 wait:Peasant (hpea) of player 1 trained in Town Hall;type:-build;wait:e2e: selected the worker;frames:5;key:B;wait:opened the build menu;key:Esc;frames:5;\
 type:-skill;wait:e2e: selected the hero;frames:5;key:O;wait:opened the skill menu;key:Esc;frames:5;\
+type:/helloobj;wait:/helloobj done;\
 type:/wasme2e e2e;wait:[wasm-e2e] e2e;${WASM_INPUT}type:/wasme2e trap;wait:wasm-e2e crashed in chat command;\
 ${RUST_INPUT}type:/hellocpp e2e;wait:/hellocpp command:;type:/hellocpp throw;wait:uncaught exception: /hellocpp throw;\
 type:-e2e-done" launch
@@ -375,7 +376,7 @@ check "JASS natives: redirected 3 of 3 InitNatives call sites" "InitNatives hook
 check "\[hello\] enabled \(1 time" "hello loaded and enabled"
 check "broken-json +error: tome\.mod\.json: line 2" "broken JSON reported with position"
 check "needs-ghost .*needs \"ghost\" \^1, which isn't installed" "missing dependency reported"
-check "needs-unmapped .*needs \"CUnit\.armor\", which isn't mapped for ${GAME_VERSION//./\\.}" "unmapped requires reported"
+check "needs-unmapped .*needs \"CUnit\.wings\", which isn't mapped for ${GAME_VERSION//./\\.}" "unmapped requires reported"
 check "hello: code allowed \(TOME_DEBUG_APPROVE\), sha256 [0-9a-f]{64}" "a mod's code is hashed and allowed"
 check "unapproved +0\.1\.0 +approval: runs native code; turn it on to allow it" "new code waits for approval"
 check "unapproved: runs native code; turn it on to allow it \(in the mod menu, or /tome enable unapproved\)" \
@@ -400,6 +401,7 @@ else
     done
     check_absent "Patches: .*FAILED" "no built-in patch failed"
 fi
+check "Game objects: 31 of 31 properties mapped; jass_call learns the natives" "every game object property mapped"
 check_absent "blp-guard.*unclamped" "the BLP header-copy clamp was applied"
 check "Main-thread dispatcher installed" "main-thread dispatcher installed"
 check "Events: hooked screens, map load, game start and end, frames, game ticks, shutdown, chat, pause, units, spells, damage, experience, players, resources, keys, menus, dialogs, levels and saved games" "event hooks installed"
@@ -532,6 +534,32 @@ if ((${#MAP_ARG[@]})); then
     check "\[hello\] .+ released Left" "arrow key released event"
     check "\[hello\] .+ opened the build menu" "build menu event (simulated B on a selected worker)" 10
     check "\[hello\] .+ opened the skill menu" "skill menu event (simulated O on a selected hero)" 10
+    echo "game objects (/helloobj on the selected hero)"
+    check "\[hello\] /helloobj: Mountain King \(Hmkg\) of player 1, level 1: life [0-9]+/[0-9]+, mana [0-9]+/[0-9]+, at -?[0-9]+, -?[0-9]+, speed [0-9]+" "a unit's properties" 10
+    check "\[hello\] /helloobj: mana set to 7: ok" "set_property: mana"
+    check "\[hello\] /helloobj: life set to [0-9]+: ok" "set_property: life"
+    check "\[hello\] /helloobj: move speed set to 200: ok" "set_property: move speed"
+    check "\[hello\] /helloobj: moved 64 to the east: ok" "set_property: x (y kept)"
+    check "\[hello\] /helloobj: max life is read-only: ok" "set_property refuses a read-only property"
+    check "\[hello\] /helloobj: facing set to 90: ok" "set_property: facing (degrees)"
+    check "\[hello\] /helloobj: acquire range [0-9]+, set to 600: ok; fly height 0, 0 xp" "acquire range, fly height and a hero's experience"
+    check "\[hello\] /helloobj: strength [0-9]+ \([0-9]+ with bonuses\), agility [0-9]+, intelligence [0-9]+; strength \+ 2: ok" "a hero's attributes (keyed: with bonuses), set"
+    check "\[hello\] /helloobj: Storm Bolt level 0, learned 1, set to 3: 3, ok; no key refused: ok" "an ability's level by its id (keyed), after SelectHeroSkill through jass_call"
+    check "\[hello\] /helloobj: armor [0-9]+\.[0-9] \(type 5\), damage [0-9]+ \+ 2d6 every [0-9]+\.[0-9]{2} s, range 100" "a unit's armor and attack (Mountain King: hero armor, 2d6, range 100)"
+    check "\[hello\] /helloobj: handle 0x1[0-9a-f]{5}, back to the unit: ok" "handle_of and object_of"
+    check "\[hello\] /helloobj: GetUnitName: Mountain King" "jass_call with a handle and a string result"
+    check "\[hello\] /helloobj: GetWidgetLife: [0-9]+, ok" "jass_call with a real result, the same as the property"
+    check "\[hello\] /helloobj: GetUnitState mana: [0-9]+, ok" "jass_call with a Convert* type (unitstate) as an integer"
+    check "\[hello\] /helloobj: I2S\(42\): 42" "jass_call returning a string"
+    check '\[hello\] /helloobj: StringLength\("héllo"\): 6' "jass_call with a string argument"
+    check "\[hello\] /helloobj: texttag [0-9]+: ok" "jass_call with a texttag (an index, not a handle table id)"
+    check "\[hello\] /helloobj: refused: ok, ok, ok, ok" "jass_call refuses an unknown native, a made-up handle, the wrong count, a player as a unit"
+    check "\[hello\] /helloobj: player in slot 0 \(ok\) has [0-9]+ gold, lumber [0-9]+, food [0-9]+/[0-9]+; gold \+ 100: ok; handle 0x1[0-9a-f]{5}" "a player's properties and handle"
+    check "\[hello\] /helloobj: GetPlayerName: ." "jass_call on the player's handle"
+    check "\[hello\] /helloobj: [1-9][0-9]* units \(the selected one among them: ok, all units: ok, [1-9][0-9]* without a handle\), [1-9][0-9]* items, [1-9][0-9]* destructables, 16 players; a bad type: -1" "list_objects: every unit (some without a handle), items, destructables, players"
+    check "\[hello\] /helloobj: a unit isn't a player: ok" "a property on the wrong kind of object is refused"
+    check "\[hello\]   the item: pinv, 1 charge\(s\), life [0-9]+, at -?[0-9]+, -?[0-9]+" "an item's properties (item pickup), its position"
+    check_absent "\[hello\] /helloobj: .*MISMATCH" "every value read back as set"
     check "\[hello\] created Rifleman \(hrif\) of player 1" "unit created event"
     check "\[hello\] removed Rifleman \(hrif\) of player 1" "unit removed event (RemoveUnit)"
     check "\[hello\] Archmage \(Hamg\) of player 1 gained [0-9]+ experience \(level 3\)" "hero experience event, with the level"
@@ -602,6 +630,10 @@ if ((${#MAP_ARG[@]})); then
         check "\[map\] TomeLogInteger\(8044\)" "a Wasm native's handle result"
         check "\[hello-wasm\] game start: " "game start event in Wasm" 30
         check "\[hello-wasm\] /hellowasm command: Hello, e2e\." "a Wasm chat command with a string setting" 30
+        check "\[hello-wasm\] /hellowasm unit: Mountain King, life [0-9]+/[0-9]+, mana [0-9]+, object type 1, its owner has [0-9]+ gold; [1-9][0-9]* units in the game" \
+            "a Wasm mod reads the selected unit's and its owner's properties (handles)"
+        check "\[hello-wasm\] /hellowasm natives: GetUnitName: Mountain King, I2S\(7\): 7, a unit as a timer refused, a made-up handle refused" \
+            "a Wasm mod runs natives by name (strings both ways), wrong handles refused"
         if ((WASMRS)); then
             check "\[hello-wasm\] published to 2 mods" "a Wasm mod published a message"
             check "\[hello-wasm-rs\] hello-wasm\.greeted: Hello, e2e\." "a Rust Wasm mod received it, topic and data"

@@ -54,12 +54,40 @@ void* game() {
     return g_base ? *reinterpret_cast<void**>(g_base + g_build->game.game_instance) : nullptr;
 }
 
+// 1.27b's GetPlayer checks the slot against the player count; 1.26a's
+// doesn't (it reads past the array), so the check is made here for both.
 void* player(int32_t slot) {
     void* g = game();
-    return g && slot >= 0 ? g_get_player(g, slot) : nullptr;
+    if (!g || slot < 0 || static_cast<uint32_t>(slot) >= field<uint32_t>(g, g_build->play.player_count_offset)) {
+        return nullptr;
+    }
+    return g_get_player(g, slot);
 }
 
 } // namespace
+
+void* game_object() {
+    return game();
+}
+
+void* handle_manager() {
+    void* g = game();
+    return g ? field<void*>(g, g_build->play.handles_offset) : nullptr;
+}
+
+void* player_at(int32_t slot) {
+    return player(slot);
+}
+
+bool is_player(const void* object) {
+    void* g = game();
+    if (!g || !object) return false;
+    const uint32_t count = field<uint32_t>(g, g_build->play.player_count_offset);
+    for (uint32_t slot = 0; slot < count; ++slot) {
+        if (g_get_player(g, static_cast<int32_t>(slot)) == object) return true;
+    }
+    return false;
+}
 
 void describe_unit(const void* unit, tome_unit& out) {
     const auto& p = g_build->play;
@@ -70,7 +98,7 @@ void describe_unit(const void* unit, tome_unit& out) {
     const char* name = g_type_name(out.type_id, 0);
     out.name = name ? name : "";
     out.owner = field<int32_t>(unit, p.unit_owner_offset);
-    out.flags = classify(out.type_id, field<uint32_t>(unit, p.unit_flags_offset), g_flag_bits);
+    out.flags = unit_flags(unit);
     out.handle = handle_of(unit);
 }
 
@@ -95,18 +123,21 @@ int32_t TOME_CALL api_selection(tome_unit* units, uint32_t unit_size, int32_t ma
     int32_t index = -1;
     describe(read_selection(), described, index);
     if (leader) *leader = index;
-    // A mod built against an older tome.h passes a smaller struct.
-    size_t copy = std::min<size_t>(unit_size, sizeof(tome_unit));
     for (int32_t i = 0; i < max && i < static_cast<int32_t>(described.size()); ++i) {
-        auto slot = reinterpret_cast<char*>(units) + static_cast<size_t>(i) * unit_size;
-        std::memset(slot, 0, unit_size);
-        std::memcpy(slot, &described[i], copy);
-        reinterpret_cast<tome_unit*>(slot)->size = static_cast<uint32_t>(copy);
+        copy_unit(described[i], reinterpret_cast<char*>(units) + static_cast<size_t>(i) * unit_size, unit_size);
     }
     return static_cast<int32_t>(described.size());
 }
 
 } // namespace
+
+void copy_unit(const tome_unit& described, void* out, uint32_t unit_size) {
+    // A mod built against an older tome.h passes a smaller struct.
+    const size_t copy = std::min<size_t>(unit_size, sizeof(tome_unit));
+    std::memset(out, 0, unit_size);
+    std::memcpy(out, &described, copy);
+    static_cast<tome_unit*>(out)->size = static_cast<uint32_t>(copy);
+}
 
 void init(uintptr_t game_base, const BuildMappings& build) {
     g_base = game_base;
@@ -186,12 +217,14 @@ int32_t player_state(const void* player) {
     return player ? field<int32_t>(player, g_build->play.player_state_offset) : 0;
 }
 
-int32_t hero_level(const void* unit) {
+uint32_t unit_flags(const void* unit) {
     if (!unit) return 0;
     const auto& p = g_build->play;
-    uint32_t flags = classify(field<uint32_t>(unit, p.unit_type_offset), field<uint32_t>(unit, p.unit_flags_offset),
-                              g_flag_bits);
-    return (flags & TOME_UNIT_HERO) ? g_hero_level(unit) : 0;
+    return classify(field<uint32_t>(unit, p.unit_type_offset), field<uint32_t>(unit, p.unit_flags_offset), g_flag_bits);
+}
+
+int32_t hero_level(const void* unit) {
+    return (unit_flags(unit) & TOME_UNIT_HERO) ? g_hero_level(unit) : 0;
 }
 
 uint32_t item_type(const void* item) {

@@ -1003,6 +1003,110 @@ SetScreen(1) (the map name is empty then), the loader, EnterGame. `-loadfile`
 with a `.w3z` doesn't load it, and the Load Saved Game screen listed no saves
 under Wine in testing (neither in `Save\Profile<n>` nor `Save\<name>`).
 
+### Game objects (API version 16)
+
+Read off the natives' own code on both builds (each native: a handle
+converter, then a call): `tome_property` uses the callee, so it works for
+objects the script has no handle for. The native tables were paired by
+name from the `BindNative` calls in `InitNatives` (1,167 natives each).
+
+| What | 1.27b | 1.26a | Notes |
+|------|-------|-------|-------|
+| CUnit::GetState | `0x687270` | `0x27AE90` | `float* __thiscall(CUnit*, float* out, int state)`, `ret 8`: 0 life, 1 max life, 2 mana, 3 max mana. GetUnitState `0x204050` / `0x3C5400` after checking state < 4. |
+| CUnit::SetState | `0x6999E0` | `0x27AF20` | `void __thiscall(CUnit*, int state, const float*)`, `ret 8`. Only 0 and 2 do anything (max life and mana can't be set this way, as in JASS). SetUnitState `0x215710` / `0x3C5EA0`. |
+| CUnit::GetMoveSpeed | `0x685310` | `0x26DE20` | `float* __thiscall(CUnit*, float* out)`, `ret 4`, through the move ability at `+0x1EC`. GetUnitMoveSpeed first checks the agent (below). |
+| CUnit::SetMoveSpeed | `0x698AF0` | `0x26DE00` | `void __thiscall(CUnit*, const float*)`, `ret 4`; nothing without a move ability. |
+| CUnit::GetLevel | `0x684830` | `0x29DCA0` | `int __thiscall(CUnit*)`: GetUnitLevel calls CUnit::GetHeroLevel for heroes (type id A-Z, not `UnitFlag.not_hero`) and this for the rest. |
+| CUnit.vtable.GetPosition | `+0xB8` | `+0xB8` | `void* __thiscall(CUnit*)`, no arguments: the position object. |
+| CPosition::Get | `0x058900` | `0x4743A0` | `float* __thiscall(pos, float out[3])`, `ret 4`: x, y, z. GetUnitX/Y. |
+| CPosition::Set | `0x058810` | `0x4743C0` | `__thiscall(pos, const float xyz[3])`, `ret 4`, no pathing check. SetUnitX (`0x215900` / `0x3C5970`) reads the position, keeps y, sets z = 0 (`.data 0xD3C744` / `0xAAE470`, 0.0) and calls it on a fresh GetPosition. |
+| CWidget.vtable.GetLife / SetLife | `+0x12C` / `+0x124` | same | `float*(float* out)` / `void(const float*)`, thiscall: GetWidgetLife and SetWidgetLife, for any widget. |
+| CItem.charges | `+0x84` | `+0x84` | int (GetItemCharges). |
+| CPlayerWar3::SetState | `0x1E98E0` | `0x3A0EB0` | `void __thiscall(CPlayerWar3*, int state, int value)`, `ret 8`. SetPlayerState passes states 15 and 16 (gathered gold and lumber) times 10 and the rest as they are. |
+| ObjectLookup | `0x054530` | `0x03FA30` | (already mapped) The agent check every unit native makes: `fastcall(CAgent.id words)` returns a record whose `+0xC` is `'+agl'` and `+0x20` 0 for a live agent. |
+| HandleManager.count | `+0x198` | `+0x198` | ids handed out; the table is the growable array at `+0x194` (count, then the entries pointer at `+0x19C`). A new id is the last free one (`free_count` `+0x188`, array `+0x18C`) or `first + count` (`0x282E30` / `0x430CF7`). Entry: 12 bytes, reference count at `+0`, object at `+4`. The generic lookup `0x285FE0` / `0x428050` checks only `id >= 0x100000`. |
+| JassVM::Get | `0x90AB10` | `0x449D10` | `fastcall(int index)`: the VM (`CGameWar3.vm_index`, `+8`, is what CreateString passes). |
+| JassVM.strings | `+0x2874` | `+0x2874` | The string table: length at `+4`, entries at `+8`, 16 bytes each (an RCString, then a reference count at `+0xC`; `0x91AF80` / `0x45D210`). A string result is an index; a string argument is a pointer to its entry. |
+
+Second batch (same method, both builds):
+
+| What | 1.27b | 1.26a | Notes |
+|------|-------|-------|-------|
+| FloatMultiply | `0x06F9C0` | `0x6EEE20` | `float* __fastcall(float* out, const float* a, const float* b)`, `ret 4`: a multiply in integer arithmetic. GetUnitFacing multiplies the position's radians by 180/pi (`.data 0xCD5468` on 1.27b; 1.26a's `0xAAE60C` is filled at startup), SetUnitFacing by pi/180. |
+| CPosition.vtable.GetFacing | `+0x1C` | same | `float*(float* out)`: radians. |
+| CPosition::SetFacing | `0x05A7A0` | `0x474830` | `__thiscall(pos, const float* radians, int flag)`, `ret 8`. SetUnitFacing passes 0, which turns the unit at its turn speed (seen in the game: 0.03 then 347.85 a moment later); 1 sets it at once (vtable `+0x58` on the agent). |
+| CUnit.fly_height | `+0x208` | same | float (GetUnitFlyHeight). |
+| CUnit::FindAbility | `0x48CB80` | `0x0787D0` | `__thiscall(unit, id, 0, 1, 1, 1)`, `ret 0x14`: the ability or NULL. An unlearned hero skill has none (SelectHeroSkill makes it). |
+| CAbility.level | `+0x50` | same | level - 1. SetUnitAbilityLevel clamps to `[1, CAbility::GetMaxLevel]` (`0x415E00` / `0x02E570`) and calls vtable `+0x2E4` (up) or `+0x2E8` (down) once per level. |
+| CUnit::GetAcquireRange / SetAcquireRange | `0x684150` / `0x697EA0` | `0x276A00` / `0x26D620` | `float*(float* out)`, `ret 4` / `void(const float*)`, `ret 4`; through the attack ability at `+0x1E8`. |
+| CUnit::GetHeroXP | `0x687440` | `0x26EB30` | `int()`, through the hero ability at `+0x1F0` (0 without). |
+| CUnit::GetHeroStr/Agi/Int | `0x686720`, `0x6841A0`, `0x684F20` | `0x2777B0`, `0x2778B0`, `0x277850` | `int(int include_bonuses)`, `ret 4`. |
+| CUnit::SetHeroStr/Agi/Int | `0x6997C0`, `0x697EF0`, `0x698860` | `0x277950`, `0x2779B0`, `0x277980` | `void(int value, int permanent)`, `ret 8`; heroes only (they use `+0x1F0` unchecked). |
+
+**Armor and attack** (no natives before 1.29): found by dumping units in the
+game and matching `UnitBalance.slk`/`UnitWeapons.slk` (War3Patch.mpq),
+the same offsets on both builds. `CUnit+0xE0` armor (float: Town Hall 5,
+Peasant 0, a level 1 Mountain King 2.3), `+0xE4` armor type (defType order:
+Peasant 1 medium, Town Hall 3 fortified, heroes 5); the info panel's
+`CInfoPanelIconArmor` (vtable `0xABEC4C`, slot `+0x6C`, `0x3D4290`) gets
+the armor and its bonus as two floats. The attack ability (`CUnit+0x1E8`,
+NULL without an attack) holds both weapons side by side: base damage
+`+0xA0`/`+0xA4` (dmgplus, plus a hero's primary attribute: 24 for the
+Mountain King's 24 strength), dice `+0x88`/`+0x8C`, sides `+0x94`/`+0x98`,
+cooldown `+0x158`/`+0x160`, range `+0x258`/`+0x260` (floats 8 bytes
+apart), acquisition range `+0x244`. Peasant: 4 + 1d2 every 2.0 s at 90,
+and its second weapon (harvesting) 0 + 1d1 every 1.1 s at 66. Tome reads
+these but doesn't write them yet: base damage follows the hero's
+attribute, so the game rewrites at least that one.
+
+**Every unit, item and destructable.** GroupEnumUnitsOfPlayer (`0x204560`
+/ `0x3C42C0`) ends in `0x22F150` / `0x3E7C30`, which calls ForEachAgent
+(`0x04C410` / `0x46D1B0`, fastcall, `ret 8`) with the class's type tag
+(`'+w3u'` from a two-instruction `mov eax, tag; ret`; `'+w3i'` items,
+`'+w3d'` destructables; the same tags on both builds) and a callback. The
+walker finds the class in the agent type registry (`.data 0xD3C82C`), runs
+through its instance list (`[type+0x6C]+0x58`, next at `+8`, the agent at
+`+0x54`), skips dying entries (`+0x20`) and checks each agent's record
+(ObjectLookup, `'+agl'`, `+0x20`) before calling `int __fastcall(agent,
+context)`; a callback returning 0 stops the walk (`neg; sbb; inc` makes
+it the stop flag), non-zero goes on. With its last argument set it also
+walks the types listed at `+0x50`, which reach other classes too: from
+`'+w3i'` it found every destructable and unit as well. Item instances
+are only found that way (`'+w3i'` alone lists none), so Tome walks items
+and destructables with it and keeps the agents with the class's vtable;
+units are walked as GroupEnumUnitsOfPlayer does (220 units, 2 items, 5,667
+destructables in the e2e map). Players aren't agents of a listed class:
+`CGameWar3::GetPlayer` gives every slot (all 16, empty ones too). **1.26a's
+GetPlayer doesn't check the slot** (`mov eax, [ecx+eax*4+0x58]`; 1.27b's
+compares it with `+0x54`): Tome checks `CGameWar3.player_count` itself.
+
+**Handle converters check types.** Each handle type's converter (unit
+`0x1EEF90`, player `0x1EDE10`, trigger `0x1EEE50`, gamecache `0x1ED2D0`,
+item `0x1ED690`, group `0x1ED550`, timer `0x1EE810`... on 1.27b) calls the
+generic lookup `0x285FE0` (no upper bound) and then a typed cast like
+`0x1D73B0`: the class's tag (`'+w3u'`), the object's type (vtable `+0x1C`)
+and an is-a test (`0x04CDD0`); a mismatch gives null, and the native does
+nothing. A scan of every native's first call found the is-a test behind
+the converters of 30 types; the natives whose first call doesn't reach it
+take a non-handle first argument (a string, a number, or an integer type
+like camerafield).
+
+**Handle-typed integers.** `unitstate`, `playerstate`, `race`, `alliancetype`
+and the other types a `Convert*` native makes from one integer (`(I)H<type>;`)
+aren't in the handle table: `ConvertUnitState(2)` is 2. `jass_call` learns
+them from the same BindNative calls and passes them through unchecked.
+
+**Index handles.** `texttag`, `image` and `ubersplat` values are indices
+of their own, not handle table ids (`CreateTextTag` returns 0 to 99).
+Every native taking a texttag (13 on both builds, e.g. SetTextTagText
+`0x214C00` / `0x3BC5D0`) starts with `cmp id, [count]; jae` (`.data
+0xBDB0F0` / `0x9550C4`), and SaveTextTagHandle stores the id as an integer
+(`0x211720` with type 2; the agent variant `0x211780` looks its value up),
+so `jass_call` passes texttags unchecked too. The image and ubersplat
+natives only refuse -1: SetImageColor (`0x213640`) ends in `0x759EF0`,
+which writes `[[manager+0x2CC] + id*0xA0 + 0x48]` with no upper bound, so
+`jass_call` keeps refusing them (they aren't live handles).
+
 ### Chat and pause
 
 | What | RVA | Notes |

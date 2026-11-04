@@ -20,6 +20,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <atomic>
 #include <functional>
 #include <map>
 #include <memory>
@@ -98,6 +99,7 @@ public:
     // other required mods don't start. Toggles still go into state.json and
     // apply when the lock goes off. Refreshes later, from the message loop.
     void set_game_lock(bool on);
+    // Any thread, also under the lock (mods' callbacks ask: objects.cpp).
     bool game_locked() const;
 
     // Settings (core/settings.h), saved in tome/mods/config/<id>.json.
@@ -317,7 +319,10 @@ private:
     bool assets_started_ = false;  // the first refresh finished; before that, asset changes count as startup
     bool shut_down_ = false;       // shutdown() ran: no more refreshes
     std::string safe_mode_;        // why safe mode is on; empty if it isn't
-    bool game_lock_ = false;       // a multiplayer game is running (set_game_lock)
+    // A multiplayer game is running (set_game_lock). Written under lock_,
+    // read without it by game_locked(): mods' calls (set_property,
+    // jass_call) ask from callbacks that already run under lock_.
+    std::atomic<bool> game_lock_{false};
     std::set<std::string> locked_;  // the mods it keeps running, by id
     std::vector<keys::Binding> declared_keys_;  // what the last refresh gave keybinds::set_mods
     std::set<std::string> safe_mode_enabled_;  // enabled during this session despite safe mode

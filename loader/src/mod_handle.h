@@ -41,6 +41,10 @@ struct tome_mod {
     // skip the mod from then on, until a new DLL is loaded.
     std::atomic<bool> faulted{false};
 
+    // "sync": "required" in tome.mod.json (the last resolve): only such mods
+    // may change the game in a multiplayer game (objects.cpp).
+    std::atomic<bool> sync_required{false};
+
     // The thread running the mod's tome_mod_load or tome_mod_enable, or 0.
     // Until that returns, guarded calls from other threads skip the mod
     // (guard.cpp): a handler it registered must not run while the mod is

@@ -132,6 +132,7 @@ add_library(tome_core STATIC
     src/core/mod_state.cpp
     src/core/movie_decoder.cpp
     src/core/mpq.cpp
+    src/core/objects.cpp
     src/core/package.cpp
     src/core/path_guard.cpp
     src/core/pe.cpp
@@ -197,6 +198,7 @@ add_library(tome_runtime OBJECT
     src/patches/movie_display_reset.cpp
     src/patches/path_sanitizer.cpp
     src/patches/widescreen.cpp
+    src/objects.cpp
     src/paths.cpp
     src/popups.cpp
     src/restart.cpp

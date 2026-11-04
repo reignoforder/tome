@@ -90,6 +90,7 @@ enum class HandleKind : uint8_t {
     JassCode,
     Item,
     Destructable,
+    Player,  // API version 16: player_object, object_of
 };
 
 class HandleTable {

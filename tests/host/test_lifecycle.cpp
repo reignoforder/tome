@@ -173,7 +173,10 @@ TEST(host_metadata_problems_reported) {
     const tome::ModStatus* ghost = find_status(all, "needs-ghost");
     CHECK(any_error_contains(ghost, "needs \"ghost\" ^1, which isn't installed"));
     const tome::ModStatus* unmapped = find_status(all, "needs-unmapped");
-    CHECK(any_error_contains(unmapped, "needs \"CUnit.armor\", which isn't mapped for 1.27b"));
+    CHECK(any_error_contains(unmapped, "needs \"CUnit.wings\", which isn't mapped for 1.27b"));
+    // Properties (core/objects.h): "mana" is mapped, "wings" isn't a property at all.
+    CHECK(any_error_contains(unmapped, "needs the property \"wings\", which this version of Tome doesn't have"));
+    CHECK(!any_error_contains(unmapped, "\"mana\""));
     CHECK_LOG("Mods: 3 installed, 0 active");
 }
 

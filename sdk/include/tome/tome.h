@@ -34,8 +34,10 @@ extern "C" {
  * destructable and item deaths, dialog clicks, skill and build menus, level end, units
  * created and removed, hero experience, player resources, day and night).
  * 13: the map script's memhack pattern (script_shadows, map_script_shadows).
- * 14: the game's files (read_game_file). 15: the game's edition (tome_game_info.edition). */
-#define TOME_API_VERSION 15
+ * 14: the game's files (read_game_file). 15: the game's edition (tome_game_info.edition).
+ * 16: game objects (object_type, object_of, handle_of, player_object, unit_info, get_property,
+ * set_property, jass_call, get_keyed_property, set_keyed_property, list_objects). */
+#define TOME_API_VERSION 16
 
 #define TOME_CALL __cdecl
 /* C linkage in C++ too: Tome looks the lifecycle functions up by their plain names. */
@@ -679,6 +681,117 @@ typedef void (TOME_CALL *tome_message_fn)(tome_mod* mod, const char* topic, cons
 /* `popup` is the id popup() gave; `choice` an index into options, or TOME_POPUP_CLOSED. */
 typedef void (TOME_CALL *tome_popup_fn)(tome_mod* mod, uint32_t popup, int32_t choice, void* user);
 
+/*
+ * Game objects (API version 16).
+ *
+ * Units, items, destructables and players are the game's own objects,
+ * passed as `void*`: tome_unit.object in events and the selection,
+ * object_of(handle) for a JASS handle id, player_object(slot) for a player.
+ * Tome checks every object it's given (object_type: its class, and that the
+ * game still counts it as alive): one that's gone or of the wrong kind fails
+ * the call with TOME_ERR_INVALID_ARGUMENT instead of being used. An object
+ * keeps its pointer while it exists, but the check reads the pointer, so
+ * don't keep one for long after the object may be gone: a removed unit's
+ * memory can be reused for a new object. To keep track of an object over
+ * time, keep its JASS handle id (handle_of, then object_of) where the
+ * script has one, and get pointers again from events and the selection.
+ *
+ * Properties read and change objects by name on every build Tome maps
+ * (get_property, set_property), with every value as a double. A property
+ * a build doesn't map yet fails with TOME_ERR_UNAVAILABLE; list the ones
+ * a mod can't do without in tome.mod.json "requires" as "property:<name>"
+ * (e.g. "property:mana"), so Tome tells the player why it won't load.
+ *
+ * jass_call runs any JASS native by name (the game's, Tome's or a mod's),
+ * for everything properties don't cover yet.
+ *
+ * Changing the game (set_property, and natives that change something)
+ * must happen the same way on every computer in a multiplayer game, or the
+ * game desyncs: do it from a "sync": "required" mod in response to synced
+ * events (unit events, game ticks, chat), never local ones (the selection,
+ * keybinds, clicks, popups). In a multiplayer game or a replay,
+ * set_property and jass_call refuse mods that aren't required (Tome can't
+ * tell which natives only read). get_property reads at any time.
+ */
+typedef enum tome_object_type {
+    TOME_OBJECT_NONE = 0,          /* NULL, gone, or not an object Tome knows */
+    TOME_OBJECT_UNIT = 1,
+    TOME_OBJECT_ITEM = 2,
+    TOME_OBJECT_DESTRUCTABLE = 3,
+    TOME_OBJECT_PLAYER = 4,
+    TOME_OBJECT_OTHER = 5          /* another handle's object (trigger, timer, group...): object_of only */
+} tome_object_type;
+
+/*
+ * What get_property and set_property read and change (API version 16):
+ * "get" can be read, "set" changed too. What each one is on (units, items,
+ * destructables, players; "heroes" are units that are heroes); any other
+ * object fails with TOME_ERR_INVALID_ARGUMENT. Some take a key
+ * (get_keyed_property, set_keyed_property): the plain functions pass 0.
+ * Appended to, never renumbered. The comment's first word is the
+ * property's name for "requires".
+ */
+typedef enum tome_property {
+    TOME_PROPERTY_LIFE = 1,        /* life: units, items, destructables; get, set (<= 0 kills, like SetWidgetLife) */
+    TOME_PROPERTY_MAX_LIFE = 2,    /* max_life: units; get */
+    TOME_PROPERTY_MANA = 3,        /* mana: units; get, set */
+    TOME_PROPERTY_MAX_MANA = 4,    /* max_mana: units; get */
+    TOME_PROPERTY_X = 5,           /* x: units, items, destructables; get; set on units (like SetUnitX: no pathing check) */
+    TOME_PROPERTY_Y = 6,           /* y: units, items, destructables; get; set on units */
+    TOME_PROPERTY_MOVE_SPEED = 7,  /* move_speed: units; get, set (nothing for a unit that can't move) */
+    TOME_PROPERTY_LEVEL = 8,       /* level: units; get (a hero's level, the unit type's level for others) */
+    TOME_PROPERTY_TYPE_ID = 9,     /* type_id: units, items, destructables; get ('hpea'; tome_type_code) */
+    TOME_PROPERTY_OWNER = 10,      /* owner: units; get (the owner's player slot, 0 = Player 1) */
+    TOME_PROPERTY_CHARGES = 11,    /* charges: items; get */
+    TOME_PROPERTY_SLOT = 12,       /* slot: players; get (0 = Player 1) */
+    TOME_PROPERTY_GOLD = 13,       /* gold: players; get, set */
+    TOME_PROPERTY_LUMBER = 14,     /* lumber: players; get, set */
+    TOME_PROPERTY_FOOD_CAP = 15,   /* food_cap: players; get, set (food provided, as GetPlayerState says) */
+    TOME_PROPERTY_FOOD_USED = 16,  /* food_used: players; get, set */
+    TOME_PROPERTY_FACING = 17,     /* facing: units; get, set (degrees, as GetUnitFacing; set turns it at once,
+                                      where SetUnitFacing turns it at its turn speed) */
+    TOME_PROPERTY_FLY_HEIGHT = 18, /* fly_height: units; get */
+    TOME_PROPERTY_ACQUIRE_RANGE = 19, /* acquire_range: units; get, set */
+    TOME_PROPERTY_HERO_XP = 20,    /* hero_xp: heroes; get */
+    /* Key 0: the hero's own (base) value, get and set; key 1: with bonuses
+     * from items and auras, get. */
+    TOME_PROPERTY_STRENGTH = 21,   /* strength: heroes */
+    TOME_PROPERTY_AGILITY = 22,    /* agility: heroes */
+    TOME_PROPERTY_INTELLIGENCE = 23, /* intelligence: heroes */
+    /* Key: the ability's type id ('AHbz'). Get: its level, 0 if the unit
+     * doesn't have it. Set: a level from 1 to the ability's last (clamped,
+     * as SetUnitAbilityLevel does); adding and removing abilities is
+     * jass_call's (UnitAddAbility, UnitRemoveAbility). */
+    TOME_PROPERTY_ABILITY_LEVEL = 24, /* ability_level: units; get, set */
+    TOME_PROPERTY_ARMOR = 25,      /* armor: units; get (with a hero's agility, as the info panel's first number) */
+    /* armor_type: units; get. 0 small, 1 medium, 2 large, 3 fortified, 4 normal, 5 hero, 6 divine, 7 none
+     * (UnitBalance.slk defType). */
+    TOME_PROPERTY_ARMOR_TYPE = 26,
+    /* A unit's attack. Key: the weapon, 0 (the first, the default) or 1. Units
+     * without an attack fail with TOME_ERR_INVALID_ARGUMENT. Base damage
+     * includes a hero's primary attribute; an attack does base + dice
+     * rolls of 1 to sides each. */
+    TOME_PROPERTY_DAMAGE_BASE = 27,     /* damage_base: units; get */
+    TOME_PROPERTY_DAMAGE_DICE = 28,     /* damage_dice: units; get */
+    TOME_PROPERTY_DAMAGE_SIDES = 29,    /* damage_sides: units; get */
+    TOME_PROPERTY_ATTACK_COOLDOWN = 30, /* attack_cooldown: units; get (seconds between attacks) */
+    TOME_PROPERTY_ATTACK_RANGE = 31     /* attack_range: units; get */
+} tome_property;
+
+/*
+ * One argument or the result of jass_call (API version 16): the member the
+ * native's signature says. Strings are UTF-8 (NULL is JASS null); a string
+ * result stays valid until the next map loads.
+ */
+typedef union tome_jass_value {
+    int32_t integer;
+    int32_t boolean;          /* 0 or 1 */
+    float real;
+    tome_jass_handle handle;  /* 0 is null */
+    tome_jass_code code;      /* a code value the map script passed to a Tome native */
+    const char* string;
+} tome_jass_value;
+
 typedef struct tome_api {
     uint32_t size;               /* sizeof(tome_api) as known to Tome */
     uint32_t api_version;        /* TOME_API_VERSION of the running Tome */
@@ -1057,6 +1170,90 @@ typedef struct tome_api {
      * the size. Main thread.
      */
     size_t (TOME_CALL *read_game_file)(const char* name, void* buffer, size_t size);
+
+    /* --- API version 16: game objects (see "Game objects" above) --- */
+
+    /* What `object` is right now (tome_object_type): TOME_OBJECT_NONE for
+     * NULL, a gone object, or anything else. Main thread. */
+    int32_t (TOME_CALL *object_type)(const void* object);
+
+    /* The object a JASS handle id stands for, or NULL if it isn't a live
+     * handle; *type (may be NULL) gets its tome_object_type. Main thread. */
+    void* (TOME_CALL *object_of)(tome_jass_handle handle, int32_t* type);
+
+    /* The JASS handle id the map script has for a unit, item, destructable
+     * or player, or 0. Never makes one (see tome_unit.handle). Main thread. */
+    tome_jass_handle (TOME_CALL *handle_of)(const void* object);
+
+    /* The player in a slot (0 = Player 1, up to 15 for the neutral
+     * players), or NULL outside a game. Main thread. */
+    void* (TOME_CALL *player_object)(int32_t slot);
+
+    /* Describes a unit as selection() does (`unit_size` is
+     * sizeof(tome_unit); use tome_get_unit_info). TOME_ERR_INVALID_ARGUMENT
+     * if it isn't a live unit. Main thread; the name stays valid until the
+     * game ends. */
+    tome_result (TOME_CALL *unit_info)(const void* unit, tome_unit* out, uint32_t unit_size);
+
+    /* Reads a property (tome_property) into *value. TOME_ERR_INVALID_ARGUMENT
+     * if the object is gone or doesn't have it, TOME_ERR_UNAVAILABLE if
+     * this build doesn't map it, TOME_ERR_WRONG_THREAD off the main thread. */
+    tome_result (TOME_CALL *get_property)(const void* object, int32_t property, double* value);
+
+    /* Changes a property, as its JASS native would (integers are rounded
+     * toward zero). Also TOME_ERR_INVALID_ARGUMENT for one that can only be
+     * read or a value that isn't a finite number, and TOME_ERR_UNAVAILABLE
+     * in a multiplayer game or replay for a mod that isn't "sync":
+     * "required" (see "Game objects" above). Main thread. */
+    tome_result (TOME_CALL *set_property)(tome_mod* mod, void* object, int32_t property, double value);
+
+    /*
+     * Runs a JASS native by name, e.g. "GetUnitName" or "SetUnitFacing",
+     * with `count` arguments as its signature says (see tome_jass_value),
+     * and puts its result in *result (may be NULL; zeroed for natives
+     * returning nothing). Only in a game, on the main thread.
+     * TOME_ERR_INVALID_ARGUMENT for an unknown native, the wrong number of
+     * arguments, a handle argument that isn't 0 or a live handle, or a code
+     * value the map script didn't pass to a Tome native; TOME_ERR_UNAVAILABLE
+     * outside a game, before the first map load, and in a multiplayer game
+     * or replay for a mod that isn't "sync": "required" (see "Game objects"
+     * above). Handle types that are integers pass as they are: the ones a
+     * Convert* native makes (unitstate, race...) and texttag (which the
+     * texttag natives check themselves).
+     *
+     * A handle argument must also fit its parameter: a unit, item,
+     * destructable or player only where the native takes that (or a widget,
+     * handle or agent); TOME_ERR_INVALID_ARGUMENT otherwise. Between other
+     * types (a timer passed as a group) the game's own conversion checks,
+     * and the native then does nothing. Natives that
+     * return a handle (GetUnitLoc, CreateUnit...) may make a new handle id,
+     * and ids made on one computer only desync the game, as changing the
+     * game does. Event natives (GetTriggerUnit...) only mean something
+     * while the map's trigger runs.
+     */
+    tome_result (TOME_CALL *jass_call)(tome_mod* mod, const char* native, const tome_jass_value* args, int32_t count,
+                                       tome_jass_value* result);
+
+    /* get_property and set_property with a key, for the properties that
+     * take one (tome_property: an ability's type id, or which value of a
+     * hero's attribute). A property that takes none needs key 0; one that
+     * needs a key fails with TOME_ERR_INVALID_ARGUMENT for 0. */
+    tome_result (TOME_CALL *get_keyed_property)(const void* object, int32_t property, uint32_t key, double* value);
+    tome_result (TOME_CALL *set_keyed_property)(tome_mod* mod, void* object, int32_t property, uint32_t key,
+                                                double value);
+
+    /*
+     * Every object of a tome_object_type there is now: TOME_OBJECT_UNIT,
+     * ITEM or DESTRUCTABLE (every live one in the game, whether or not the
+     * map script has a handle for it: all of the game's, as
+     * GroupEnumUnitsOfPlayer walks them) or TOME_OBJECT_PLAYER (every
+     * player slot in use). Fills up to `max` (`out` may be NULL with max 0,
+     * to count them) and returns how many there are, possibly more than
+     * `max`; -1 for another type or a build that doesn't map it, 0 outside
+     * a game. The pointers are good until the game goes on (the next frame
+     * or game tick). Main thread.
+     */
+    int32_t (TOME_CALL *list_objects)(int32_t type, void** out, int32_t max);
 } tome_api;
 
 /*
@@ -1217,6 +1414,55 @@ static inline int32_t tome_get_map_script_shadows(const tome_api* api, tome_scri
 
 static inline int32_t tome_get_selection(const tome_api* api, tome_unit* units, int32_t max, int32_t* leader) {
     return api->selection(units, (uint32_t)sizeof(tome_unit), max, leader);
+}
+
+/* True if the running Tome has game objects: properties, handles and jass_call (version 16). */
+static inline int tome_has_objects(const tome_api* api) {
+    return api->api_version >= 16 &&
+           api->size >= offsetof(tome_api, list_objects) + sizeof(api->list_objects);
+}
+
+static inline tome_result tome_get_unit_info(const tome_api* api, const void* unit, tome_unit* out) {
+    return api->unit_info(unit, out, (uint32_t)sizeof(tome_unit));
+}
+
+/* A property's value, or `fallback` if it can't be read. */
+static inline double tome_property_value(const tome_api* api, const void* object, int32_t property, double fallback) {
+    double value;
+    return api->get_property(object, property, &value) == TOME_OK ? value : fallback;
+}
+
+/* jass_call arguments: tome_jass_value args[] = {tome_jass_handle_value(u), tome_jass_real(90.0f)}; */
+static inline tome_jass_value tome_jass_int(int32_t value) {
+    tome_jass_value v;
+    memset(&v, 0, sizeof(v));
+    v.integer = value;
+    return v;
+}
+
+static inline tome_jass_value tome_jass_bool(int value) {
+    return tome_jass_int(value ? 1 : 0);
+}
+
+static inline tome_jass_value tome_jass_real(float value) {
+    tome_jass_value v;
+    memset(&v, 0, sizeof(v));
+    v.real = value;
+    return v;
+}
+
+static inline tome_jass_value tome_jass_handle_value(tome_jass_handle handle) {
+    tome_jass_value v;
+    memset(&v, 0, sizeof(v));
+    v.handle = handle;
+    return v;
+}
+
+static inline tome_jass_value tome_jass_str(const char* text) {
+    tome_jass_value v;
+    memset(&v, 0, sizeof(v));
+    v.string = text;
+    return v;
 }
 
 /* A unit type id as its four characters: 'hpea' -> "hpea". `out` holds 5. */

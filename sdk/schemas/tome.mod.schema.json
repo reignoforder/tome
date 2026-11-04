@@ -53,7 +53,7 @@
     "assets": { "$ref": "#/definitions/path", "description": "Folder merged into the game's files; \"assets\" by default." },
     "requires": {
       "type": "array", "items": { "type": "string" },
-      "description": "Mapped names the mod can't work without (\"CTextFrame::SetText\"): Tome won't load it on builds that lack one."
+      "description": "What the mod can't work without: mapped names (\"CTextFrame::SetText\") and game object properties (\"property:mana\"). Tome won't load it on builds that lack one."
     },
     "natives": {
       "type": "array",

@@ -64,6 +64,16 @@ helpers check for you.
   (`resolve`), so a mod needs no build-specific numbers.
 - **Game files** [14]: read any file as the game would, through its archives
   and the mods' assets (`read_game_file`).
+- **Game objects** [16]: units, items, destructables and players. Read and
+  change their properties by name (life, mana, position, facing, move speed,
+  armor, damage, attack cooldown, hero attributes, ability levels, gold,
+  lumber, food...) on every game version Tome supports, list every unit,
+  item or destructable in the game, turn JASS
+  handle ids into objects and back, and call any JASS native by name
+  (`jass_call`: `GetUnitName`, `SetUnitFacing`, `CreateUnit`...). Tome checks
+  each object is still there before it touches it. In a multiplayer game
+  or a replay, only `"sync": "required"` mods may change properties or run
+  natives.
 
 A mod built against an older `tome.h` keeps working with a newer Tome: the
 API only ever grows.
@@ -140,7 +150,7 @@ loads and turns it on, binds its natives as a map load does, then turns it
 off and unloads it, and reports what Tome found on the way:
 
 ```
-my-mod: error: tome.mod.json: needs "CUnit.armor", which isn't mapped for 1.27b
+my-mod: error: tome.mod.json: needs "CUnit.wings", which isn't mapped for 1.27b
 my-mod 0.1.0: warning: native MyForgotten is in tome.mod.json, but the mod didn't register it (register_native in tome_mod_enable): it returns 0
 my-mod 0.1.0: ok (native, 2 natives)
 ```

@@ -101,6 +101,8 @@ outside memory; nothing is terminated.
 | `config_read`, `config_write` | instead of `config_dir` | the mod's own files in `tome/mods/config/<id>/`, plain names, up to 1 MiB |
 | `register_native` | same | below |
 | `jass_code_call`, `jass_code_execute` | same | Tome checks code values, as for DLLs |
+| `object_type`, `object_of`, `handle_of`, `player_object`, `unit_info`, `get_property`, `set_property`, `get_keyed_property`, `set_keyed_property`, `list_objects` | same | objects are handles (below); `tome_object_type_of` in C (`tome_object_type` is the enum); `unit_info` writes a `tome_wasm_unit` |
+| `jass_call` | same | arguments one word each (`tome_jass_value`), strings as pointers to NUL-terminated text in the module's memory, copied in; a string result copied into a buffer of the module's (`tome_jass_call` in C, `jass_call` in Rust); the same checks as for DLLs (below) |
 | `resolve`, `hook`, `unhook`, `hook_call_next` | **no** | addresses and raw arguments |
 | `service_*`, `on_service` | **no** | function tables; `publish`/`subscribe` instead |
 | `jass_string`, `jass_string_create` | not needed | strings come and go as text (below) |
@@ -126,9 +128,29 @@ build. Strings are NUL-terminated copies after the struct.
   again on every use (`frame_get`/`ui_root`): a frame that's gone, or a
   screen that changed, just fails. A module never holds a frame pointer, so
   it can't make Tome touch freed memory.
-- **Units, items, destructables** (in events and the selection) are opaque
-  ids that tell objects apart, never dereferenced; the table drops them at
-  each map load and game end (and past 100 000).
+- **Units, items, destructables and players** (in events, the selection,
+  `object_of` and `player_object`) are ids in the module's table; the
+  table drops them at each map load and game end (and past 100 000). The
+  object behind one is only used through the game objects imports. Tome
+  keeps each unit's, item's and destructable's agent id (`CAgent.id`) with
+  its handle, taken whenever it hands the handle out (the object is live
+  then), and looks the id up in the game's agent table before every use:
+  a removed object fails the call without its memory being read. Players
+  are only compared with the game's players. After that, the same checks
+  as for DLL mods (`architecture.md`, "Game objects").
+- **`jass_call`:** a native turns a handle argument into its object with
+  the game's own converter, which looks the id up without an upper bound
+  and then checks the object's type (an is-a test on its type tag; found
+  in the converters of 30 handle types). Tome checks every handle argument
+  first, for DLL and Wasm mods alike: 0 or a live id in the handle table
+  (bounds and reference count, so a made-up id never reaches the
+  unbounded lookup), of the parameter's kind where Tome can tell (unit,
+  item, destructable, player, widget; other types only get other objects,
+  and the converter tells those apart). Code values must be ones the map
+  passed to a Tome native. Handle types that are integers (`unitstate`,
+  `race`..., made by `Convert*`) pass as they are, as they do for map
+  scripts, and so do texttags (indices the texttag natives bound-check
+  themselves; images and ubersplats aren't, so they're refused). File natives are the path sanitizer's wrappers.
 - Handles are per module: one module's handles mean nothing to another.
 
 ### Natives

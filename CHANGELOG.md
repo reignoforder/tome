@@ -27,7 +27,7 @@ API version of each addition in `tome.h` and `sdk/README.md` ("[14]").
 ## [0.1.0] - unreleased
 
 The first public release. Warcraft III 1.27b (game.dll 1.27.1.7085) only;
-API version 14.
+API version 16.
 
 ### Loader
 
@@ -67,6 +67,19 @@ API version 14.
   imports, events (game, units, players, UI, chat, selection, and more),
   frames, chat commands, settings, keybinds, services and messages between
   mods, the game's files, UTF-8 helpers.
+- Game objects (API version 16): units, items, destructables and players,
+  checked before every use; properties read and changed by name on every
+  supported game version (`get_property`, `set_property`, and keyed ones
+  for abilities, weapons and hero attributes; `"requires": ["property:mana"]`):
+  life, mana, position, facing, move speed, level, ranges, armor, damage,
+  attack cooldown and range, hero attributes and experience, ability
+  levels, a player's resources; every unit, item, destructable or player
+  in the game (`list_objects`), with or without a handle; JASS handle ids to objects and back (`object_of`,
+  `handle_of`); any JASS native by name (`jass_call`, for WebAssembly
+  mods too), with handle arguments checked against the handle table and
+  the parameter's type (texttags as the indices they are). In multiplayer
+  games and replays only `"sync": "required"` mods may change properties
+  or run natives.
 - C++ helpers (`tome.hpp`), a Rust crate (`tome`), and sandboxed WebAssembly
   mods (experimental; C and Rust).
 - `TomeMod.cmake`, templates and examples in each language, `tome-check`

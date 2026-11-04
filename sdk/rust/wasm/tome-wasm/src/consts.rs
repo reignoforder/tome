@@ -5,7 +5,7 @@
 
 #![allow(missing_docs)]
 
-pub const TOME_API_VERSION: u32 = 15;
+pub const TOME_API_VERSION: u32 = 16;
 pub const TOME_POPUP_CLOSED: i32 = -1;
 
 // tome_result
@@ -152,6 +152,47 @@ pub const TOME_CHAT_ALL: i32 = 0;
 pub const TOME_CHAT_ALLIES: i32 = 1;
 pub const TOME_CHAT_OBSERVERS: i32 = 2;
 pub const TOME_CHAT_PRIVATE: i32 = 3;
+
+// tome_object_type
+pub const TOME_OBJECT_NONE: i32 = 0;
+pub const TOME_OBJECT_UNIT: i32 = 1;
+pub const TOME_OBJECT_ITEM: i32 = 2;
+pub const TOME_OBJECT_DESTRUCTABLE: i32 = 3;
+pub const TOME_OBJECT_PLAYER: i32 = 4;
+pub const TOME_OBJECT_OTHER: i32 = 5;
+
+// tome_property
+pub const TOME_PROPERTY_LIFE: i32 = 1;
+pub const TOME_PROPERTY_MAX_LIFE: i32 = 2;
+pub const TOME_PROPERTY_MANA: i32 = 3;
+pub const TOME_PROPERTY_MAX_MANA: i32 = 4;
+pub const TOME_PROPERTY_X: i32 = 5;
+pub const TOME_PROPERTY_Y: i32 = 6;
+pub const TOME_PROPERTY_MOVE_SPEED: i32 = 7;
+pub const TOME_PROPERTY_LEVEL: i32 = 8;
+pub const TOME_PROPERTY_TYPE_ID: i32 = 9;
+pub const TOME_PROPERTY_OWNER: i32 = 10;
+pub const TOME_PROPERTY_CHARGES: i32 = 11;
+pub const TOME_PROPERTY_SLOT: i32 = 12;
+pub const TOME_PROPERTY_GOLD: i32 = 13;
+pub const TOME_PROPERTY_LUMBER: i32 = 14;
+pub const TOME_PROPERTY_FOOD_CAP: i32 = 15;
+pub const TOME_PROPERTY_FOOD_USED: i32 = 16;
+pub const TOME_PROPERTY_FACING: i32 = 17;
+pub const TOME_PROPERTY_FLY_HEIGHT: i32 = 18;
+pub const TOME_PROPERTY_ACQUIRE_RANGE: i32 = 19;
+pub const TOME_PROPERTY_HERO_XP: i32 = 20;
+pub const TOME_PROPERTY_STRENGTH: i32 = 21;
+pub const TOME_PROPERTY_AGILITY: i32 = 22;
+pub const TOME_PROPERTY_INTELLIGENCE: i32 = 23;
+pub const TOME_PROPERTY_ABILITY_LEVEL: i32 = 24;
+pub const TOME_PROPERTY_ARMOR: i32 = 25;
+pub const TOME_PROPERTY_ARMOR_TYPE: i32 = 26;
+pub const TOME_PROPERTY_DAMAGE_BASE: i32 = 27;
+pub const TOME_PROPERTY_DAMAGE_DICE: i32 = 28;
+pub const TOME_PROPERTY_DAMAGE_SIDES: i32 = 29;
+pub const TOME_PROPERTY_ATTACK_COOLDOWN: i32 = 30;
+pub const TOME_PROPERTY_ATTACK_RANGE: i32 = 31;
 
 impl crate::FramePoint {
     pub const TOPLEFT: Self = Self(TOME_FRAMEPOINT_TOPLEFT);

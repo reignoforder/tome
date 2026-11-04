@@ -4,7 +4,7 @@
   "id": "hello",
   "version": "1.0.0",
   "name": "Hello Tome",
-  "description": "Example mod that logs each lifecycle step, adds JASS natives (numbers, strings, callbacks), buttons on the menus and in game, logs game events, adds a /hello chat command, settings, a Greet key (Ctrl+G) and popups (Ctrl+Shift+P).",
+  "description": "Example mod that logs each lifecycle step, adds JASS natives (numbers, strings, callbacks), buttons on the menus and in game, logs game events, adds /hello and /helloobj chat commands (the selected unit and its owner read and changed through properties and natives), settings, a Greet key (Ctrl+G) and popups (Ctrl+Shift+P).",
   "authors": ["Tome contributors"],
   "license": "MIT",
   "icon": "icon.blp",

@@ -49,30 +49,40 @@ inline void name(Bytes& b, const std::string& s) {
 
 // Instructions, each as its bytes.
 namespace op {
+// An instruction's opcode bytes, with room for its immediate (at most 8
+// bytes: a LEB128 u32/i32 takes 5, an f64 8). Reserving it also keeps GCC
+// from warning (-Warray-bounds) that a push_back onto a 1-byte vector
+// writes past it: at -O2 it misses the reallocation.
+inline Bytes opcode(std::initializer_list<uint8_t> bytes) {
+    Bytes b;
+    b.reserve(bytes.size() + 8);
+    b.insert(b.end(), bytes);
+    return b;
+}
 inline Bytes i32_const(int32_t v) {
-    Bytes b{0x41};
+    Bytes b = opcode({0x41});
     sleb(b, v);
     return b;
 }
 inline Bytes f32_const(float v) {
-    Bytes b{0x43};
+    Bytes b = opcode({0x43});
     const uint8_t* p = reinterpret_cast<const uint8_t*>(&v);
     b.insert(b.end(), p, p + 4);
     return b;
 }
 inline Bytes f64_const(double v) {
-    Bytes b{0x44};
+    Bytes b = opcode({0x44});
     const uint8_t* p = reinterpret_cast<const uint8_t*>(&v);
     b.insert(b.end(), p, p + 8);
     return b;
 }
 inline Bytes local_get(uint32_t i) {
-    Bytes b{0x20};
+    Bytes b = opcode({0x20});
     uleb(b, i);
     return b;
 }
 inline Bytes call(uint32_t f) {
-    Bytes b{0x10};
+    Bytes b = opcode({0x10});
     uleb(b, f);
     return b;
 }
@@ -83,7 +93,7 @@ inline Bytes end() { return {0x0b}; }
 inline Bytes unreachable() { return {0x00}; }
 inline Bytes loop_forever() { return {0x03, 0x40, 0x0c, 0x00, 0x0b}; }  // loop br 0 end
 inline Bytes i32_load(uint32_t offset = 0) {
-    Bytes b{0x28, 0x02};
+    Bytes b = opcode({0x28, 0x02});
     uleb(b, offset);
     return b;
 }

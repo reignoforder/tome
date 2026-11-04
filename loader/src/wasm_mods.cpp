@@ -11,6 +11,7 @@
 #include "core/wasm_layout.h"
 #include "log.h"
 #include "natives.h"
+#include "objects.h"
 #include "paths.h"
 #include "storm.h"
 
@@ -26,6 +27,7 @@
 #include <functional>
 #include <iterator>
 #include <map>
+#include <unordered_map>
 #include <vector>
 
 // WAMR's log lines (BH_VPRINTF, loader/CMakeLists.txt), into tome.log.
@@ -184,13 +186,23 @@ struct Instance::Impl {
         return [this](wasm::HandleKind kind, const void* object) -> uint32_t {
             if (!object) return 0;
             if (handles.live() > kMaxObjectHandles) drop_object_handles();
-            return handles.add(kind, const_cast<void*>(object));
+            const uint32_t handle = handles.add(kind, const_cast<void*>(object));
+            // The object is live now (an event's, the selection's): its agent
+            // id says later whether it still is, without reading the object.
+            // A new object at a freed one's address gets the same handle, so
+            // the id is taken again every time.
+            if (handle && kind != wasm::HandleKind::Player) agent_ids[handle] = objects::agent_id(object);
+            return handle;
         };
     }
+    // The agent id of each unit, item and destructable handle (object_handles).
+    std::unordered_map<uint32_t, objects::AgentId> agent_ids;
     void drop_object_handles() {
+        agent_ids.clear();
         handles.remove_all(wasm::HandleKind::Unit);
         handles.remove_all(wasm::HandleKind::Item);
         handles.remove_all(wasm::HandleKind::Destructable);
+        handles.remove_all(wasm::HandleKind::Player);
     }
 
     // --- calls into the module ---
@@ -987,6 +999,184 @@ int32_t w_jass_code_call(wasm_exec_env_t env, uint32_t code, uint32_t result_out
 int32_t w_jass_code_execute(wasm_exec_env_t env, uint32_t code) {
     impl_of(env);  // the call's time limit
     return api()->jass_code_execute(code);
+}
+
+// Game objects (API version 16). Units, items, destructables and players
+// are the module's own handles; Tome checks the object again before every
+// use (object_type: still a live agent, or one of the game's players), as
+// it does for DLL mods. jass_call (below) takes JASS handle ids, which
+// Tome checks against the handle table as for DLL mods (docs/wasm-mods.md).
+
+constexpr wasm::HandleKind kObjectKinds[] = {wasm::HandleKind::Unit, wasm::HandleKind::Item,
+                                             wasm::HandleKind::Destructable, wasm::HandleKind::Player};
+
+// The object behind a handle the module has (of any of those kinds), or
+// null. A unit, item or destructable only while the agent it was is still
+// live (checked in the agent table, so a removed one's memory is never
+// read); a player is only ever compared with the game's players.
+void* object_from(Impl* impl, uint32_t handle) {
+    impl->object_handles();  // first drops the handles of an older map script
+    for (wasm::HandleKind kind : kObjectKinds) {
+        void* object = impl->handles.get(handle, kind);
+        if (!object) continue;
+        // A player only while it's one of the game's players (compared, never read).
+        if (kind == wasm::HandleKind::Player) return objects::is_player(object) ? object : nullptr;
+        auto id = impl->agent_ids.find(handle);
+        return id != impl->agent_ids.end() && objects::agent_id_alive(id->second) ? object : nullptr;
+    }
+    return nullptr;
+}
+
+// The module's handle for an object of a tome_object_type (0 for another type).
+uint32_t object_handle(Impl* impl, void* object, int32_t type) {
+    if (type < TOME_OBJECT_UNIT || type > TOME_OBJECT_PLAYER) return 0;
+    return impl->object_handles()(kObjectKinds[type - TOME_OBJECT_UNIT], object);
+}
+
+int32_t w_object_type(wasm_exec_env_t env, uint32_t handle) {
+    return api()->object_type(object_from(impl_of(env), handle));
+}
+
+uint32_t w_object_of(wasm_exec_env_t env, uint32_t jass_handle, uint32_t type_out) {
+    Impl* impl = impl_of(env);
+    int32_t type = TOME_OBJECT_NONE;
+    void* object = api()->object_of(jass_handle, &type);
+    const uint32_t handle = object_handle(impl, object, type);
+    if (!store(impl, type_out, static_cast<uint32_t>(type))) return 0;
+    return handle;
+}
+
+uint32_t w_handle_of(wasm_exec_env_t env, uint32_t handle) {
+    return api()->handle_of(object_from(impl_of(env), handle));
+}
+
+uint32_t w_player_object(wasm_exec_env_t env, int32_t slot) {
+    Impl* impl = impl_of(env);
+    return object_handle(impl, api()->player_object(slot), TOME_OBJECT_PLAYER);
+}
+
+// A tome_wasm_unit (its name after it), if it fits; the size it needs, or
+// UINT32_MAX if the handle isn't a live unit.
+uint32_t w_unit_info(wasm_exec_env_t env, uint32_t handle, uint32_t out, uint32_t capacity) {
+    Impl* impl = impl_of(env);
+    tome_unit unit;
+    if (api()->unit_info(object_from(impl, handle), &unit, sizeof(unit)) != TOME_OK) return UINT32_MAX;
+    return wasm::write_out(impl->memory(), out, capacity, wasm::encode_units(&unit, 1, impl->object_handles(), out));
+}
+
+int32_t w_get_keyed_property(wasm_exec_env_t env, uint32_t handle, int32_t property, uint32_t key,
+                             uint32_t value_out) {
+    Impl* impl = impl_of(env);
+    if (!wasm::in_bounds(impl->memory(), value_out, sizeof(double)) || !value_out) return TOME_ERR_INVALID_ARGUMENT;
+    double value = 0;
+    const tome_result r = api()->get_keyed_property(object_from(impl, handle), property, key, &value);
+    const wasm::Memory m = impl->memory();  // taken again after the call
+    if (!wasm::in_bounds(m, value_out, sizeof(double))) return TOME_ERR_INVALID_ARGUMENT;
+    std::memcpy(m.base + value_out, &value, sizeof(value));
+    return r;
+}
+
+int32_t w_get_property(wasm_exec_env_t env, uint32_t handle, int32_t property, uint32_t value_out) {
+    return w_get_keyed_property(env, handle, property, 0, value_out);
+}
+
+int32_t w_set_keyed_property(wasm_exec_env_t env, uint32_t handle, int32_t property, uint32_t key, double value) {
+    Impl* impl = impl_of(env);
+    return api()->set_keyed_property(impl->mod, object_from(impl, handle), property, key, value);
+}
+
+int32_t w_set_property(wasm_exec_env_t env, uint32_t handle, int32_t property, double value) {
+    return w_set_keyed_property(env, handle, property, 0, value);
+}
+
+// Every object of a type, as the module's handles (u32s) in `out`, up to
+// `max`; how many there are, or -1.
+int32_t w_list_objects(wasm_exec_env_t env, int32_t type, uint32_t out, int32_t max) {
+    Impl* impl = impl_of(env);
+    if (max < 0 || (max > 0 && !wasm::in_bounds(impl->memory(), out, static_cast<uint32_t>(max) * 4u))) return -1;
+    const int32_t total = api()->list_objects(type, nullptr, 0);
+    if (total <= 0) return total;
+    std::vector<void*> found(static_cast<size_t>(total));
+    const int32_t n = std::min(api()->list_objects(type, found.data(), total), total);
+    // `type` is one of kObjectKinds' (list_objects refused any other).
+    const wasm::Handles handles = impl->object_handles();
+    const wasm::HandleKind kind = kObjectKinds[type - TOME_OBJECT_UNIT];
+    for (int32_t i = 0; i < n && i < max; ++i) {
+        // Memory is taken again for each store: handing out a handle can't grow it, but store checks anyway.
+        if (!store(impl, out + static_cast<uint32_t>(i) * 4u, handles(kind, found[static_cast<size_t>(i)]))) {
+            return -1;
+        }
+    }
+    return n;
+}
+
+// jass_call(name, len, args, count, result, text, capacity): the arguments
+// are one word each (tome_wasm.h's tome_jass_value), strings as pointers to
+// NUL-terminated UTF-8 in the module's memory (0 for null). Tome runs the
+// same jass_call as for DLL mods, with its checks: handles live and of the
+// parameter's type, code values the map passed to a Tome native. A string
+// result is copied to `text` (NUL-terminated, cut to `capacity`) and the
+// result word points at it; 0 for a null string.
+constexpr uint32_t kMaxJassArgs = 32;
+
+int32_t w_jass_call(wasm_exec_env_t env, uint32_t name_ptr, uint32_t name_len, uint32_t args_ptr, int32_t count,
+                    uint32_t result_ptr, uint32_t text_ptr, uint32_t text_capacity) {
+    Impl* impl = impl_of(env);
+    std::string name;
+    if (!arg_string(impl, "jass_call", name_ptr, name_len, name)) return TOME_ERR_INVALID_ARGUMENT;
+    if (count < 0 || static_cast<uint32_t>(count) > kMaxJassArgs ||
+        (count > 0 && !wasm::in_bounds(impl->memory(), args_ptr, static_cast<uint32_t>(count) * 4u)) ||
+        (result_ptr && !wasm::in_bounds(impl->memory(), result_ptr, 4)) ||
+        (text_capacity && !wasm::in_bounds(impl->memory(), text_ptr, text_capacity))) {
+        TOME_ERROR("[%s] jass_call(%s): an argument is outside the module's memory", impl->mod->id.c_str(),
+                   name.c_str());
+        return TOME_ERR_INVALID_ARGUMENT;
+    }
+    objects::JassCall call;
+    if (tome_result r = objects::prepare_jass_call(impl->mod, name.c_str(), count, call); r != TOME_OK) {
+        store(impl, result_ptr, 0);
+        return r;
+    }
+    const wasm::JassSignature& sig = call.sig;
+    std::vector<tome_jass_value> args(static_cast<size_t>(count));
+    std::vector<std::string> texts(static_cast<size_t>(count));
+    for (int32_t i = 0; i < count; ++i) {
+        uint32_t word = 0;
+        wasm::load_u32(impl->memory(), args_ptr + static_cast<uint32_t>(i) * 4u, word);
+        std::memcpy(&args[static_cast<size_t>(i)], &word, sizeof(word));
+        if (sig.params[static_cast<size_t>(i)].kind != 'S') continue;
+        // A pointer here would be the module's: read the string out, or null.
+        args[static_cast<size_t>(i)].string = nullptr;
+        if (!word) continue;
+        const wasm::Memory m = impl->memory();
+        uint32_t end = word;
+        while (end < m.size && end - word < kMaxString && m.base[end]) ++end;
+        if (end >= m.size || m.base[end]) {
+            TOME_ERROR("[%s] jass_call(%s): string argument %d isn't a NUL-terminated string in the module's memory "
+                       "(up to %zu bytes)", impl->mod->id.c_str(), name.c_str(), i + 1, kMaxString);
+            return TOME_ERR_INVALID_ARGUMENT;
+        }
+        texts[static_cast<size_t>(i)].assign(reinterpret_cast<const char*>(m.base + word), end - word);
+        args[static_cast<size_t>(i)].string = texts[static_cast<size_t>(i)].c_str();
+    }
+    tome_jass_value result;
+    const tome_result r = objects::run_jass_call(impl->mod, name.c_str(), call, args.data(), &result);
+    uint32_t word = 0;
+    if (r == TOME_OK && sig.result.kind == 'S') {
+        if (result.string && text_capacity) {
+            const std::string_view text(result.string);
+            const size_t n = std::min<size_t>(text.size(), text_capacity - 1);
+            const wasm::Memory m = impl->memory();
+            if (!wasm::in_bounds(m, text_ptr, text_capacity)) return TOME_ERR_INVALID_ARGUMENT;
+            std::memcpy(m.base + text_ptr, text.data(), n);
+            m.base[text_ptr + n] = 0;
+            word = text_ptr;
+        }
+    } else {
+        std::memcpy(&word, &result, sizeof(word));
+    }
+    if (!store(impl, result_ptr, word)) return TOME_ERR_INVALID_ARGUMENT;
+    return r;
 }
 
 #define IMPORT(name, sig) {#name, reinterpret_cast<void*>(w_##name), sig, nullptr},

@@ -335,6 +335,25 @@ int32_t tome_selection(tome_wasm_unit* out, int32_t max, int32_t* leader) {
     return (int32_t)count;
 }
 
+/* One unit and its name. */
+static unsigned char g_unit[sizeof(tome_wasm_unit) + 128];
+
+int32_t tome_unit_info(uint32_t unit, tome_wasm_unit* out) {
+    const uint32_t n = tome_raw_unit_info(unit, g_unit, sizeof(g_unit));
+    if (n == UINT32_MAX || n > sizeof(g_unit)) return TOME_ERR_INVALID_ARGUMENT;
+    *out = *(const tome_wasm_unit*)g_unit;
+    return TOME_OK;
+}
+
+/* A string result of jass_call. */
+static char g_jass_text[4096];
+
+int32_t tome_jass_call(const char* name, const tome_jass_value* args, int32_t count, tome_jass_value* result) {
+    tome_jass_value ignored;
+    return tome_raw_jass_call(name, (uint32_t)tome_strlen(name), args, count, result ? result : &ignored, g_jass_text,
+                              sizeof(g_jass_text));
+}
+
 char* tome_append(char* buf, uint32_t size, const char* text) {
     uint32_t n = (uint32_t)tome_strlen(buf);
     while (text && *text && n + 1 < size) buf[n++] = *text++;

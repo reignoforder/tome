@@ -196,6 +196,36 @@ TOME_WASM_IMPORT(config_write) int32_t tome_raw_config_write(const char* name, u
 TOME_WASM_IMPORT(register_native) int32_t tome_raw_register_native(const char* name, uint32_t len, uint32_t callback);
 TOME_WASM_IMPORT(jass_code_call) int32_t tome_jass_code_call(uint32_t code, int32_t* result);
 TOME_WASM_IMPORT(jass_code_execute) int32_t tome_jass_code_execute(uint32_t code);
+/* API version 16: game objects. Units, items, destructables and players are
+ * handles like tome_wasm_unit.object; property ids are tome.h's
+ * tome_property (TOME_PROPERTY_*), values doubles. jass_call (below) takes
+ * JASS handle ids (tome_handle_of), not these handles. */
+TOME_WASM_IMPORT(object_type) int32_t tome_object_type_of(uint32_t object);
+TOME_WASM_IMPORT(object_of) uint32_t tome_object_of(uint32_t jass_handle, int32_t* type);
+TOME_WASM_IMPORT(handle_of) uint32_t tome_handle_of(uint32_t object);
+TOME_WASM_IMPORT(player_object) uint32_t tome_player_object(int32_t slot);
+TOME_WASM_IMPORT(unit_info) uint32_t tome_raw_unit_info(uint32_t unit, void* out, uint32_t capacity);
+TOME_WASM_IMPORT(get_property) int32_t tome_get_property(uint32_t object, int32_t property, double* value);
+TOME_WASM_IMPORT(set_property) int32_t tome_set_property(uint32_t object, int32_t property, double value);
+TOME_WASM_IMPORT(get_keyed_property) int32_t tome_get_keyed_property(uint32_t object, int32_t property, uint32_t key, double* value);
+TOME_WASM_IMPORT(set_keyed_property) int32_t tome_set_keyed_property(uint32_t object, int32_t property, uint32_t key, double value);
+/* Every unit, item, destructable or player (TOME_OBJECT_*) as handles, up to `max`; how many there are, -1 if not. */
+TOME_WASM_IMPORT(list_objects) int32_t tome_list_objects(int32_t type, uint32_t* out, int32_t max);
+/* One argument or the result of jass_call: the member the native's signature
+ * says. Handles are JASS handle ids here (tome_handle_of), not this module's
+ * object handles; strings are UTF-8. */
+typedef union tome_jass_value {
+    int32_t integer;
+    int32_t boolean;
+    float real;
+    uint32_t handle;
+    uint32_t code;
+    const char* string;
+} tome_jass_value;
+_Static_assert(sizeof(tome_jass_value) == 4, "one word per argument");
+/* Runs a JASS native by name, as tome.h's jass_call (with the same checks); a string result is
+ * copied into `text` (cut to `capacity`). Use tome_jass_call. */
+TOME_WASM_IMPORT(jass_call) int32_t tome_raw_jass_call(const char* name, uint32_t len, const tome_jass_value* args, int32_t count, tome_jass_value* result, char* text, uint32_t capacity);
 #undef TOME_WASM_IMPORT
 
 /* --- the wrappers (support/tome_wasm.c) ---------------------------------- */
@@ -292,6 +322,21 @@ static inline int32_t tome_load_toc(const char* path) { return tome_raw_load_toc
  * the next call), *leader (may be NULL) the active one or -1; how many are
  * selected. */
 int32_t tome_selection(tome_wasm_unit* out, int32_t max, int32_t* leader);
+
+/* A unit as the selection describes it (its name stays valid until the next
+ * call): TOME_OK, or TOME_ERR_INVALID_ARGUMENT if `unit` isn't a live unit. */
+int32_t tome_unit_info(uint32_t unit, tome_wasm_unit* out);
+
+/* Runs a JASS native by name: `count` arguments, the result in *result (may
+ * be NULL). A string result stays valid until the next call. TOME_OK or a
+ * tome_result. */
+int32_t tome_jass_call(const char* name, const tome_jass_value* args, int32_t count, tome_jass_value* result);
+
+/* A property's value, or `fallback` if it can't be read. */
+static inline double tome_property_value(uint32_t object, int32_t property, double fallback) {
+    double value;
+    return tome_get_property(object, property, &value) == TOME_OK ? value : fallback;
+}
 
 /* A game file (through the archives and Tome's overlay) into `out`, up to
  * `size` bytes; the file's whole size (0 if there's none). */

@@ -242,6 +242,16 @@ static void TOME_CALL on_play_event(tome_mod* mod, const tome_event_info* info, 
                   info->event == TOME_EVENT_ITEM_PICKUP ? "picked up"
                   : info->event == TOME_EVENT_ITEM_DROP ? "dropped" : "used",
                   info->object_name, tome_type_code(info->object_id, code));
+        /* API version 16: the item's own properties. */
+        if (info->event == TOME_EVENT_ITEM_PICKUP && tome_has_objects(api) &&
+            api->object_type(info->item) == TOME_OBJECT_ITEM) {
+            tome_logf(api, mod, TOME_LOG_INFO, "  the item: %s, %.0f charge(s), life %.0f, at %.0f, %.0f",
+                      tome_type_code((uint32_t)tome_property_value(api, info->item, TOME_PROPERTY_TYPE_ID, 0), code),
+                      tome_property_value(api, info->item, TOME_PROPERTY_CHARGES, -1),
+                      tome_property_value(api, info->item, TOME_PROPERTY_LIFE, -1),
+                      tome_property_value(api, info->item, TOME_PROPERTY_X, 0),
+                      tome_property_value(api, info->item, TOME_PROPERTY_Y, 0));
+        }
         return;
     case TOME_EVENT_PLAYER_VICTORY:
     case TOME_EVENT_PLAYER_DEFEAT:
@@ -412,6 +422,210 @@ static void TOME_CALL on_hello_command(tome_mod* mod, const char* args, void* us
     greet(mod, args, "/hello command");
 }
 
+/* API version 16: game objects. /helloobj reads the selected unit and its
+ * owner through properties and natives, changes them and puts them back.
+ * (A mod that changes the game in multiplayer must be "sync": "required";
+ * Tome refuses set_property to this one there.) */
+static const char* ok(int good) {
+    return good ? "ok" : "MISMATCH";
+}
+
+static void TOME_CALL on_objects_command(tome_mod* mod, const char* args, void* user) {
+    tome_unit selected[12], info;
+    int32_t leader = -1, type = TOME_OBJECT_NONE;
+    void* unit;
+    void* player;
+    tome_jass_handle handle, player_handle;
+    tome_jass_value a[3], r;
+    double life, max_life, mana, max_mana, x, y, speed, level, gold, value;
+    char code[5];
+    (void)args;
+    (void)user;
+    if (!tome_has_objects(api)) {
+        api->log(mod, TOME_LOG_WARN, "/helloobj: this Tome has no game objects (API version 16)");
+        return;
+    }
+    if (tome_get_selection(api, selected, 12, &leader) <= 0) {
+        api->log(mod, TOME_LOG_INFO, "/helloobj: select a unit first");
+        return;
+    }
+    unit = selected[leader >= 0 ? leader : 0].object;
+    if (api->object_type(unit) != TOME_OBJECT_UNIT || tome_get_unit_info(api, unit, &info) != TOME_OK) {
+        api->log(mod, TOME_LOG_WARN, "/helloobj: the selected unit is gone");
+        return;
+    }
+    life = tome_property_value(api, unit, TOME_PROPERTY_LIFE, -1);
+    max_life = tome_property_value(api, unit, TOME_PROPERTY_MAX_LIFE, -1);
+    mana = tome_property_value(api, unit, TOME_PROPERTY_MANA, -1);
+    max_mana = tome_property_value(api, unit, TOME_PROPERTY_MAX_MANA, -1);
+    x = tome_property_value(api, unit, TOME_PROPERTY_X, 0);
+    y = tome_property_value(api, unit, TOME_PROPERTY_Y, 0);
+    speed = tome_property_value(api, unit, TOME_PROPERTY_MOVE_SPEED, -1);
+    level = tome_property_value(api, unit, TOME_PROPERTY_LEVEL, -1);
+    tome_logf(api, mod, TOME_LOG_INFO, "/helloobj: %s (%s) of player %d, level %.0f: life %.0f/%.0f, mana %.0f/%.0f, "
+              "at %.0f, %.0f, speed %.0f", info.name, tome_type_code(info.type_id, code), (int)info.owner + 1, level,
+              life, max_life, mana, max_mana, x, y, speed);
+
+    /* Change them, read them back, and put them back. */
+    api->set_property(mod, unit, TOME_PROPERTY_MANA, 7);
+    value = tome_property_value(api, unit, TOME_PROPERTY_MANA, -1);
+    tome_logf(api, mod, TOME_LOG_INFO, "/helloobj: mana set to 7: %s", ok(value == 7));
+    api->set_property(mod, unit, TOME_PROPERTY_LIFE, max_life - 1);
+    value = tome_property_value(api, unit, TOME_PROPERTY_LIFE, -1);
+    tome_logf(api, mod, TOME_LOG_INFO, "/helloobj: life set to %.0f: %s", max_life - 1, ok(value == max_life - 1));
+    api->set_property(mod, unit, TOME_PROPERTY_MOVE_SPEED, 200);
+    value = tome_property_value(api, unit, TOME_PROPERTY_MOVE_SPEED, -1);
+    tome_logf(api, mod, TOME_LOG_INFO, "/helloobj: move speed set to 200: %s", ok(value == 200));
+    api->set_property(mod, unit, TOME_PROPERTY_X, x + 64);
+    value = tome_property_value(api, unit, TOME_PROPERTY_X, 0);
+    tome_logf(api, mod, TOME_LOG_INFO, "/helloobj: moved 64 to the east: %s", ok(value == x + 64 &&
+              tome_property_value(api, unit, TOME_PROPERTY_Y, 0) == y));
+    tome_logf(api, mod, TOME_LOG_INFO, "/helloobj: max life is read-only: %s",
+              ok(api->set_property(mod, unit, TOME_PROPERTY_MAX_LIFE, 1) == TOME_ERR_INVALID_ARGUMENT));
+    api->set_property(mod, unit, TOME_PROPERTY_X, x);
+    api->set_property(mod, unit, TOME_PROPERTY_MOVE_SPEED, speed);
+
+    /* Facing, ranges, a hero's attributes and an ability's level. */
+    api->set_property(mod, unit, TOME_PROPERTY_FACING, 90);
+    value = tome_property_value(api, unit, TOME_PROPERTY_FACING, -1);
+    tome_logf(api, mod, TOME_LOG_INFO, "/helloobj: facing set to 90: %s", ok(value > 89.99 && value < 90.01));
+    double range = tome_property_value(api, unit, TOME_PROPERTY_ACQUIRE_RANGE, -1);
+    api->set_property(mod, unit, TOME_PROPERTY_ACQUIRE_RANGE, 600);
+    value = tome_property_value(api, unit, TOME_PROPERTY_ACQUIRE_RANGE, -1);
+    api->set_property(mod, unit, TOME_PROPERTY_ACQUIRE_RANGE, range);
+    tome_logf(api, mod, TOME_LOG_INFO, "/helloobj: acquire range %.0f, set to 600: %s; fly height %.0f, %.0f xp",
+              range, ok(value == 600), tome_property_value(api, unit, TOME_PROPERTY_FLY_HEIGHT, -1),
+              tome_property_value(api, unit, TOME_PROPERTY_HERO_XP, -1));
+    if (info.flags & TOME_UNIT_HERO) {
+        double base = tome_property_value(api, unit, TOME_PROPERTY_STRENGTH, -1), total = -1, level = -1;
+        int refused;
+        api->get_keyed_property(unit, TOME_PROPERTY_STRENGTH, 1, &total);
+        api->set_property(mod, unit, TOME_PROPERTY_STRENGTH, base + 2);
+        value = tome_property_value(api, unit, TOME_PROPERTY_STRENGTH, -1);
+        api->set_property(mod, unit, TOME_PROPERTY_STRENGTH, base);
+        tome_logf(api, mod, TOME_LOG_INFO, "/helloobj: strength %.0f (%.0f with bonuses), agility %.0f, intelligence "
+                  "%.0f; strength + 2: %s", base, total, tome_property_value(api, unit, TOME_PROPERTY_AGILITY, -1),
+                  tome_property_value(api, unit, TOME_PROPERTY_INTELLIGENCE, -1), ok(value == base + 2));
+        /* Storm Bolt: not there until learned (SelectHeroSkill, a native), then level 1 of 3. */
+        api->get_keyed_property(unit, TOME_PROPERTY_ABILITY_LEVEL, 0x41487462 /* 'AHtb' */, &level);
+        a[0] = tome_jass_handle_value(api->handle_of(unit));
+        a[1] = tome_jass_int(0x41487462);
+        api->jass_call(mod, "SelectHeroSkill", a, 2, NULL);
+        api->get_keyed_property(unit, TOME_PROPERTY_ABILITY_LEVEL, 0x41487462, &total);
+        api->set_keyed_property(mod, unit, TOME_PROPERTY_ABILITY_LEVEL, 0x41487462, 3);
+        api->get_keyed_property(unit, TOME_PROPERTY_ABILITY_LEVEL, 0x41487462, &value);
+        /* Without its key (the ability), it's refused. */
+        refused = api->get_property(unit, TOME_PROPERTY_ABILITY_LEVEL, &range) == TOME_ERR_INVALID_ARGUMENT;
+        tome_logf(api, mod, TOME_LOG_INFO, "/helloobj: Storm Bolt level %.0f, learned %.0f, set to 3: %.0f, %s; no "
+                  "key refused: %s", level, total, value, ok(value == 3), ok(refused));
+    }
+    {
+        double base = -1, dice = -1, sides = -1, cooldown = -1, reach = -1;
+        api->get_keyed_property(unit, TOME_PROPERTY_DAMAGE_BASE, 0, &base);
+        api->get_keyed_property(unit, TOME_PROPERTY_DAMAGE_DICE, 0, &dice);
+        api->get_keyed_property(unit, TOME_PROPERTY_DAMAGE_SIDES, 0, &sides);
+        api->get_keyed_property(unit, TOME_PROPERTY_ATTACK_COOLDOWN, 0, &cooldown);
+        api->get_keyed_property(unit, TOME_PROPERTY_ATTACK_RANGE, 0, &reach);
+        tome_logf(api, mod, TOME_LOG_INFO, "/helloobj: armor %.1f (type %.0f), damage %.0f + %.0fd%.0f every %.2f s, "
+                  "range %.0f", tome_property_value(api, unit, TOME_PROPERTY_ARMOR, -1),
+                  tome_property_value(api, unit, TOME_PROPERTY_ARMOR_TYPE, -1), base, dice, sides, cooldown, reach);
+    }
+    api->set_property(mod, unit, TOME_PROPERTY_LIFE, life);
+    api->set_property(mod, unit, TOME_PROPERTY_MANA, mana);
+
+    /* JASS handles and natives. */
+    handle = api->handle_of(unit);
+    tome_logf(api, mod, TOME_LOG_INFO, "/helloobj: handle 0x%x, back to the unit: %s", (unsigned)handle,
+              ok(handle && api->object_of(handle, &type) == unit && type == TOME_OBJECT_UNIT));
+    if (handle) {
+        a[0] = tome_jass_handle_value(handle);
+        if (api->jass_call(mod, "GetUnitName", a, 1, &r) == TOME_OK) {
+            tome_logf(api, mod, TOME_LOG_INFO, "/helloobj: GetUnitName: %s", r.string ? r.string : "(null)");
+        }
+        if (api->jass_call(mod, "GetWidgetLife", a, 1, &r) == TOME_OK) {
+            tome_logf(api, mod, TOME_LOG_INFO, "/helloobj: GetWidgetLife: %.0f, %s", r.real, ok(r.real == life));
+        }
+        a[1] = tome_jass_int(2); /* UNIT_STATE_MANA: a handle type that is really an integer */
+        if (api->jass_call(mod, "GetUnitState", a, 2, &r) == TOME_OK) {
+            tome_logf(api, mod, TOME_LOG_INFO, "/helloobj: GetUnitState mana: %.0f, %s", r.real, ok(r.real == mana));
+        }
+        a[1] = tome_jass_real(270.0f);
+        api->jass_call(mod, "SetUnitFacing", a, 2, NULL);
+    }
+    a[0] = tome_jass_int(42);
+    if (api->jass_call(mod, "I2S", a, 1, &r) == TOME_OK) {
+        tome_logf(api, mod, TOME_LOG_INFO, "/helloobj: I2S(42): %s", r.string ? r.string : "(null)");
+    }
+    a[0] = tome_jass_str("h\xc3\xa9llo");
+    if (api->jass_call(mod, "StringLength", a, 1, &r) == TOME_OK) {
+        tome_logf(api, mod, TOME_LOG_INFO, "/helloobj: StringLength(\"h\xc3\xa9llo\"): %d", (int)r.integer);
+    }
+    /* A texttag is an index (0 to 99), not a handle table id: it passes as it is. */
+    if (api->jass_call(mod, "CreateTextTag", a, 0, &r) == TOME_OK) {
+        const uint32_t tag = r.handle;
+        int set = 0;
+        a[0] = tome_jass_handle_value(tag);
+        a[1] = tome_jass_str("hello");
+        a[2] = tome_jass_real(0.023f);
+        set = api->jass_call(mod, "SetTextTagText", a, 3, NULL) == TOME_OK;
+        a[1] = tome_jass_real(2.0f);
+        set = set && api->jass_call(mod, "SetTextTagLifespan", a, 2, NULL) == TOME_OK;
+        set = set && api->jass_call(mod, "DestroyTextTag", a, 1, NULL) == TOME_OK;
+        tome_logf(api, mod, TOME_LOG_INFO, "/helloobj: texttag %u: %s", (unsigned)tag, ok(set));
+    }
+    a[0] = tome_jass_handle_value(0x7ffffff);
+    {
+        const int none = api->jass_call(mod, "NoSuchNative", a, 0, &r) == TOME_ERR_INVALID_ARGUMENT;
+        const int made_up = api->jass_call(mod, "GetUnitName", a, 1, &r) == TOME_ERR_INVALID_ARGUMENT;
+        const int count = api->jass_call(mod, "I2S", a, 2, &r) == TOME_ERR_INVALID_ARGUMENT;
+        int wrong_type = 1;
+        a[0] = tome_jass_handle_value(api->handle_of(api->player_object(0)));  /* a player as a unit */
+        if (a[0].handle) wrong_type = api->jass_call(mod, "GetUnitName", a, 1, &r) == TOME_ERR_INVALID_ARGUMENT;
+        tome_logf(api, mod, TOME_LOG_INFO, "/helloobj: refused: %s, %s, %s, %s", ok(none), ok(made_up), ok(count),
+                  ok(wrong_type));
+    }
+
+    /* The owner. */
+    player = api->player_object(info.owner);
+    gold = tome_property_value(api, player, TOME_PROPERTY_GOLD, -1);
+    api->set_property(mod, player, TOME_PROPERTY_GOLD, gold + 100);
+    value = tome_property_value(api, player, TOME_PROPERTY_GOLD, -1);
+    api->set_property(mod, player, TOME_PROPERTY_GOLD, gold);
+    player_handle = api->handle_of(player);
+    tome_logf(api, mod, TOME_LOG_INFO, "/helloobj: player in slot %.0f (%s) has %.0f gold, lumber %.0f, food %.0f/%.0f; "
+              "gold + 100: %s; handle 0x%x",
+              tome_property_value(api, player, TOME_PROPERTY_SLOT, -1),
+              ok(api->object_type(player) == TOME_OBJECT_PLAYER), gold,
+              tome_property_value(api, player, TOME_PROPERTY_LUMBER, -1),
+              tome_property_value(api, player, TOME_PROPERTY_FOOD_USED, -1),
+              tome_property_value(api, player, TOME_PROPERTY_FOOD_CAP, -1), ok(value == gold + 100),
+              (unsigned)player_handle);
+    if (player_handle) {
+        a[0] = tome_jass_handle_value(player_handle);
+        if (api->jass_call(mod, "GetPlayerName", a, 1, &r) == TOME_OK) {
+            tome_logf(api, mod, TOME_LOG_INFO, "/helloobj: GetPlayerName: %s", r.string ? r.string : "(null)");
+        }
+    }
+    /* Every unit in the game, whether or not the map script has a handle for it. */
+    {
+        static void* all[4096];
+        int32_t units = api->list_objects(TOME_OBJECT_UNIT, all, 4096), i, found = 0, typed = 1, without = 0;
+        for (i = 0; i < units && i < 4096; ++i) {
+            found |= all[i] == unit;
+            typed &= api->object_type(all[i]) == TOME_OBJECT_UNIT;
+            without += api->handle_of(all[i]) == 0;
+        }
+        tome_logf(api, mod, TOME_LOG_INFO, "/helloobj: %d units (the selected one among them: %s, all units: %s, %d "
+                  "without a handle), %d items, %d destructables, %d players; a bad type: %d", (int)units, ok(found),
+                  ok(typed), without, (int)api->list_objects(TOME_OBJECT_ITEM, NULL, 0),
+                  (int)api->list_objects(TOME_OBJECT_DESTRUCTABLE, NULL, 0),
+                  (int)api->list_objects(TOME_OBJECT_PLAYER, NULL, 0), (int)api->list_objects(TOME_OBJECT_OTHER, NULL, 0));
+    }
+    tome_logf(api, mod, TOME_LOG_INFO, "/helloobj: a unit isn't a player: %s",
+              ok(api->get_property(unit, TOME_PROPERTY_GOLD, &value) == TOME_ERR_INVALID_ARGUMENT));
+    api->log(mod, TOME_LOG_INFO, "/helloobj done");
+}
+
 /* The Greet key (tome.mod.json "keybinds"). */
 static void TOME_CALL on_greet_key(tome_mod* mod, const char* id, void* user) {
     (void)id;
@@ -540,6 +754,7 @@ TOME_EXPORT void TOME_CALL tome_mod_enable(tome_mod* mod) {
     if (tome_has_more_events(api)) {
         for (i = TOME_EVENT_SPELL_CHANNEL; i <= TOME_EVENT_NIGHT; ++i) api->on_event(mod, i, on_more_event, NULL);
     }
+    if (tome_has_objects(api)) api->register_command(mod, "helloobj", on_objects_command, NULL);
     if (tome_has_settings(api)) {
         api->on_setting_changed(mod, on_setting_changed, NULL);
         api->on_keybind(mod, "greet", on_greet_key, NULL);

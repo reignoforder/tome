@@ -9,6 +9,7 @@
 #include "log.h"
 #include "mod_manager.h"
 #include "natives.h"
+#include "objects.h"
 #include "popups.h"
 #include "settings_api.h"
 #include "storm.h"
@@ -214,6 +215,7 @@ void init_api(const GameBuild& build) {
     units::fill_api(g_api);
     popups::fill_api(g_api);
     intermod_api::fill_api(g_api);
+    objects::fill_api(g_api);
 }
 
 const tome_api* api_table() {

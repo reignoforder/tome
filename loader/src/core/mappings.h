@@ -167,6 +167,7 @@ struct BuildMappings {
         uint32_t local_player_offset;     // CGameWar3.local_player
         uint32_t handles_offset;          // CGameWar3.handles
         uint32_t get_player;              // CGameWar3::GetPlayer
+        uint32_t player_count_offset;     // CGameWar3.player_count (1.26a's GetPlayer doesn't check it)
         uint32_t player_name_offset;      // CPlayerWar3.name
         uint32_t player_slot_offset;      // CPlayerWar3.slot
         uint32_t player_selection_offset; // CPlayerWar3.selection
@@ -292,6 +293,62 @@ struct BuildMappings {
         uint32_t gamma_call;      // Movie.gamma_call (patched by movie-display-reset)
         uint32_t gamma_restore;   // Movie.gamma_restore (patched by movie-display-reset)
     } movie;
+
+    // Optional: game objects for mods (objects.cpp, API version 16). Each
+    // property, handle lookup and jass_call works when its own symbols are
+    // mapped (non-zero), and reports TOME_ERR_UNAVAILABLE otherwise.
+    struct {
+        uint32_t handle_count_offset;       // HandleManager.count
+        uint32_t handle_free_count_offset;  // HandleManager.free_count
+        uint32_t handle_entry_size;         // HandleEntry.size
+        uint32_t handle_entry_object;       // HandleEntry.object
+        uint32_t object_lookup;             // ObjectLookup
+        uint32_t agent_tag_offset;          // AgentRecord.tag
+        uint32_t agent_dying_offset;        // AgentRecord.dying
+        uint32_t agent_tag;                 // AgentTag.agent
+        uint32_t unit_get_state;            // CUnit::GetState
+        uint32_t unit_set_state;            // CUnit::SetState
+        uint32_t unit_get_move_speed;       // CUnit::GetMoveSpeed
+        uint32_t unit_set_move_speed;       // CUnit::SetMoveSpeed
+        uint32_t unit_get_level;            // CUnit::GetLevel
+        uint32_t unit_position_slot;        // CUnit.vtable.GetPosition
+        uint32_t position_get;              // CPosition::Get
+        uint32_t position_set;              // CPosition::Set
+        uint32_t widget_get_life_slot;      // CWidget.vtable.GetLife
+        uint32_t widget_set_life_slot;      // CWidget.vtable.SetLife
+        uint32_t item_charges_offset;       // CItem.charges
+        uint32_t player_set_state;          // CPlayerWar3::SetState
+        uint32_t jass_vm_get;               // JassVM::Get
+        uint32_t vm_index_offset;           // CGameWar3.vm_index
+        uint32_t vm_strings_offset;         // JassVM.strings
+        uint32_t string_count_offset;       // JassStringTable.count
+        uint32_t string_entries_offset;     // JassStringTable.entries
+        uint32_t string_entry_size;         // JassString.size
+        uint32_t float_multiply;            // FloatMultiply
+        uint32_t position_facing_slot;      // CPosition.vtable.GetFacing
+        uint32_t position_set_facing;       // CPosition::SetFacing
+        uint32_t unit_fly_height_offset;    // CUnit.fly_height
+        uint32_t unit_find_ability;         // CUnit::FindAbility
+        uint32_t ability_level_offset;      // CAbility.level
+        uint32_t ability_max_level;         // CAbility::GetMaxLevel
+        uint32_t ability_level_up_slot;     // CAbility.vtable.LevelUp
+        uint32_t ability_level_down_slot;   // CAbility.vtable.LevelDown
+        uint32_t unit_get_acquire_range;    // CUnit::GetAcquireRange
+        uint32_t unit_set_acquire_range;    // CUnit::SetAcquireRange
+        uint32_t unit_get_hero_xp;          // CUnit::GetHeroXP
+        uint32_t unit_get_hero_stat[3];     // CUnit::GetHeroStr, GetHeroAgi, GetHeroInt
+        uint32_t unit_set_hero_stat[3];     // CUnit::SetHeroStr, SetHeroAgi, SetHeroInt
+        uint32_t unit_armor_offset;         // CUnit.armor
+        uint32_t unit_armor_type_offset;    // CUnit.armor_type
+        uint32_t unit_attack_offset;        // CUnit.attack
+        uint32_t attack_damage_base_offset; // CAbilityAttack.damage_base (int; the second weapon's 4 bytes on)
+        uint32_t attack_damage_dice_offset; // CAbilityAttack.damage_dice (int, likewise)
+        uint32_t attack_damage_sides_offset;// CAbilityAttack.damage_sides (int, likewise)
+        uint32_t attack_cooldown_offset;    // CAbilityAttack.cooldown (float; the second weapon's 8 bytes on)
+        uint32_t attack_range_offset;       // CAbilityAttack.range (float, likewise)
+        uint32_t for_each_agent;            // ForEachAgent
+        uint32_t agent_tags[3];             // AgentTag.unit, .item, .destructable
+    } objects;
 };
 
 // The game's JASS event functions that events.cpp hooks by name (its

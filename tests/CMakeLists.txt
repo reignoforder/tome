@@ -37,6 +37,7 @@ add_executable(tome_tests
     test_signature.cpp
     test_text.cpp
     test_tome_hpp.cpp
+    test_objects.cpp
     test_units.cpp
     test_utf8.cpp
     test_verify.cpp
@@ -209,7 +210,7 @@ function(tome_check_fails fixture expected)
 endfunction()
 tome_check_fails(broken-json "tome.mod.json: line 2, column 1: expected a string key")
 tome_check_fails(needs-ghost "doesn't start: error: needs \"ghost\"")
-tome_check_fails(needs-unmapped "tome.mod.json: needs \"CUnit.armor\", which isn't mapped for 1.27b")
+tome_check_fails(needs-unmapped "tome.mod.json: needs \"CUnit.wings\", which isn't mapped for 1.27b")
 tome_check_fails(wrong-arch "tome.mod.json: entry DLL \"wrong-arch.dll\" not found")
 # ...and where it passes or only warns: the C example and an assets-only
 # mod pass (--strict: warnings would fail them); a mod for one edition; a mod whose icon is

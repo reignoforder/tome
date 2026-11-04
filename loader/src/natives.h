@@ -70,6 +70,15 @@ std::vector<NativeInfo> list();
 // that's inside the native.
 const char* string_text(const void* jass_string);
 
+// A JASS string id for `text` (UTF-8; invalid bytes become U+FFFD), as
+// jass_string_create makes it; 0 for NULL, outside a game or off the main
+// thread (logged).
+uint32_t create_string(const char* text);
+
+// Whether the current map script passed `code` to a Tome native (only those
+// may be run). Main thread.
+bool code_seen(uint32_t code);
+
 // Fills the version 6 part of the API table: strings and code. Each one
 // fails (or returns null) until install_hooks has run.
 void fill_api(tome_api& api);

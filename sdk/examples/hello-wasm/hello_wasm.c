@@ -27,6 +27,51 @@ static void on_command(const char* args, void* user) {
     const int32_t repeat = tome_setting_int("repeat", 1);
     for (int32_t i = 0; i < repeat; ++i) log_line("/hellowasm command: ", line);
     tome_display_text(line, 5.0f);
+    /* API version 16: the selected unit and its owner, through handles (a
+     * Wasm module never sees game pointers). */
+    tome_wasm_unit selected[12], unit;
+    int32_t leader = -1;
+    if (tome_selection(selected, 12, &leader) > 0 &&
+        tome_unit_info(selected[leader >= 0 ? leader : 0].object, &unit) == TOME_OK) {
+        const uint32_t player = tome_player_object(unit.owner);
+        char text[192] = "";
+        tome_append(text, sizeof(text), unit.name);
+        tome_append(text, sizeof(text), ", life ");
+        tome_append_int(text, sizeof(text), (int64_t)tome_property_value(unit.object, TOME_PROPERTY_LIFE, -1));
+        tome_append(text, sizeof(text), "/");
+        tome_append_int(text, sizeof(text), (int64_t)tome_property_value(unit.object, TOME_PROPERTY_MAX_LIFE, -1));
+        tome_append(text, sizeof(text), ", mana ");
+        tome_append_int(text, sizeof(text), (int64_t)tome_property_value(unit.object, TOME_PROPERTY_MANA, -1));
+        tome_append(text, sizeof(text), ", object type ");
+        tome_append_int(text, sizeof(text), tome_object_type_of(unit.object));
+        tome_append(text, sizeof(text), ", its owner has ");
+        tome_append_int(text, sizeof(text), (int64_t)tome_property_value(player, TOME_PROPERTY_GOLD, -1));
+        tome_append(text, sizeof(text), " gold; ");
+        tome_append_int(text, sizeof(text), tome_list_objects(TOME_OBJECT_UNIT, 0, 0));
+        tome_append(text, sizeof(text), " units in the game");
+        log_line("/hellowasm unit: ", text);
+        /* Natives by name, through the unit's JASS handle. */
+        tome_jass_value args[1], result;
+        const uint32_t handle = tome_handle_of(unit.object);
+        char calls[192] = "GetUnitName: ";
+        args[0].handle = handle;
+        if (handle && tome_jass_call("GetUnitName", args, 1, &result) == TOME_OK && result.string) {
+            tome_append(calls, sizeof(calls), result.string);
+        }
+        args[0].integer = 7;
+        if (tome_jass_call("I2S", args, 1, &result) == TOME_OK && result.string) {
+            tome_append(calls, sizeof(calls), ", I2S(7): ");
+            tome_append(calls, sizeof(calls), result.string);
+        }
+        /* Refused: the unit as a timer, and a made-up handle. */
+        args[0].handle = handle;
+        tome_append(calls, sizeof(calls), tome_jass_call("TimerGetElapsed", args, 1, &result) == TOME_ERR_INVALID_ARGUMENT
+                                              ? ", a unit as a timer refused" : ", a unit as a timer NOT refused");
+        args[0].handle = 0x7ffffff;
+        tome_append(calls, sizeof(calls), tome_jass_call("GetUnitName", args, 1, &result) == TOME_ERR_INVALID_ARGUMENT
+                                              ? ", a made-up handle refused" : ", a made-up handle NOT refused");
+        log_line("/hellowasm natives: ", calls);
+    }
     /* Other mods listening on the topic hear it (not this one). */
     const int32_t reached = tome_publish("hello-wasm.greeted", line, (uint32_t)tome_strlen(line));
     char note[64] = "published to ";

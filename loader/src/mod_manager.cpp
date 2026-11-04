@@ -16,6 +16,7 @@
 #include "mod_menu.h"
 #include "natives.h"
 #include "packages.h"
+#include "core/objects.h"
 #include "core/package.h"
 #include "core/signature.h"
 #include "sha256.h"
@@ -345,12 +346,18 @@ std::vector<ModManager::Installed> ModManager::discover() const {
                 cached.warnings = std::move(meta.warnings);
                 cached.valid = meta.ok;
                 if (cached.valid && build_.known) {
-                    // Names with a single ':' are capabilities ("event:frame"), not mappings; not checked
-                    // yet. "Class::Method" is a mapping.
+                    // Names with a single ':' are capabilities ("property:mana", core/objects.h);
+                    // only "property:" ones are checked so far. "Class::Method" is a mapping.
+                    const mappings::Build* data = build_.known->data;
                     for (const std::string& name : cached.meta.requires_) {
                         const bool capability =
                             name.find(':') != std::string::npos && name.find("::") == std::string::npos;
-                        if (!capability && !build_.known->data->find(name)) {
+                        std::string error;
+                        if (capability && !objects::capability_met(
+                                              name, [&](const char* s) { return data->find(s) != nullptr; }, error)) {
+                            cached.errors.push_back(error);
+                            cached.valid = false;
+                        } else if (!capability && !data->find(name)) {
                             cached.errors.push_back("needs \"" + name + "\", which isn't mapped for " +
                                                     build_.known->data->name);
                             cached.valid = false;
@@ -1081,8 +1088,9 @@ void ModManager::set_game_lock(bool on) {
 }
 
 bool ModManager::game_locked() const {
-    SharedLock hold(lock_);
-    return game_lock_;
+    // Not under lock_: SRW locks aren't reentrant, and mods call set_property
+    // and jass_call from tome_mod_enable, which runs with lock_ held.
+    return game_lock_.load();
 }
 
 bool ModManager::poll_changed() {
@@ -1725,6 +1733,7 @@ void ModManager::refresh_locked(std::vector<Installed> installed, assets::Moment
             }
         }
         rt.required = mod.meta.sync == SyncMode::Required;
+        rt.handle.sync_required = rt.required;
         rt.depends.clear();
         rt.versioned.clear();
         for (const Dependency& dep : mod.meta.depends) {
