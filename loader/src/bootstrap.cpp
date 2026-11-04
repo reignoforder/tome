@@ -261,6 +261,7 @@ DWORD bootstrap() {
         if (g_menu_hooks_ok) {
             TOME_INFO("Mod menu: %s; %s (attached on thread %lu)", g_menu_hooks_report.c_str(),
                       g_menu_reload_report.c_str(), g_attach_thread);
+            mod_menu::log_chains_model();
         } else {
             TOME_ERROR("Mod menu unavailable: %s", g_menu_hooks_report.c_str());
         }

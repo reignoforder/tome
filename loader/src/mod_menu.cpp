@@ -560,6 +560,12 @@ void close_panel(Panel& p) {
 
 // --- hooks -------------------------------------------------------------------
 
+// What chains_model() found, for log_chains_model(): it may run in DllMain.
+// Bootstrap's thread logs it, or the main thread's FrameDef.toc hook does.
+SRWLOCK g_chains_lock = SRWLOCK_INIT;
+std::string g_chains_note;
+bool g_chains_from_skin = false;
+
 // The chained panel model the game's glue screens show (ui::kChainsSkinKey).
 // Read when the overlay is built, not at install_hooks: Tome may be attached
 // before the game sets Game.expansion (game_build.h), but not before it
@@ -571,13 +577,19 @@ std::string chains_model() {
     auto get = reinterpret_cast<SkinGetStringFn>(g_base + g_build->ui.skin_get_string);
     const char* value = get(key.c_str(), nullptr);
     std::string model = ui::skin_model_path(value);
-    if (!model.empty()) {
-        TOME_INFO("Mod menu: chains model %s (skin %s)", model.c_str(), key.c_str());
-        return model;
+    bool from_skin = !model.empty();
+    std::string note;
+    if (from_skin) {
+        note = model + " (skin " + key + ")";
+    } else {
+        model = ui::default_chains_model(edition);
+        note = model + " (" + edition_name(edition) + ": skin " + key + " " +
+               (value ? "isn't a usable path" : "not found") + ")";
     }
-    model = ui::default_chains_model(edition);
-    TOME_WARN("Mod menu: chains model %s (%s: skin %s %s)", model.c_str(), edition_name(edition), key.c_str(),
-              value ? "isn't a usable path" : "not found");
+    AcquireSRWLockExclusive(&g_chains_lock);
+    g_chains_note = std::move(note);
+    g_chains_from_skin = from_skin;
+    ReleaseSRWLockExclusive(&g_chains_lock);
     return model;
 }
 
@@ -606,6 +618,7 @@ uint32_t __fastcall hooked_load_toc(const char* toc, void* context) {
     if (!g_overlay_attempted) {
         g_overlay_attempted = true;
         build_overlay();
+        log_chains_model();
     }
     uint32_t result = g_load_toc(toc, context);
     load_tome_definitions();
@@ -740,6 +753,20 @@ bool open_from_key() {
     }
     open_esc_panel();
     return true;
+}
+
+void log_chains_model() {
+    AcquireSRWLockExclusive(&g_chains_lock);
+    std::string note = std::move(g_chains_note);
+    g_chains_note.clear();
+    bool from_skin = g_chains_from_skin;
+    ReleaseSRWLockExclusive(&g_chains_lock);
+    if (note.empty()) return;
+    if (from_skin) {
+        TOME_INFO("Mod menu: chains model %s", note.c_str());
+    } else {
+        TOME_WARN("Mod menu: chains model %s", note.c_str());
+    }
 }
 
 void reload_frame_definitions(std::string& report) {

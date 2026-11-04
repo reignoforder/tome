@@ -32,6 +32,11 @@ bool install_hooks(uintptr_t game_base, const BuildMappings& build, std::string&
 // game's main thread, before the main menu is built.
 void reload_frame_definitions(std::string& report);
 
+// Logs which chains model the overlay got (from the skin, or the edition's
+// own), once. Building the overlay can run in DllMain, before the log is
+// open: bootstrap calls this after it, the FrameDef.toc hook right away.
+void log_chains_model();
+
 // The Esc menu's hooks, through the hook manager (call after hooks::init).
 bool install_game_hooks(std::string& report);
 
