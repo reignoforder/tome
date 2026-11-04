@@ -3,6 +3,7 @@
 
 #include "core/chat.h"
 #include "core/jass.h"
+#include "core/log_view.h"
 #include "crash_loop.h"
 #include "storm.h"
 #include "frames.h"
@@ -297,6 +298,12 @@ void say(const std::string& text) {
 
 void tome_command(const std::string& args) {
     chat::TomeCommand cmd = chat::parse_tome(args);
+    // /tome logs reads tome.log before this command's own line goes in, so
+    // that line doesn't take one of the `count` shown. Enough of the file to
+    // find `count` warnings among the lines around them.
+    std::string tail;
+    if (cmd.action == chat::TomeAction::Logs) tail = log::read_tail(256 * 1024);
+    TOME_INFO("Chat command: /tome %s", args.c_str());
     auto find = [](const std::string& id) {
         for (const ModStatus& s : mod_manager().status()) {
             if (s.id == id) return true;
@@ -308,8 +315,19 @@ void tome_command(const std::string& args) {
         say(cmd.error);
         return;
     case chat::TomeAction::Help:
-        say("/tome list | enable <id> | disable <id> | reload [id]");
+        say("/tome list | enable <id> | disable <id> | reload [id] | logs [warn|error] [count]");
         return;
+    case chat::TomeAction::Logs: {
+        std::vector<std::string> lines = log_view::format(tail, cmd.filter, cmd.count);
+        if (lines.empty()) {
+            say(cmd.filter == chat::LogFilter::All    ? "tome.log is empty or can't be read"
+                : cmd.filter == chat::LogFilter::Warn ? "no recent warnings or errors in tome.log"
+                                                      : "no recent errors in tome.log");
+        }
+        for (const std::string& line : lines) display_text(line, 20.0f);
+        TOME_INFO("/tome logs: showed %zu lines", lines.size());
+        return;
+    }
     case chat::TomeAction::List: {
         std::vector<ModStatus> mods = mod_manager().status();
         if (mods.empty()) say("no mods installed");
@@ -382,8 +400,7 @@ bool handle_chat(const char* text) {
         std::string().swap(cmd.args);
     });
     if (cmd.name == "tome") {
-        TOME_INFO("Chat command: /tome %s", cmd.args.c_str());
-        tome_command(cmd.args);
+        tome_command(cmd.args);  // logs the command itself
         return true;
     }
     RegPtr reg;

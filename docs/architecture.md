@@ -23,6 +23,7 @@ loader/
     rtti.*                reads MSVC RTTI: an object's class and base classes
     frames.*              frame id table for JASS, mod FDF archive paths
     chat.*                chat command parsing, /tome subcommands
+    log_view.*            /tome logs: tome.log lines as chat lines
     handshake.*           multiplayer handshake: mod-set lines, comparison, lobby state, game report
     game_lock.*           which required mods a multiplayer game locks, and the notes
     command_line.*        splits the command line like argv (for -tomesafe)
@@ -771,7 +772,10 @@ before adding any handler. Everything runs on the main thread.
 - **Chat:** `core/chat` parses `/name args` (names: 1-32 of a-z, 0-9, `_`,
   `-`, case-insensitive). Mods can't take `tome` or the game's own
   commands, nor another mod's. `/tome help|list|enable <id>|disable
-  <id>|reload [id]` answers through `CGameUI::DisplayText`; enable,
+  <id>|reload [id]|logs [warn|error] [count]` answers through
+  `CGameUI::DisplayText`; `logs` shows the last lines of `tome.log` (10 by
+  default, up to 30; `warn` keeps warnings and errors, `error` errors only;
+  `core/log_view` makes them chat lines, the level colored); enable,
   disable and reload are posted to the main-thread dispatcher, so they run
   outside the game's chat handling (the mod being changed may have handlers
   on that very call). `reload` forces a DLL reload (`ModManager::reload`

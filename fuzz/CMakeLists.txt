@@ -21,11 +21,13 @@ set(CORE ${ROOT}/loader/src/core)
 add_library(fuzz_core STATIC
     ${CORE}/blp.cpp
     ${CORE}/chat.cpp
+    ${CORE}/edition.cpp
     ${CORE}/frames.cpp
     ${CORE}/handshake.cpp
     ${CORE}/jass.cpp
     ${CORE}/json.cpp
     ${CORE}/keys.cpp
+    ${CORE}/log_view.cpp
     ${CORE}/metadata.cpp
     ${CORE}/package.cpp
     ${CORE}/path_guard.cpp

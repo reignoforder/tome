@@ -993,6 +993,7 @@ click:SkirmishButton;wait:Screen: custom game;wait:Screen ready: custom game;cli
 wait:Game started: ;settle;type:/hello e2e;wait:/hello command: Howdy, e2e!;\
 type:/tome disable hello;wait:[hello] disabled;type:/hello ignored;frames:5;\
 type:/tome enable hello;wait:[hello] game start: ;settle;type:/tome nonsense;wait:Chat command: /tome nonsense;\
+type:/tome logs 3;wait:/tome logs: showed ;\
 key:Esc;wait:pressed Esc;click:HelloButton,13;until:[hello] Hello button clicked (2);\
 key:F10;wait:game paused by;settle;click:TomeEscModsButton;until:Mod menu opened in game;\
 key:Esc;until:Mod menu closed in game;settle;key:Esc;wait:game resumed by;settle;\
@@ -1020,6 +1021,7 @@ check "Chat command: /tome enable hello" "/tome enable" 10
 check_count "\[hello\] added a Hello button to the game" 2 "re-enabling mid-game rebuilt the mod's in-game button"
 check_count "\[hello\] game start: " 2 "a mod enabled mid-game gets the game start"
 check "Chat command: /tome nonsense" "unknown /tome subcommands are still swallowed" 10
+check "/tome logs: showed 3 lines" "/tome logs shows the end of tome.log" 10
 check_absent "Hello, ignored" "a disabled mod's command doesn't run"
 check "\[hello\] .+ pressed Esc" "Esc event (sent whether or not the map listens)"
 check "\[hello\] Hello button clicked \(2\)" "click on an in-game button" 10

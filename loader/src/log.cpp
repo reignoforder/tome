@@ -13,19 +13,10 @@ namespace tome::log {
 namespace {
 
 HANDLE g_file = INVALID_HANDLE_VALUE;
+std::wstring g_path;  // of g_file
 SRWLOCK g_lock = SRWLOCK_INIT;
 bool g_keep = false;
 std::string g_kept;  // every line since keep_lines()
-
-const char* level_name(Level level) {
-    switch (level) {
-    case Level::Debug: return "DEBUG";
-    case Level::Info:  return "INFO ";
-    case Level::Warn:  return "WARN ";
-    case Level::Error: return "ERROR";
-    }
-    return "?????";
-}
 
 } // namespace
 
@@ -38,6 +29,7 @@ bool open(const std::wstring& path) {
     }
     ExclusiveLock hold(g_lock);
     g_file = file;
+    g_path = path;
     return true;
 }
 
@@ -45,6 +37,37 @@ void close() {
     ExclusiveLock hold(g_lock);
     if (g_file != INVALID_HANDLE_VALUE) CloseHandle(g_file);
     g_file = INVALID_HANDLE_VALUE;
+    g_path.clear();
+}
+
+std::string read_tail(size_t max_bytes) {
+    std::wstring path;
+    {
+        SharedLock hold(g_lock);
+        path = g_path;
+    }
+    if (path.empty()) return "";
+    // Our own handle writes: the share mode has to allow that.
+    HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                              nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return "";
+    std::string text;
+    LARGE_INTEGER size;
+    if (GetFileSizeEx(file, &size)) {
+        LONGLONG start = size.QuadPart - static_cast<LONGLONG>(max_bytes);
+        if (start < 0) start = 0;
+        LARGE_INTEGER at;
+        at.QuadPart = start;
+        text.resize(static_cast<size_t>(size.QuadPart - start));
+        DWORD read = 0;
+        if (!SetFilePointerEx(file, at, nullptr, FILE_BEGIN) ||
+            !ReadFile(file, text.data(), static_cast<DWORD>(text.size()), &read, nullptr)) {
+            read = 0;
+        }
+        text.resize(read);
+    }
+    CloseHandle(file);
+    return text;
 }
 
 void keep_lines(bool keep) {
@@ -70,23 +93,12 @@ size_t kept_size() {
 
 namespace {
 
-// One line as it goes into the file: time, thread, level, message, CRLF.
-int format_line(char (&line)[2200], Level level, const char* message) {
+// One line as it goes into the file (core/log_line.h), stamped now.
+int stamped_line(char (&line)[2200], Level level, const char* message) {
     SYSTEMTIME now;
     GetLocalTime(&now);
-    int len = snprintf(line, sizeof(line), "[%02u:%02u:%02u.%03u] [%5lu] [%s] %s\r\n",
-                       now.wHour, now.wMinute, now.wSecond, now.wMilliseconds,
-                       GetCurrentThreadId(), level_name(level), message);
-    if (len < 0) {
-        return -1;
-    }
-    if (len >= static_cast<int>(sizeof(line))) {
-        // Cut short: still one line, for find_kept and readers of the file.
-        len = sizeof(line) - 1;
-        line[len - 2] = '\r';
-        line[len - 1] = '\n';
-    }
-    return len;
+    return log::format_line(line, sizeof(line), now.wHour, now.wMinute, now.wSecond,
+                            now.wMilliseconds, GetCurrentThreadId(), level, message);
 }
 
 // With g_lock held.
@@ -110,7 +122,7 @@ void write(Level level, const char* fmt, ...) {
     va_end(args);
 
     char line[2200];
-    int len = format_line(line, level, message);
+    int len = stamped_line(line, level, message);
     if (len < 0) return;
     OutputDebugStringA(line);
 
@@ -120,7 +132,7 @@ void write(Level level, const char* fmt, ...) {
 
 bool try_write(Level level, const char* message) {
     char line[2200];
-    int len = format_line(line, level, message);
+    int len = stamped_line(line, level, message);
     if (len < 0) return false;
     OutputDebugStringA(line);
     // Another thread's write takes microseconds; a crashed thread's never ends.

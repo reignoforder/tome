@@ -124,6 +124,7 @@ add_library(tome_core STATIC
     src/core/jass.cpp
     src/core/json.cpp
     src/core/keys.cpp
+    src/core/log_view.cpp
     src/core/main_menu_fdf.cpp
     src/core/mappings.cpp
     src/core/metadata.cpp

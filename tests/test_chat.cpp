@@ -68,3 +68,29 @@ TEST(chat_parse_tome) {
     CHECK(parse_tome("enable a b").action == TomeAction::Invalid);
     CHECK(parse_tome("list everything").action == TomeAction::Invalid);
 }
+
+TEST(chat_parse_tome_logs) {
+    TomeCommand logs = parse_tome("logs");
+    CHECK(logs.action == TomeAction::Logs);
+    CHECK(logs.filter == LogFilter::All);
+    CHECK_EQ(logs.count, kLogsDefault);
+
+    logs = parse_tome("LOGS warn 20");
+    CHECK(logs.action == TomeAction::Logs);
+    CHECK(logs.filter == LogFilter::Warn);
+    CHECK_EQ(logs.count, size_t(20));
+
+    CHECK(parse_tome("logs warning").filter == LogFilter::Warn);
+
+    logs = parse_tome("log 5 errors");
+    CHECK(logs.filter == LogFilter::Error);
+    CHECK_EQ(logs.count, size_t(5));
+
+    CHECK(parse_tome("logs 0").action == TomeAction::Invalid);
+    CHECK(parse_tome("logs 31").action == TomeAction::Invalid);
+    CHECK(parse_tome("logs -1").action == TomeAction::Invalid);
+    CHECK(parse_tome("logs warn error").action == TomeAction::Invalid);
+    CHECK(parse_tome("logs 5 6").action == TomeAction::Invalid);
+    CHECK(parse_tome("logs everything").action == TomeAction::Invalid);
+    CHECK(parse_tome("logs warn 5 x").action == TomeAction::Invalid);
+}

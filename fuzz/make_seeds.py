@@ -39,9 +39,14 @@ for text in [
 ]:
     add("handshake", text)
 
-for text in ["/tome list", "/tome enable hello", "/tome disable my-mod", "/tome reload", "/Hello  some  args ",
+for text in ["/tome list", "/tome enable hello", "/tome disable my-mod", "/tome reload", "/tome logs warn 20", "/Hello  some  args ",
              "/x\targ", "/tome help"]:
     add("chat", text)
+
+# tome.log text, for /tome logs (the same target).
+add("chat", "ed line\r\n[12:00:01.000] [  100] [INFO ] Tome starting\r\n"
+            "[12:00:03.000] [ 2048] [WARN ] [hello] a | pipe\r\n"
+            "[12:00:04.000] [ 2048] [ERROR] crashed\r\n  called from x.dll+0x10\r\n")
 
 
 def zip_bytes(files, method):

@@ -24,6 +24,19 @@ std::string_view next_word(std::string_view& text) {
     return word;
 }
 
+// A line count for /tome logs: 1 to kLogsMax, digits only.
+bool parse_count(std::string_view word, size_t& out) {
+    if (word.empty() || word.size() > 3) return false;
+    size_t n = 0;
+    for (char c : word) {
+        if (c < '0' || c > '9') return false;
+        n = n * 10 + static_cast<size_t>(c - '0');
+    }
+    if (n < 1 || n > kLogsMax) return false;
+    out = n;
+    return true;
+}
+
 } // namespace
 
 std::string lowercase(std::string_view text) {
@@ -87,6 +100,23 @@ TomeCommand parse_tome(std::string_view args) {
     } else if (action == "reload") {
         out.action = TomeAction::Reload;
         out.id = std::string(id);
+    } else if (action == "logs" || action == "log") {
+        out.action = TomeAction::Logs;
+        bool have_filter = false, have_count = false;
+        for (std::string_view word = id; !word.empty(); word = next_word(args)) {
+            std::string lower = lowercase(word);
+            if (!have_filter && (lower == "warn" || lower == "warning" || lower == "warnings" || lower == "error" || lower == "errors")) {
+                out.filter = lower[0] == 'w' ? LogFilter::Warn : LogFilter::Error;
+                have_filter = true;
+            } else if (!have_count && parse_count(word, out.count)) {
+                have_count = true;
+            } else {
+                out = TomeCommand{};
+                out.error = "usage: /tome logs [warn|error] [1-" + std::to_string(kLogsMax) + "]";
+                return out;
+            }
+        }
+        return out;
     } else {
         out.error = "unknown command \"" + action + "\"; try /tome help";
         return out;

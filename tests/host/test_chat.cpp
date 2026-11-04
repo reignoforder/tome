@@ -5,6 +5,7 @@
 #include "harness.h"
 #include "test.h"
 
+#include "log.h"
 #include "mod_manager.h"
 #include "paths.h"
 
@@ -39,6 +40,13 @@ TEST(host_chat_tome_commands) {
     CHECK(running("hello"));
     CHECK_EQ(session.game.chat("/tome nonsense"), 1);  // unknown subcommands are still Tome's
     CHECK_LOG("Chat command: /tome nonsense");
+
+    // /tome logs reads tome.log as log.cpp writes it.
+    CHECK_EQ(session.game.chat("/tome logs 3"), 1);
+    CHECK_LOG("/tome logs: showed 3 lines");
+    TOME_WARN("host test: a warning for /tome logs");
+    CHECK_EQ(session.game.chat("/tome logs warn 1"), 1);
+    CHECK_LOG("/tome logs: showed 1 lines");
 }
 
 TEST(host_chat_mod_command) {

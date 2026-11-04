@@ -30,16 +30,24 @@ std::string lowercase(std::string_view text);
 bool reserved(std::string_view name);
 
 // The /tome command's subcommands.
-enum class TomeAction { Help, List, Enable, Disable, Reload, Invalid };
+enum class TomeAction { Help, List, Enable, Disable, Reload, Logs, Invalid };
+
+// Logs: which lines of tome.log to show.
+enum class LogFilter { All, Warn /* warnings and errors */, Error };
+
+constexpr size_t kLogsDefault = 10;
+constexpr size_t kLogsMax = 30;
 
 struct TomeCommand {
     TomeAction action = TomeAction::Invalid;
     std::string id;     // Enable, Disable: required; Reload: empty means every mod
     std::string error;  // Invalid: what's wrong, for the player
+    LogFilter filter = LogFilter::All;  // Logs
+    size_t count = kLogsDefault;        // Logs: 1 to kLogsMax lines
 };
 
 // Parses the arguments of "/tome": "", "help", "list", "enable <id>",
-// "disable <id>", "reload [id]".
+// "disable <id>", "reload [id]", "logs [warn|error] [count]" (in either order).
 TomeCommand parse_tome(std::string_view args);
 
 } // namespace tome::chat

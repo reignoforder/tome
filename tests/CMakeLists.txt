@@ -20,6 +20,7 @@ add_executable(tome_tests
     test_jass.cpp
     test_json.cpp
     test_keys.cpp
+    test_log_view.cpp
     test_main_menu_fdf.cpp
     test_mappings.cpp
     test_metadata.cpp

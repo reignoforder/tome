@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "core/log_line.h"
+
 #include <cstddef>
 #include <string>
 #include <string_view>
 
 namespace tome::log {
-
-enum class Level { Debug, Info, Warn, Error };
 
 // Opens (truncates) the log file. Messages written before this are only sent
 // to OutputDebugString, which winedbg/DebugView can still show.
@@ -30,6 +30,10 @@ bool find_kept(size_t& from, std::string_view text);
 
 // The end of the kept lines: a find_kept from here sees only later lines.
 size_t kept_size();
+
+// The end of the log file, at most `max_bytes` (the first line may be cut);
+// "" if no file is open or it can't be read.
+std::string read_tail(size_t max_bytes);
 
 void write(Level level, const char* fmt, ...) __attribute__((format(gnu_printf, 2, 3)));
 
