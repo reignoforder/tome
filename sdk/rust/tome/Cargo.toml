@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: MIT-0
+[package]
+name = "tome"
+description = "Safe Rust API for Tome mods"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "MIT-0"  # built into mods (sdk/LICENSE-MIT-0)
+# Not on crates.io (`tome` is taken there): mods use the SDK's copy by path.
+publish = false
+
+[dependencies]
+tome-sys = { path = "../tome-sys" }
+
+[lib]
+doctest = false

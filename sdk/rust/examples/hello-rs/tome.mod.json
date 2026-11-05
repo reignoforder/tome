@@ -1,0 +1,26 @@
+{
+  "$schema": "../../../schemas/tome.mod.schema.json",
+  "schema": 1,
+  "id": "hello-rs",
+  "version": "1.0.0",
+  "name": "Hello Tome (Rust)",
+  "description": "The hello example written in Rust: JASS natives, a main menu button, game events, a hook, a /hellors chat command, settings, a keybind (Ctrl+Shift+H) and a popup.",
+  "authors": ["Tome contributors"],
+  "license": "MIT",
+  "game": "1.27b",
+  "tome": ">=0.1.0 <0.2.0",
+  "entry": "hello_rs.dll",
+  "sync": "client",
+  "reload": "live",
+  "requires": ["CTextFrame::SetText"],
+  "config": "config.schema.json",
+  "keybinds": [
+    { "id": "greet", "label": "Greet", "default": "Ctrl+Shift+H" }
+  ],
+  "natives": [
+    "native HelloRsLog takes integer value returns nothing",
+    "native HelloRsDouble takes real value returns real",
+    "native HelloRsGreet takes string name returns string",
+    "native HelloRsCall takes code callback returns boolean"
+  ]
+}

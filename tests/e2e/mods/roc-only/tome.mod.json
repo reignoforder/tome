@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "id": "roc-only",
+  "version": "1.0.0",
+  "name": "Reign of Chaos only",
+  "description": "Test mod without code for one game: loads in Reign of Chaos, not in The Frozen Throne.",
+  "game": "*",
+  "edition": "roc",
+  "tome": "*",
+  "sync": "client"
+}

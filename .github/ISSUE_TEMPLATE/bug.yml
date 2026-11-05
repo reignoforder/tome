@@ -1,0 +1,63 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+name: Bug report
+description: Tome or the game misbehaves, crashes, or a mod won't load.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Security problems (a way around mod approval, a map or player making Tome run code or write files) go to private reporting instead: see SECURITY.md.
+        A problem in one mod (not Tome) belongs with that mod's author first.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start the game with ...
+        2. Open the Mods menu and ...
+  - type: input
+    id: tome
+    attributes:
+      label: Tome version
+      description: The first line of tome/tome.log, or the window title ("[Tome 0.1.0]").
+    validations:
+      required: true
+  - type: input
+    id: game
+    attributes:
+      label: Game build
+      description: Bottom right of the main menu (1.27.1.7085 is the one Tome supports).
+    validations:
+      required: true
+  - type: dropdown
+    id: system
+    attributes:
+      label: System
+      options:
+        - Windows 11
+        - Windows 10
+        - Windows 7 or 8
+        - Wine or Proton on Linux
+        - Wine on macOS
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: mods
+    attributes:
+      label: Mods
+      description: The mods you use (the "Mods:" list in tome/tome.log), and whether it also happens in safe mode (hold Shift while the game starts).
+  - type: textarea
+    id: log
+    attributes:
+      label: tome.log
+      description: Attach tome/tome.log from the game folder (drag the file here), or paste it. After a crash, attach the report from tome/crashes/ too.
+    validations:
+      required: true

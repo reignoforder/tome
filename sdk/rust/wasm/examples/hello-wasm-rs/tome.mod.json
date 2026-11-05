@@ -1,0 +1,25 @@
+{
+  "$schema": "../../../../schemas/tome.mod.schema.json",
+  "schema": 1,
+  "id": "hello-wasm-rs",
+  "version": "1.0.0",
+  "name": "Hello WebAssembly (Rust)",
+  "description": "The WebAssembly example in Rust (tome-wasm): game events, the main menu, a /hellowasmrs chat command with settings, a key (Ctrl+Shift+R), messages from hello-wasm and JASS natives.",
+  "authors": ["Tome contributors"],
+  "license": "MIT",
+  "game": "1.27b",
+  "tome": ">=0.1.0 <0.2.0",
+  "wasm": "hello_wasm_rs.wasm",
+  "sync": "client",
+  "reload": "live",
+  "config": "config.schema.json",
+  "keybinds": [
+    { "id": "greet", "label": "Greet", "default": "Ctrl+Shift+R" }
+  ],
+  "natives": [
+    "native HelloWasmRsAdd takes integer a, integer b returns integer",
+    "native HelloWasmRsHalf takes real value returns real",
+    "native HelloWasmRsGreet takes string name returns string",
+    "native HelloWasmRsSame takes unit u returns unit"
+  ]
+}

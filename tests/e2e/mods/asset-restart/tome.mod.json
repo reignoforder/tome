@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "id": "asset-restart",
+  "version": "1.0.0",
+  "name": "Asset restart test",
+  "description": "Assets-only test mod whose asset changes wait for a restart.",
+  "game": "1.27b",
+  "tome": "*",
+  "sync": "client",
+  "reload": "restart"
+}

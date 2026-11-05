@@ -1,0 +1,51 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# A published release must carry SHA256SUMS.sig, the maintainer's offline
+# signature of its SHA256SUMS by a key in loader/release-keys.txt
+# (docs/releasing.md). If it doesn't verify, the release goes back to draft
+# and this run fails. Tome's update check makes the same check on its own,
+# so an unsigned release is never announced in the game either way; this
+# keeps one from staying up for people downloading by hand.
+name: Release check
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  signature:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write  # gh release edit --draft
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Verify SHA256SUMS.sig
+        id: verify
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          mkdir release
+          # Every file SHA256SUMS lists (ci.yml, "Draft release"), or the check below fails.
+          gh release download "$TAG" --dir release --pattern 'SHA256SUMS' --pattern 'SHA256SUMS.sig' \
+            --pattern 'tome-*.zip' --pattern 'WAMR-*.tar.gz' --pattern 'toolchain.txt'
+          python3 -I tools/release_sign.py verify release/SHA256SUMS release/SHA256SUMS.sig
+          # The signed hashes are the files' as published.
+          (cd release && sha256sum --check --strict SHA256SUMS)
+
+      - name: Back to draft
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          gh release edit "$TAG" --draft=true
+          echo "::error::$TAG isn't signed with a release key (or its files don't match SHA256SUMS): it's a draft again. docs/releasing.md"

@@ -1,0 +1,26 @@
+{
+  "$schema": "../../schemas/tome.mod.schema.json",
+  "schema": 1,
+  "id": "hello-wasm",
+  "version": "1.0.0",
+  "name": "Hello WebAssembly",
+  "description": "The example mod as a sandboxed WebAssembly module: lifecycle, game events, the main menu, a /hellowasm chat command with settings, a key (Ctrl+Shift+W), messages between mods and JASS natives.",
+  "authors": ["Tome contributors"],
+  "license": "MIT",
+  "game": "1.27b",
+  "tome": ">=0.1.0 <0.2.0",
+  "wasm": "hello_wasm.wasm",
+  "sync": "client",
+  "reload": "live",
+  "config": "config.schema.json",
+  "keybinds": [
+    { "id": "greet", "label": "Greet", "default": "Ctrl+Shift+W" }
+  ],
+  "natives": [
+    "native HelloWasmAdd takes integer a, integer b returns integer",
+    "native HelloWasmHalf takes real value returns real",
+    "native HelloWasmGreet takes string name returns string",
+    "native HelloWasmSame takes unit u returns unit",
+    "native HelloWasmCall takes code callback returns boolean"
+  ]
+}

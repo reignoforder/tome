@@ -1,0 +1,42 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "config.schema.schema.json",
+  "title": "Tome mod settings schema",
+  "description": "A mod's settings (tome.mod.json \"config\"), a small subset of JSON Schema; the mod menu makes a settings page from it (sdk/docs/tome-mod-json.md, \"Settings\").",
+  "type": "object",
+  "required": ["properties"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "type": { "const": "object" },
+    "properties": {
+      "type": "object", "maxProperties": 64,
+      "propertyNames": { "pattern": "^[A-Za-z0-9._-]{1,64}$" },
+      "additionalProperties": { "$ref": "#/definitions/setting" },
+      "description": "One entry per setting, in the order the page shows them; the key is what setting_* names."
+    }
+  },
+  "definitions": {
+    "setting": {
+      "type": "object", "required": ["type"], "additionalProperties": false,
+      "properties": {
+        "type": { "enum": ["boolean", "integer", "number", "string"] },
+        "title": { "type": "string", "description": "The label; defaults to the key." },
+        "description": { "type": "string", "description": "About three lines show." },
+        "default": {},
+        "minimum": { "type": "number" },
+        "maximum": { "type": "number" },
+        "step": { "type": "number", "exclusiveMinimum": 0, "description": "What - and + change it by." },
+        "input": { "enum": ["buttons", "text"], "description": "Integers and numbers: - and + buttons (the default), or a box to type in." },
+        "enum": { "type": "array", "minItems": 1, "items": { "type": "string" }, "description": "Strings: the choices." },
+        "enumTitles": { "type": "array", "items": { "type": "string" }, "description": "How each choice is shown." },
+        "maxLength": { "type": "integer", "minimum": 1, "maximum": 4096, "description": "Strings: the longest value." }
+      },
+      "allOf": [
+        { "if": { "properties": { "type": { "const": "boolean" } } }, "then": { "properties": { "default": { "type": "boolean" } } } },
+        { "if": { "properties": { "type": { "const": "integer" } } }, "then": { "properties": { "default": { "type": "integer" } } } },
+        { "if": { "properties": { "type": { "const": "number" } } }, "then": { "properties": { "default": { "type": "number" } } } },
+        { "if": { "properties": { "type": { "const": "string" } } }, "then": { "properties": { "default": { "type": "string" } } } }
+      ]
+    }
+  }
+}

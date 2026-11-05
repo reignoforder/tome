@@ -1,0 +1,14 @@
+{
+  "$schema": "../../schemas/tome.mod.schema.json",
+  "schema": 1,
+  "id": "my-wasm-mod",
+  "version": "0.1.0",
+  "name": "My Wasm Mod",
+  "description": "A sandboxed Tome mod in C, from sdk/templates/wasm.",
+  "authors": ["You"],
+  "game": "1.27b",
+  "tome": ">=0.1.0 <0.2.0",
+  "wasm": "my_wasm_mod.wasm",
+  "sync": "client",
+  "natives": ["native MyWasmModAdd takes integer a, integer b returns integer"]
+}

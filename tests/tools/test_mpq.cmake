@@ -1,0 +1,57 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# tome-mpq on a copy of the game's first melee map (the e2e test's map is
+# built the same way): list, extract, put, extract again, and its errors.
+# cmake -DMPQ=<tome-mpq.exe> -DWINE=<wine or empty> -DGAME=<game folder> -DWORK=<folder> -P test_mpq.cmake
+# TOME_GAME_DIR in the environment (`make test <version>`) overrides GAME.
+# Says "skipped: no melee map" (SKIP_REGULAR_EXPRESSION) without a map.
+# CMake 3.20 (the project's minimum): no cmake_language(EXIT) or file(COPY_FILE).
+if(DEFINED ENV{TOME_GAME_DIR} AND NOT "$ENV{TOME_GAME_DIR}" STREQUAL "")
+    set(GAME "$ENV{TOME_GAME_DIR}")
+endif()
+file(GLOB maps "${GAME}/Maps/*.w3m")
+if(NOT maps)
+    message("skipped: no melee map in ${GAME}/Maps")
+    return()
+endif()
+list(SORT maps)
+list(GET maps 0 source)
+get_filename_component(source_name "${source}" NAME)
+file(REMOVE_RECURSE "${WORK}")
+file(MAKE_DIRECTORY "${WORK}")
+file(COPY "${source}" DESTINATION "${WORK}")
+file(RENAME "${WORK}/${source_name}" "${WORK}/map.w3m")
+
+function(mpq expected_code out)
+    execute_process(COMMAND ${WINE} "${MPQ}" ${ARGN} RESULT_VARIABLE code OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+    if(NOT code EQUAL expected_code)
+        message(FATAL_ERROR "tome-mpq ${ARGN}: exit ${code}, not ${expected_code}\n${stdout}${stderr}")
+    endif()
+    set(${out} "${stdout}${stderr}" PARENT_SCOPE)
+endfunction()
+function(expect text in)
+    string(FIND "${in}" "${text}" at)
+    if(at EQUAL -1)
+        message(FATAL_ERROR "expected \"${text}\" in:\n${in}")
+    endif()
+endfunction()
+
+mpq(0 out list "${WORK}/map.w3m")
+expect("war3map.j" "${out}")
+mpq(0 out extract "${WORK}/map.w3m" war3map.j "${WORK}/war3map.j")
+file(APPEND "${WORK}/war3map.j" "\n// tome-mpq test\n")
+mpq(0 out put "${WORK}/map.w3m" war3map.j "${WORK}/war3map.j")
+mpq(0 out extract "${WORK}/map.w3m" war3map.j "${WORK}/again.j")
+file(READ "${WORK}/again.j" again)
+expect("// tome-mpq test" "${again}")
+
+mpq(2 out)
+expect("usage: tome-mpq" "${out}")
+mpq(2 out list "${WORK}/map.w3m" extra)
+expect("usage: tome-mpq" "${out}")
+mpq(1 out list "${WORK}/missing.w3m")
+expect("can't open archive" "${out}")
+mpq(1 out extract "${WORK}/map.w3m" no-such-file "${WORK}/x")
+expect("can't extract no-such-file" "${out}")
+mpq(1 out put "${WORK}/map.w3m" x.txt "${WORK}/no-such-input")
+expect("can't add x.txt" "${out}")
+file(REMOVE_RECURSE "${WORK}")

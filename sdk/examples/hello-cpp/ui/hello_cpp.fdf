@@ -1,0 +1,14 @@
+// The hello-cpp mod's button, created on the main menu from code. Its own
+// names, so it can sit beside the other hello examples' buttons.
+
+IncludeFile "UI\FrameDef\Glue\StandardTemplates.fdf",
+
+Frame "GLUETEXTBUTTON" "HelloCppButton" INHERITS WITHCHILDREN "StandardSmallButtonTemplate" {
+    Width 0.12,
+    Height 0.03,
+
+    ButtonText "HelloCppButtonText",
+    Frame "TEXT" "HelloCppButtonText" INHERITS "StandardButtonTextTemplate" {
+        Text "Hello (C++)",
+    }
+}

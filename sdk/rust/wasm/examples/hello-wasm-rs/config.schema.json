@@ -1,0 +1,14 @@
+{
+  "$schema": "../../../../schemas/config.schema.schema.json",
+  "type": "object",
+  "properties": {
+    "greeting": {
+      "type": "string", "title": "Greeting", "maxLength": 32, "default": "Hello",
+      "description": "What /hellowasmrs and the Greet key say"
+    },
+    "repeat": {
+      "type": "integer", "title": "Repeat", "minimum": 1, "maximum": 3, "default": 1,
+      "description": "How many times /hellowasmrs logs it"
+    }
+  }
+}

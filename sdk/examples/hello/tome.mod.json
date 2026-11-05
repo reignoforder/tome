@@ -1,0 +1,31 @@
+{
+  "$schema": "../../schemas/tome.mod.schema.json",
+  "schema": 1,
+  "id": "hello",
+  "version": "1.0.0",
+  "name": "Hello Tome",
+  "description": "Example mod that logs each lifecycle step, adds JASS natives (numbers, strings, callbacks), buttons on the menus and in game, logs game events, adds /hello and /helloobj chat commands (the selected unit and its owner read and changed through properties and natives), settings, a Greet key (Ctrl+G) and popups (Ctrl+Shift+P).",
+  "authors": ["Tome contributors"],
+  "license": "MIT",
+  "icon": "icon.blp",
+  "game": "1.27b",
+  "tome": ">=0.1.0 <0.2.0",
+  "entry": "hello.dll",
+  "sync": "client",
+  "reload": "live",
+  "requires": ["CTextFrame::SetText"],
+  "config": "config.schema.json",
+  "keybinds": [
+    { "id": "greet", "label": "Greet", "default": "Ctrl+G" },
+    { "id": "popup", "label": "Show a popup", "default": "Ctrl+Shift+P" }
+  ],
+  "natives": [
+    "native HelloLog takes integer value returns nothing",
+    "native HelloLogReal takes real value returns nothing",
+    "native HelloDouble takes real value returns real",
+    "native HelloGreet takes string name returns string",
+    "native HelloCall takes code callback returns boolean",
+    "native HelloRun takes code callback returns nothing",
+    "native HelloOnGameStart takes code callback returns nothing"
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "schema": 2,
+  "module": "blizzard.ax",
+  "name": "blizzard.ax",
+  "file_version": "5.0.2.0",
+  "pe_timestamp": "0x3cdc61d0",
+  "size_of_image": "0x00096000",
+  "sha256": "7d418d54b82effe2d21c2da70d06876eac8a2400e04bcf8f5fbb9da7909f4c19",
+  "symbols": {
+
+    "BlzFilter::Transform": {
+      "kind": "function", "rva": "0x00004020", "conv": "thiscall",
+      "sig": "HRESULT(void* this, IMediaSample* in, IMediaSample* out)",
+      "bytes": "57 56 55 53 81 ec ac 00 00 00 8b e9 8b 9c 24 c0 00 00 00 8b 94 24 c4 00 00 00 8b 32 8d 44 24 78 50 52 ff 56 34",
+      "doc": "The BLZ0 (DivX) filter's CTransformFilter::Transform: decodes one frame into the output sample, but never sets its length, so the sample keeps its whole buffer's (width * 4 * height). These bytes run up to the output sample's GetMediaType (this in ebp). movie-frame-length wraps it through its vtable slot under Wine. See docs/reverse-engineering.md, blizzard.ax."
+    },
+    "BlzFilter.vtable.Transform_slot": {
+      "kind": "data", "rva": "0x000623e4",
+      "doc": "The filter's vtable slot (.data1) holding BlzFilter::Transform; movie-frame-length points it at its wrapper (patch_pointer)."
+    },
+    "BlzFilter.width": {
+      "kind": "offset", "value": "0xec",
+      "doc": "int32: the movie's width. Set by SetMediaType (0x34D0) and by Transform when a sample changes the type, as are the fields below."
+    },
+    "BlzFilter.height": { "kind": "offset", "value": "0xf0", "doc": "int32: the movie's height." },
+    "BlzFilter.format": {
+      "kind": "offset", "value": "0xf4",
+      "doc": "uint32: the output format code (core/movie_decoder.h, Format: 1 YUY2, 2 UYVY, 4 RGB32, 6 RGB24, 8 RGB555, 0xA RGB565, 0xD YV12/I420)."
+    },
+    "BlzFilter.output_width": {
+      "kind": "offset", "value": "0x1ec",
+      "doc": "int32: the output type's biWidth, the row width Transform writes (0x404498); 0 means the movie's width rounded up to 32."
+    }
+  }
+}

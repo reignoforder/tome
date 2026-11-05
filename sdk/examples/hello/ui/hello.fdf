@@ -1,0 +1,15 @@
+// The hello mod's button. The mod loads this file with api->load_fdf,
+// creates "HelloButton" on the main menu, the single player screen and in
+// the game (one create context each) and anchors it from code.
+
+IncludeFile "UI\FrameDef\Glue\StandardTemplates.fdf",
+
+Frame "GLUETEXTBUTTON" "HelloButton" INHERITS WITHCHILDREN "StandardSmallButtonTemplate" {
+    Width 0.12,
+    Height 0.03,
+
+    ButtonText "HelloButtonText",
+    Frame "TEXT" "HelloButtonText" INHERITS "StandardButtonTextTemplate" {
+        Text "Hello",
+    }
+}

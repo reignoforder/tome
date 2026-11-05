@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "id": "wrong-arch",
+  "version": "0.1.0",
+  "game": "1.27b",
+  "tome": "*",
+  "sync": "client",
+  "entry": "wrong-arch.dll"
+}

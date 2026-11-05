@@ -1,0 +1,11 @@
+# Public keys allowed to sign Tome's releases (SHA256SUMS.sig), built into
+# tome.mix: the update check only announces a release signed with one of
+# them (loader/src/core/update_check.h). One base64 Ed25519 public key per
+# line; '#' starts a comment. The secret keys are kept offline, never in
+# this repository or GitHub (docs/releasing.md). Keep a backup key here too,
+# so a lost or leaked key can be replaced without stranding installs.
+
+# Main release key (signs releases).
+5CUwVuraMMdqoZNTaIEBw3d7m+h/LtExSvvtbZPtkt4=
+# Backup key (kept apart; signs only if the main key is lost or leaked).
+5i6B8yJFM3zGlnhSMaAH/V6np2s6Ag398fZ4Dw0x0HA=

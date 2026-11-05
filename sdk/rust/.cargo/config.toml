@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: MIT
+# Warcraft III is a 32-bit process, so every mod is a PE32 DLL.
+[build]
+target = "i686-pc-windows-gnu"
+
+[target.i686-pc-windows-gnu]
+linker = "i686-w64-mingw32-gcc"
+# A mod loads into a process without MinGW's runtime DLLs (libgcc_s_dw2-1,
+# libwinpthread-1): link them in, as TomeMod.cmake does for C mods.
+rustflags = ["-C", "link-arg=-static", "-C", "link-arg=-static-libgcc"]
+# cargo test runs the tests under Wine.
+runner = "wine"

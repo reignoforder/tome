@@ -1,0 +1,53 @@
+# Build output
+build/
+build-*/
+sdk/rust/target/
+sdk/templates/rust/target/
+sdk/rust/wasm/target/
+sdk/templates/rust-wasm/target/
+sdk/templates/rust-wasm/Cargo.lock
+sdk/templates/rust/Cargo.lock
+# Downloaded at configure time (FetchContent: WAMR, StormLib) into
+# <build>/_deps, whatever the build folder is called; WAMR's old vendored path
+_deps/
+loader/third_party/wamr/core/
+compile_commands.json
+.cache/
+__pycache__/
+
+# Local editor configuration (machine-specific toolchain paths)
+.clangd
+
+# The Warcraft III files the tests read, a folder per version (input/1.27b/:
+# input/README.md). Game files are Blizzard's and must never be committed.
+# A version folder may also be a link to a game folder; only the README is kept.
+/input
+!/input/
+/input/*
+!/input/README.md
+# Where the game's files went before input/ (older checkouts may still have it).
+/WarCraft III/
+
+# Defensive: game data, binaries and generated archives, in case a game folder
+# or extracted files end up inside the repo under another name.
+*.mpq
+*.w3m
+*.w3x
+*.w3n
+*.w3g
+*.w3z
+*.blp
+*.mdx
+*.mdl
+*.tga
+*.exe
+*.dll
+*.mix
+*.ax
+common.j
+Blizzard.j
+war3map.j
+
+# Tome's runtime folders, if the repo root is ever used as a game folder
+/mods/
+/tome/

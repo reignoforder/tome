@@ -1,0 +1,14 @@
+{
+  "$schema": "../../schemas/tome.mod.schema.json",
+  "schema": 1,
+  "id": "my-cpp-mod",
+  "version": "0.1.0",
+  "name": "My C++ Mod",
+  "description": "A Tome mod in C++, from sdk/templates/cpp.",
+  "authors": ["You"],
+  "game": "1.27b",
+  "tome": ">=0.1.0 <0.2.0",
+  "entry": "my-cpp-mod.dll",
+  "sync": "client",
+  "natives": ["native MyCppModAdd takes integer a, integer b returns integer"]
+}

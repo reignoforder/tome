@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "id": "asset-map",
+  "version": "1.0.0",
+  "name": "Asset reload test",
+  "description": "Assets-only test mod whose asset changes wait for the main menu.",
+  "game": "1.27b",
+  "tome": "*",
+  "sync": "client",
+  "reload": "map"
+}

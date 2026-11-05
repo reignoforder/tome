@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "id": "hook-b",
+  "version": "1.0.0",
+  "name": "Hook test B",
+  "description": "e2e fixture: hooks RCString::GetText alongside hook-a and calls it on enable.",
+  "game": "*",
+  "tome": "*",
+  "entry": "hook-b.dll",
+  "sync": "client",
+  "reload": "live",
+  "requires": ["RCString::GetText"]
+}

@@ -1,0 +1,112 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "tome.mod.schema.json",
+  "title": "tome.mod.json",
+  "description": "A Tome mod's metadata (sdk/docs/tome-mod-json.md). Tome checks the file itself when it loads the mod; this schema is for editors.",
+  "type": "object",
+  "required": ["schema", "id", "version", "game", "tome", "sync"],
+  "properties": {
+    "$schema": { "type": "string", "description": "This schema, for editors. Tome ignores it." },
+    "schema": { "const": 1, "description": "The metadata format version: 1." },
+    "id": {
+      "type": "string", "pattern": "^[a-z][a-z0-9_-]{1,63}$", "not": { "const": "tome" },
+      "description": "Unique and stable forever: 2-64 characters, a lowercase letter first, then lowercase letters, digits, '-' or '_'."
+    },
+    "version": {
+      "type": "string", "maxLength": 64,
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\\+[0-9A-Za-z.-]+)?$",
+      "description": "Semantic version, e.g. 1.0.0."
+    },
+    "name": { "type": "string", "description": "Shown in the mod menu; defaults to the id." },
+    "description": { "type": "string" },
+    "authors": { "type": "array", "items": { "type": "string" } },
+    "license": { "type": "string" },
+    "icon": { "$ref": "#/definitions/path", "description": "A .blp or .tga in the mod folder, shown in the mod list." },
+    "links": {
+      "type": "object", "additionalProperties": { "type": "string" },
+      "description": "Reserved (homepage, source, issues); not shown yet."
+    },
+    "game": {
+      "type": "string",
+      "description": "Supported game builds: a range such as \"1.27b\", \">=1.26a <1.29\" or \"*\". Aliases: 1.24e, 1.26a, 1.27a, 1.27b."
+    },
+    "edition": {
+      "enum": ["roc", "tft"],
+      "description": "The one game the mod is for: \"roc\" (Reign of Chaos) or \"tft\" (The Frozen Throne). Leave it out for both."
+    },
+    "tome": { "type": "string", "description": "Supported Tome versions: a semver range such as \">=0.1.0 <0.2.0\"." },
+    "depends": { "$ref": "#/definitions/dependencies", "description": "Must be installed and enabled first: { \"id\": \"range\" }." },
+    "recommends": { "$ref": "#/definitions/dependencies", "description": "Mentioned in the mod's warnings when missing." },
+    "conflicts": { "$ref": "#/definitions/dependencies", "description": "A warning when both run." },
+    "breaks": { "$ref": "#/definitions/dependencies", "description": "Can't run together: one of the two stays off." },
+    "entry": {
+      "description": "The DLL (32-bit), relative to the mod folder; or { \"game range\": \"path\" } checked in order. Leave out for a mod without code.",
+      "oneOf": [
+        { "$ref": "#/definitions/path" },
+        { "type": "object", "additionalProperties": { "$ref": "#/definitions/path" } }
+      ]
+    },
+    "wasm": {
+      "allOf": [{ "$ref": "#/definitions/path" }, { "pattern": "\\.wasm$" }],
+      "description": "A WebAssembly module run sandboxed, relative to the mod folder; instead of \"entry\". Experimental."
+    },
+    "assets": { "$ref": "#/definitions/path", "description": "Folder merged into the game's files; \"assets\" by default." },
+    "requires": {
+      "type": "array", "items": { "type": "string" },
+      "description": "What the mod can't work without: mapped names (\"CTextFrame::SetText\") and game object properties (\"property:mana\"). Tome won't load it on builds that lack one."
+    },
+    "natives": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^\\s*native\\s+[A-Za-z_][A-Za-z0-9_]*\\s+takes\\s+.+\\s+returns\\s+[A-Za-z_][A-Za-z0-9_]*\\s*$" },
+      "description": "JASS declarations of the natives the mod provides, as a map declares them: \"native Foo takes integer x returns nothing\"."
+    },
+    "provides": {
+      "type": "array", "items": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{1,63}$" },
+      "description": "Other ids this mod stands in for in other mods' \"depends\"."
+    },
+    "sync": {
+      "enum": ["client", "required"],
+      "description": "client: only this player needs it. required: every player in a multiplayer game needs the same version (checked in the lobby)."
+    },
+    "reload": {
+      "enum": ["live", "map", "restart"],
+      "description": "When changes to the mod's assets apply: right away (live, the default), at the next map load, or after a restart."
+    },
+    "load": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "after": { "type": "array", "items": { "type": "string" } },
+        "before": { "type": "array", "items": { "type": "string" } }
+      },
+      "description": "Load order among mods that don't depend on each other."
+    },
+    "config": {
+      "$ref": "#/definitions/path",
+      "description": "The settings schema (sdk/schemas/config.schema.schema.json); Tome makes the mod's settings page from it."
+    },
+    "keybinds": {
+      "type": "array",
+      "items": {
+        "type": "object", "required": ["id"], "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9._-]{1,64}$", "description": "What on_keybind names." },
+          "label": { "type": "string", "description": "Shown on the Keybinds page; defaults to the id." },
+          "default": {
+            "type": "string",
+            "description": "Modifiers (Ctrl, Shift, Alt) and a key joined with '+': \"Ctrl+H\", \"F5\", \"Ctrl+Shift+Num1\", or \"None\"."
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "path": {
+      "type": "string", "minLength": 1, "pattern": "^(?![/\\\\])(?!.*:)(?!(.*[/\\\\])?\\.\\.([/\\\\]|$)).*$",
+      "description": "A path inside the mod folder."
+    },
+    "dependencies": {
+      "type": "object",
+      "additionalProperties": { "type": "string", "description": "A semver range: \"^1.0\", \">=1.2 <2\", \"*\"." }
+    }
+  }
+}
