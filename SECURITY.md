@@ -52,6 +52,23 @@ only compares mod lists: **Tome never downloads or installs a mod from
 another player or a map**, and it never will. A missing mod is something you
 install yourself.
 
+**Releases** are built by CI from the tagged commit (reproducibly, with
+build provenance attestations) and signed offline by the maintainer
+(`SHA256SUMS.sig`, keys in `loader/release-keys.txt`). Tome's update check
+only announces a release with a valid signature, and a published release
+without one goes back to draft. How to check a download yourself:
+[`docs/releasing.md`](docs/releasing.md). Worth reporting: a way to make
+Tome announce a release that isn't signed with a release key, or make
+Update Now install anything but the signed zip's `tome.mix` and Tome's own
+texts.
+
+The release keys (Ed25519, base64; the same as `loader/release-keys.txt`):
+
+```
+5CUwVuraMMdqoZNTaIEBw3d7m+h/LtExSvvtbZPtkt4=   main
+5i6B8yJFM3zGlnhSMaAH/V6np2s6Ag398fZ4Dw0x0HA=   backup
+```
+
 ## What it doesn't protect against
 
 - **A mod you allowed.** A WebAssembly mod (experimental) runs in an

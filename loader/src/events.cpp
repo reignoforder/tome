@@ -739,6 +739,7 @@ void TOME_CALL before_game_tick(tome_mod*, tome_hook_call* call, void*) {
 void TOME_CALL before_shutdown(tome_mod*, tome_hook_call*, void*) {
     end_game();
     mod_manager().shutdown();
+    crash_loop::on_shutdown();
     restart::on_shutdown();
 }
 

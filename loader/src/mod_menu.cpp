@@ -21,6 +21,7 @@
 #include "popups.h"
 #include "restart.h"
 #include "tome_settings.h"
+#include "update_check.h"
 
 #include <windows.h>
 #include <shellapi.h>
@@ -121,6 +122,7 @@ menu::Data gather() {
     data.tome.safe_mode = mod_manager().safe_mode();
     data.tome.settings = tome_settings::schema();
     data.tome.settings_values = tome_settings::values();
+    data.tome.updates = update_check::status();
     return data;
 }
 
@@ -201,6 +203,7 @@ bool store_setting(const menu::Action& action) {
         ok = mod_manager().set_setting(action.mod, action.key, action.value, error) == TOME_OK;
     } else if (action.kind == menu::Action::SetTomeSetting) {
         ok = tome_settings::set(action.key, action.value, error);
+        if (ok) update_check::on_setting_changed(action.key);
     } else {
         return false;
     }
@@ -681,6 +684,7 @@ int __thiscall hooked_menu_setup(void* menu, int a, int b) {
     // No map is loaded now, so asset changes that waited for one to end apply.
     mod_manager().on_main_menu();
     crash_loop::on_main_menu();
+    update_check::on_main_menu();
     crash_handler::check_filter();
     return result;
 }

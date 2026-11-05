@@ -26,6 +26,8 @@ bool dir_is_empty(const std::wstring& dir) {
     return empty;
 }
 
+} // namespace
+
 std::wstring module_path(HMODULE module) {
     std::wstring path(MAX_PATH, L'\0');
     for (;;) {
@@ -40,6 +42,8 @@ std::wstring module_path(HMODULE module) {
         path.resize(path.size() * 2);
     }
 }
+
+namespace {
 
 std::wstring dir_of(const std::wstring& path) {
     size_t slash = path.find_last_of(L"\\/");

@@ -2,7 +2,8 @@
 # Packs the SDK into one zip for mod makers (the sdk-dist target in
 # sdk/CMakeLists.txt): cmake -DSDK=<sdk> -DOUT=<zip> -DNAME=<top folder>
 # [-DCHECK_EXE=<tome-check.exe> -DTEST_DLL=<tome_test.dll> -DTEST_IMPLIB=<its import library>]
-# [-DGPL=<Tome's LICENSE> -DTHIRD_PARTY=<loader/third_party>] -P dist.cmake
+# [-DGPL=<Tome's LICENSE> -DTHIRD_PARTY=<loader/third_party>] -DREPRO_ZIP=<Tome's cmake/repro_zip.cmake>
+# [-DPYTHON=<python> -DZIP_TOOL=<cmake/repro_zip.py>] -P dist.cmake
 #
 # Everything in sdk/ but build output (Rust target/ folders, build/ and
 # build-*/ folders such as a template built in place, a template's
@@ -10,6 +11,9 @@
 # lib/ (TomeMod.cmake, "Checks at build time and tests"). The tools are
 # Tome's code (GPL) with third-party code in them: their licenses go into
 # licenses/ (loader/third_party/NOTICES.md).
+if(NOT DEFINED REPRO_ZIP)
+    message(FATAL_ERROR "dist.cmake: -DREPRO_ZIP (Tome's cmake/repro_zip.cmake) is missing")
+endif()
 if((DEFINED CHECK_EXE OR DEFINED TEST_DLL OR DEFINED TEST_IMPLIB) AND NOT (DEFINED GPL AND DEFINED THIRD_PARTY))
     message(FATAL_ERROR "dist.cmake: Tome's tools ship with their licenses: pass -DGPL and -DTHIRD_PARTY too")
 endif()
@@ -46,11 +50,8 @@ if(DEFINED THIRD_PARTY)
     list(TRANSFORM texts PREPEND "licenses/")
     list(APPEND files ${texts})
 endif()
-file(REMOVE "${OUT}")
-execute_process(COMMAND "${CMAKE_COMMAND}" -E tar cf "${OUT}" --format=zip "${NAME}"
-    WORKING_DIRECTORY "${stage}" RESULT_VARIABLE result)
-if(NOT result EQUAL 0)
-    message(FATAL_ERROR "couldn't write ${OUT}")
-endif()
+include("${REPRO_ZIP}")  # reproducible_zip()
+
+reproducible_zip("${OUT}" "${stage}" "${NAME}")
 list(LENGTH files count)
 message(STATUS "SDK: ${OUT} (${count} files)")

@@ -329,7 +329,9 @@ void build_tome(const Data& data, View& view) {
     std::string body;
     body += colored(kGray, "Tome: ") + data.tome.version + "\n";
     body += colored(kGray, "Game: ") + data.tome.game_build + "\n";
-    body += colored(kGray, "Mods folder: ") + data.tome.mods_dir + "\n\n";
+    body += colored(kGray, "Mods folder: ") + data.tome.mods_dir + "\n";
+    if (!data.tome.updates.empty()) body += colored(kGray, "Updates: ") + data.tome.updates + "\n";
+    body += "\n";
     if (data.tome.safe_mode.empty()) {
         body += colored(kGray, "Safe mode: ") + "off\n";
         body += "Safe Mode stops every mod for the rest of this session; you can still turn them on one at a "

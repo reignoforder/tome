@@ -77,16 +77,22 @@ Rust mods need Windows 10 (`WaitOnAddress`; Rust's own minimum).
    (`loader/third_party/licenses.cmake`). No example mod in it.
 4. ~~**CI**~~ Done: `.github/workflows/ci.yml` builds a release build
    in the container, runs `make test` (the Rust bindings check included),
-   and makes both zips on every push; a `v*` tag also makes a draft release
+   and makes both zips, when run by hand or for a `v*` tag (not on every
+   push: since 2026-11-04 it runs on demand), in the Containerfile's `ci`
+   stage (without what running the game needs), its layers cached in the
+   Actions cache. A `v*` tag also makes a draft release
    with both zips, `SHA256SUMS` and the WAMR archive the build used (part of
    the GPL's corresponding source; `loader/third_party/NOTICES.md`), after
-   checking the tag against the project version; publish it by hand. Every
-   push also runs the fuzz targets for 30 s each (`make container-fuzz`).
+   checking the tag against the project version; publish it by hand. Each
+   run also runs the fuzz targets for 30 s each (`make container-fuzz`).
    Actions are pinned to commits, with Dependabot (`.github/dependabot.yml`)
    proposing updates. The e2e test needs game files and stays local
    (`CONTRIBUTING.md`).
 5. **Real Windows:** everything so far ran under Wine with Mesa. One manual
-   pass on Windows 10/11 with Direct3D and Defender on: install, Mods menu,
+   pass on Windows 10/11 with Direct3D and Defender on: install, the update
+check over real HTTPS and Update Now (also in a Program Files install
+without admin rights: it should fail cleanly, not land in the
+VirtualStore; and whether Defender minds a DLL replacing tome.mix), Mods menu,
    approving a DLL mod, settings, keybinds, a LAN game, safe mode, uninstall.
 6. ~~**Crash loops** (§9)~~ Done: starts that don't reach the main menu
    (or a game) are counted in `tome/startups`; after 3 in a row the next
@@ -143,7 +149,10 @@ Rust mods need Windows 10 (`WaitOnAddress`; Rust's own minimum).
     which servers Tome is meant for.
 12. **Mods at launch:** `enhanced-options` and one or two more, and a place
     to list mods (a curated list in its own repository is enough).
-13. Tag `v0.1.0`.
+13. ~~**Release keys**~~ Done (2026-11-04, `docs/releasing.md`): a main
+    and a backup key, both public keys in `loader/release-keys.txt` and
+    `SECURITY.md`. Left: the secret keys moved offline.
+14. Tag `v0.1.0`.
 
 ## Later
 

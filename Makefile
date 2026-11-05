@@ -23,6 +23,8 @@
 #   ENGINE      container tool: podman or docker (the first one found)
 #   IMAGE_READY 1: the container targets use the $(IMAGE) image as it is,
 #               without rebuilding it first (CI builds it with a cache)
+#   IMAGE_TARGET  `make container`'s stage: ci (build and unit tests only,
+#               as CI's image) or the default, everything (the e2e test too)
 #
 # The tests read the game from input/<version>/ (input/README.md) and never
 # write there.
@@ -34,6 +36,7 @@ DEV        ?= ON
 GENERATOR  ?= $(if $(shell command -v ninja),Ninja,Unix Makefiles)
 ENGINE     ?= $(firstword $(foreach e,podman docker,$(if $(shell command -v $(e)),$(e))))
 IMAGE      ?= tome-dev
+IMAGE_TARGET ?=
 RELEASE_BUILD ?= build-release
 E2E_KEEP   ?= 0
 
@@ -124,7 +127,15 @@ build-folder: $(BUILD)/CMakeCache.txt
 build: build-folder
 	cmake --build $(BUILD)
 
+# In the container without a display (CI, `make container-test`), Wine has
+# no driver to make windows with, and tests that need one fail
+# (host_background_mute_round_trip): its own prefix gets Wine's null display
+# driver. Only there (TOME_CONTAINER, set by the image), never a host prefix.
 test: build
+	@if [ "$${TOME_CONTAINER:-}" = 1 ] && [ -z "$${DISPLAY:-}$${WAYLAND_DISPLAY:-}" ]; then \
+	    wine reg add 'HKCU\Software\Wine\Drivers' /v Graphics /d null /f >/dev/null 2>&1 \
+	        || echo "warning: couldn't select Wine's null display driver"; \
+	fi
 	cd $(BUILD) && ctest --output-on-failure
 
 # The multiplayer test runs even when the first one failed (both report).
@@ -199,7 +210,7 @@ CONTAINER_RUN = $(ENGINE) run --rm -i $(if $(shell test -t 0 && echo yes),-t) \
 
 container:
 	@test -n "$(ENGINE)" || { echo "needs podman or docker"; exit 1; }
-	$(ENGINE) build -t $(IMAGE) -f tools/container/Containerfile tools/container
+	$(ENGINE) build -t $(IMAGE) $(if $(IMAGE_TARGET),--target $(IMAGE_TARGET)) -f tools/container/Containerfile tools/container
 
 # The image, unless IMAGE_READY=1 says it's already built.
 CONTAINER_IMAGE = $(if $(filter 1,$(IMAGE_READY)),,container)

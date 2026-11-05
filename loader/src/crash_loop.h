@@ -33,6 +33,10 @@ void count_start();
 // Bootstrap thread, once the log is open: logs what check() found.
 void log_status();
 
+// The starts before this one that didn't reach the main menu or a game, as
+// check read them (0 before it). The update check's rollback uses it.
+int failed_starts();
+
 // A crash report was written (any thread): if this start is still counted,
 // it's the crash the safe mode popup names.
 void note_crash(const std::string& stem);
@@ -41,6 +45,11 @@ void note_crash(const std::string& stem);
 // after kGoodAfterMs, the first time.
 void on_main_menu();
 void on_game_start();
+
+// The game is shutting down normally (main thread): a start that reached the
+// main menu or a game counts as good at once, without waiting kGoodAfterMs
+// (unless it's in safe mode for a crash loop: that waits for the popup).
+void on_shutdown();
 
 // The game has run on for a while after either: this start is a good one
 // (the count goes back to 0), and after a crash loop the popup offers to

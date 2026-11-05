@@ -16,6 +16,7 @@ Paths g_paths;
 bool g_checked = false;
 crash_report::Starts g_starts;  // as read by check
 bool g_loop = false;            // check() asked for safe mode
+int g_failed_before = 0;        // the count as check() read it (failed_starts)
 std::atomic<bool> g_counting{false};
 bool g_reached = false;  // the main menu or a game; main thread
 SRWLOCK g_lock = SRWLOCK_INIT;  // the file, between note_crash and the main menu
@@ -80,8 +81,14 @@ std::string check(const Paths& paths) {
     g_starts = {};  // a missing or unreadable file counts 0
     std::string text;
     if (read_file(starts_file(), text)) g_starts = crash_report::parse_starts(text);
+    g_failed_before = g_starts.count;
     g_loop = crash_report::is_crash_loop(g_starts.count);
     return g_loop ? crash_report::safe_mode_reason(g_starts.count) : "";
+}
+
+int failed_starts() {
+    // Not g_starts.count: count_start adds this start to it.
+    return g_checked ? g_failed_before : 0;
 }
 
 void count_start() {
@@ -129,6 +136,15 @@ void on_main_menu() {
 
 void on_game_start() {
     reached();
+}
+
+void on_shutdown() {
+    // Reached the main menu or a game and closing normally: a good start,
+    // even within kGoodAfterMs (a restart from a popup, a quick quit). Not
+    // after a crash loop: settling there offers to keep safe mode, a popup
+    // nobody would see now, and the next start would run every mod again
+    // without having asked.
+    if (g_reached && !g_loop) settled();
 }
 
 } // namespace tome::crash_loop

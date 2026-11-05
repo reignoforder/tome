@@ -191,6 +191,8 @@ the log's `Tome <version> starting` line says when it's one.
 | `TOME_HOME` | Use this folder (a Windows path) for `tome/` (and so `tome/mods/`) instead of the game folder. |
 | `TOME_DEBUG_APPROVE` | Allow these mods' code without turning them on in the menu: ids, comma-separated, or `*` for all. For tests. |
 | `TOME_DEBUG_OPEN_MOD_MENU=1` | Open the mod menu automatically once the main menu is up (screenshots). |
+| `TOME_DEBUG_UPDATE_URL` | The URL the update check asks instead of GitHub's (`http://` allowed), e.g. a local file server with a `{"tag_name": "v9.9.9"}` reply. Developer builds never ask or check without it, so tests don't see the first start's question. The release's `SHA256SUMS` and `.sig` are fetched from `<tag>/` next to it. |
+| `TOME_DEBUG_RELEASE_KEY` | One more public key (base64) the update check accepts release signatures from, for a test server's releases. |
 | `TOME_DEBUG_SKIP_MOVIES=1` | Skip each movie with Esc as it starts (a movie presents no frames, so `TOME_DEBUG_CLICKS` can't). Used by the e2e test. |
 | `TOME_DEBUG_EXIT=1` | Exit the way the game's menu does (mods disabled and unloaded) once `tome/debug-exit` appears, so a `--coverage` build writes its counters (`tools/coverage.sh`). |
 | `TOME_DEBUG_CLICKS` | Simulated input for tests, paced by the game rather than a clock: `click:FrameName` clicks a named button, `x,y;...` clicks at a position (fractions of the window), `type:text` types a chat line, `text:abc` types characters (no Enter), `key:Ctrl+J` presses a key, `wait:text` waits for a `tome.log` line containing the text, `until:text` repeats the last action until such a line, `frames:n` waits n frames, `settle` waits until no UI animation runs. See `loader/src/core/debug_script.h`. Used by the e2e test. |
@@ -252,7 +254,15 @@ screen, from `build/test-env/game/`; put mods to try in its `tome/mods/`.
 
 ## Privacy
 
-Tome makes no connections of its own. In a multiplayer game it tells the
+Tome makes no connections of its own unless you let it check for updates:
+on the first start it asks, and if you say yes it asks GitHub once a day
+for the latest release of Tome (nothing about you or your mods is sent;
+GitHub sees your IP address, as with any website). Nothing is downloaded
+unless you click Update Now (or turn on Install Updates Automatically),
+and the new version is installed only if it's the one signed with Tome's
+release key.
+Mods > Tome > Settings > Check for Updates changes the answer. In a
+multiplayer game it tells the
 other players your required mods (`"sync": "required"`: id, version and a
 hash of the files), in the lobby and as game actions that the replay
 records; mods only for you aren't sent. Logs and crash reports stay on

@@ -101,6 +101,8 @@ add_custom_target(sdk-dist
         -DCHECK_EXE=$<TARGET_FILE:tome_check> -DTEST_DLL=$<TARGET_FILE:tome_test>
         -DTEST_IMPLIB=$<TARGET_LINKER_FILE:tome_test>
         -DGPL=${CMAKE_SOURCE_DIR}/LICENSE -DTHIRD_PARTY=${CMAKE_SOURCE_DIR}/loader/third_party
+        -DPYTHON=${Python3_EXECUTABLE} -DZIP_TOOL=${CMAKE_SOURCE_DIR}/cmake/repro_zip.py
+        -DREPRO_ZIP=${CMAKE_SOURCE_DIR}/cmake/repro_zip.cmake
         -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/dist.cmake
     COMMENT "Packing the SDK"
     VERBATIM

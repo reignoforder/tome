@@ -53,6 +53,20 @@ API version 16.
 - Multiplayer: required mods compared in the lobby (the host refuses to
   start while they differ), sent as game actions (replays carry them), and
   locked during a game.
+- Update check, if you allow it (asked on the first start; Tome >
+  Settings): once a day Tome asks GitHub for its latest release and says
+  when there's a newer one (a popup with its release page, and the Tome
+  page). Only releases signed with Tome's release key are announced, with
+  the zip's SHA-256. **Update Now** in the popup downloads the zip, installs
+  it only if its SHA-256 is the signed one, and offers a restart; the
+  previous `tome.mix` stays as `tome.mix.old` and is put back if the new one
+  doesn't reach the main menu twice. **Install Updates Automatically**
+  (Tome > Settings, off by default) installs a signed new version as soon
+  as it's found instead of asking; it runs from the next start. Tome's only
+  connection of its own.
+- Releases: reproducible builds (the same commit gives the same bytes),
+  build provenance attestations, and an offline signature of `SHA256SUMS`
+  (`docs/releasing.md`).
 
 ### Mods menu
 

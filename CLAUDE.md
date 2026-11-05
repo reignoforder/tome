@@ -23,7 +23,8 @@ make container-fuzz FUZZ_SECONDS=30       # the same in the container (build-con
 tools/gen-rust-bindings.sh               # after changing tome.h: regenerate sdk/rust/tome-sys (bindgen)
 tools/gen-wasm-consts.py                 # after changing tome.h's enums: regenerate the Wasm SDKs' constants (C and Rust)
 make sdk                                 # build/tome-sdk-<version>.zip, the SDK for mod makers
-make container-test / container-e2e      # the same in a podman/docker image (tools/container/); CI runs container-test (.github/workflows/ci.yml)
+tools/release_sign.py sign|verify ...    # release signatures (SHA256SUMS.sig); releases, keys, reproducible builds: docs/releasing.md
+make container-test / container-e2e      # the same in a podman/docker image (tools/container/); CI runs container-test (.github/workflows/ci.yml: on demand and v* tags, in the image's `ci` stage)
 make deploy INSTALL_DIR=<game folder>    # copy tome.mix into a game folder (never input/): only when asked to
 ```
 
@@ -96,6 +97,12 @@ default) puts it in its own Xvfb; `tools/game.sh` shows it on screen unless
 - **`TOME_DEBUG_*` only work in developer builds** (`-DTOME_DEV=ON`, the
   Makefile's default). A build folder configured by hand without it ignores
   them; `tools/e2e-test.sh` refuses it.
+- **The update check is off in developer builds** unless
+  `TOME_DEBUG_UPDATE_URL` is set (a local server's URL: `http://` allowed
+  there); release builds ask on the first start. It only announces releases
+  signed with a key in `loader/release-keys.txt` (`TOME_DEBUG_RELEASE_KEY`
+  adds a test key). `docs/architecture.md`, "Update check";
+  `docs/releasing.md` for signing and reproducible builds.
 - **New mods with a DLL don't run until allowed** (approval, `core/mod_state.*`).
   A test that installs one sets `TOME_DEBUG_APPROVE=<ids>` (or `*`); for
   `tools/game.sh start` pass it like any other variable.

@@ -16,6 +16,8 @@ std::wstring g_file;  // tome/settings.json
 json::Value g_stored = json::Value::object();  // the file as last read or written, unknown keys kept
 json::Value g_values = json::Value::object();  // every setting, defaults filled in
 std::atomic<bool> g_widescreen{true};
+std::atomic<bool> g_update_check{false};
+std::atomic<bool> g_update_install{false};
 
 // Call with g_lock held exclusively. Logs what's wrong in the file only
 // when `warn` (at startup): a later set() would repeat it.
@@ -26,6 +28,8 @@ void refresh(bool warn) {
         for (const std::string& w : warnings) TOME_WARN("tome/settings.json: %s", w.c_str());
     }
     g_widescreen = get_bool(g_values, kWidescreen);
+    g_update_check = get_bool(g_values, kUpdateCheck);
+    g_update_install = get_bool(g_values, kUpdateInstall);
 }
 
 } // namespace
@@ -45,7 +49,9 @@ void init(const Paths& paths) {
         }
     }
     refresh(true);
-    TOME_INFO("Tome settings: widescreen %s", g_widescreen ? "on" : "off");
+    TOME_INFO("Tome settings: widescreen %s, update check %s, automatic install %s", g_widescreen ? "on" : "off",
+              !g_stored.find(kUpdateCheck) ? "not asked yet" : g_update_check ? "on" : "off",
+              g_update_install ? "on" : "off");
 }
 
 json::Value values() {
@@ -74,6 +80,19 @@ bool set(const std::string& key, const json::Value& value, std::string& error) {
 
 bool widescreen() {
     return g_widescreen.load(std::memory_order_relaxed);
+}
+
+bool update_check_on() {
+    return g_update_check.load(std::memory_order_relaxed);
+}
+
+bool update_install_on() {
+    return g_update_install.load(std::memory_order_relaxed);
+}
+
+bool stored(const std::string& key) {
+    SharedLock hold(g_lock);
+    return g_stored.find(key) != nullptr;
 }
 
 } // namespace tome::tome_settings

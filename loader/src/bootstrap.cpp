@@ -22,6 +22,7 @@
 #include "patches.h"
 #include "paths.h"
 #include "tome_settings.h"
+#include "update_check.h"
 #include "watcher.h"
 
 #include <atomic>
@@ -205,6 +206,11 @@ DWORD bootstrap() {
         TOME_INFO("Running inside the World Editor; editor support isn't implemented yet. Tome is idle.");
         return 0;
     }
+
+    // As early as the log allows: its rollback of an update that didn't start
+    // has to run before anything that version could crash in (the mods' first
+    // load, below, and the game's own startup going on meanwhile).
+    update_check::init(g_paths);
 
     for (const std::string& error : mapping_errors()) {
         TOME_ERROR("Mapping database: %s", error.c_str());

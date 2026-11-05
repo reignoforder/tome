@@ -32,9 +32,15 @@ neither Tome nor its authors can do anything about that. Tome isn't a cheat
 and isn't built to hide from anything.
 
 **What other players see.** Tome makes no connections of its own and
-sends nothing anywhere but to the other players of a game you're in. There,
-it shows them your *required* mods (those marked `"sync": "required"`, which
-every player of a game needs), each as its id, version and a hash of its
+sends nothing anywhere but to the other players of a game you're in, with
+one exception you choose: if you allow update checks (asked on the first
+start; Mods > Tome > Settings), Tome asks GitHub once a day for its latest
+release, and if you click Update Now (or turned on Install Updates
+Automatically), downloads it. Those requests carry
+Tome's version and nothing about you or your mods; GitHub sees your IP
+address as with any website. To the other
+players of a game, Tome shows your *required* mods (those marked
+`"sync": "required"`, which every player of a game needs), each as its id, version and a hash of its
 files. In a lobby, a host running Tome with required mods sends its list to
 each player, and a player with Tome answers whoever sent one (host or not)
 with theirs; nothing is sent otherwise. In a game, every player with required mods sends the list to the

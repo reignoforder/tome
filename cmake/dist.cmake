@@ -37,12 +37,9 @@ foreach(t IN LISTS texts)
     text("${stage}/tome/licenses/${t}" "licenses/${t}")
 endforeach()
 
-file(REMOVE "${OUT}")
-execute_process(COMMAND "${CMAKE_COMMAND}" -E tar cf "${OUT}" --format=zip tome.mix tome
-    WORKING_DIRECTORY "${stage}" RESULT_VARIABLE result)
-if(NOT result EQUAL 0)
-    message(FATAL_ERROR "couldn't write ${OUT}")
-endif()
+include("${CMAKE_CURRENT_LIST_DIR}/repro_zip.cmake")
+
+reproducible_zip("${OUT}" "${stage}" tome.mix tome)
 file(SHA256 "${OUT}" hash)
 get_filename_component(name "${OUT}" NAME)
 file(WRITE "${OUT}.sha256" "${hash}  ${name}\n")

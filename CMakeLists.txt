@@ -13,8 +13,18 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+include(cmake/ccache.cmake)  # TOME_CCACHE
+
 # MinGW's default printf family is msvcrt's, which lacks C99 formats like %zu.
 add_compile_definitions(__USE_MINGW_ANSI_STDIO=1)
+
+# Reproducible binaries: without this, ld writes the link time into each
+# .exe/.dll (the PE header and the export table, and so the checksum), the
+# only difference between two builds of the same commit. Anyone can rebuild a
+# release and compare hashes (docs/releasing.md).
+if(MINGW)
+    add_link_options(-Wl,--no-insert-timestamp)
+endif()
 
 # The game folders the tests read: input/<version>/ (input/README.md).
 # Nothing writes there. TOME_GAME_DIR is the tests' default (1.27b); the

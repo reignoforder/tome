@@ -5,6 +5,7 @@
 #include "log.h"
 #include "main_thread.h"
 #include "paths.h"
+#include "update_check.h"
 
 #include <cwchar>
 #include <string>
@@ -21,12 +22,6 @@ constexpr unsigned kCloseTimeoutMs = 60000;
 
 bool g_pending = false;  // main thread
 unsigned g_sequence = 0;
-
-std::wstring module_path(HMODULE module) {
-    wchar_t path[MAX_PATH];
-    DWORD len = GetModuleFileNameW(module, path, MAX_PATH);
-    return len == 0 || len >= MAX_PATH ? std::wstring() : std::wstring(path, len);
-}
 
 HMODULE self_module() {
     HMODULE self = nullptr;
@@ -66,7 +61,11 @@ void on_shutdown() {
     if (!g_pending) return;
     g_pending = false;
     std::wstring exe = module_path(nullptr);
-    std::wstring mix = module_path(self_module());
+    // The helper is this version's TomeRestartW, from the file this code
+    // came from: after an update, tome.mix is the new version (which may
+    // take other arguments, or not load), and this one is tome.mix.old.
+    std::wstring mix = update_check::loaded_file();
+    if (mix.empty()) mix = module_path(self_module());
     wchar_t system[MAX_PATH];
     UINT system_len = GetSystemDirectoryW(system, MAX_PATH);
     if (exe.empty() || mix.empty() || system_len == 0 || system_len >= MAX_PATH) {

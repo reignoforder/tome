@@ -56,6 +56,7 @@ struct TomeInfo {
     std::string game_build;  // e.g. "1.27b (1.27.1.7085)"
     std::string mods_dir;
     std::string safe_mode;   // why safe mode is on; "" if it isn't
+    std::string updates;     // the update check's line (update_check::status_line); "" hides it
     settings::Schema settings;    // Tome's own (core/tome_settings.h)
     json::Value settings_values;  // ...and their values
 };

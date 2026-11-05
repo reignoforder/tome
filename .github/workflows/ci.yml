@@ -1,20 +1,27 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Builds Tome and runs `make test` in the tools/container image: the same
-# toolchain, Wine and Rust targets as `make container-test`. Without the game
+# Builds Tome and runs `make test` in the tools/container image's `ci` stage
+# (the same toolchain, Wine and Rust targets as `make container-test`,
+# without what running the game needs). Runs only when asked: "Run workflow" (Actions tab, or `gh workflow run
+# ci.yml`), or a v* tag, which makes the release. Without the game
 # the tests on game.dll skip themselves; the e2e test needs the game (and a
 # developer build) and doesn't run here. The build is a release one
 # (DEV=OFF: tome.mix ignores the TOME_DEBUG_* variables), so the player
 # download and the SDK zip come from it. A v* tag also makes a draft
 # release with both zips, their SHA-256s and the WAMR source archive the
 # build used (the GPL's corresponding source: loader/third_party/NOTICES.md);
-# publish it by hand after a look. Actions are pinned to commits (the
+# publish it by hand after a look and after signing SHA256SUMS offline
+# (docs/releasing.md; release-check.yml takes an unsigned one back to draft). Each file (and tome.mix on its own) gets
+# a build provenance attestation: a record in Sigstore's public log that this
+# workflow built it from the tagged commit, which anyone can check with
+# `gh attestation verify <file> --repo reignoforder/tome` (public
+# repositories only on this plan: skipped while the repository is private).
+# Actions are pinned to commits (the
 # version in a comment); Dependabot proposes updates (.github/dependabot.yml).
 name: CI
 
 on:
   push:
     tags: ['v*']
-  pull_request:
   workflow_dispatch:
 
 concurrency:
@@ -31,7 +38,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
 
-      # The image (~5.5 GB, twice: in the buildx builder and once loaded into
+      # The image (~5.7 GB, twice: in the buildx builder and once loaded into
       # docker) and the build (~3 GB, two Wine prefixes) don't fit in the
       # runner's free space: drop the preinstalled SDKs nothing here uses.
       - name: Free disk space
@@ -41,18 +48,20 @@ jobs:
             /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/share/swift
           df -h /
 
-      # The image changes only with the Containerfile, so its layers come
-      # from the Actions cache.
+      # Only the Containerfile's `ci` stage (no Xvfb, Mesa or sound: CI never
+      # runs the game). Its layers come from the Actions cache, so it's only
+      # built again when the Containerfile changes or the cache expired.
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3.12.0
       - name: Build the container image
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6.19.2
         with:
           context: tools/container
           file: tools/container/Containerfile
+          target: ci
           tags: tome-dev
           load: true
-          cache-from: type=gha,scope=tome-dev
-          cache-to: type=gha,mode=max,scope=tome-dev
+          cache-from: type=gha,scope=tome-ci
+          cache-to: type=gha,mode=max,scope=tome-ci
 
       # The image is in docker and its layers in the Actions cache now: the
       # builder's copy is only taking space.
@@ -60,6 +69,13 @@ jobs:
         run: |
           docker buildx prune --all --force
           df -h /
+
+      # What the image was built from: the same packages give the same bytes
+      # (docs/releasing.md, reproducible builds). Published with a release.
+      - name: Toolchain
+        run: |
+          mkdir -p build-container
+          docker run --rm tome-dev rpm -qa --qf '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\n' | sort > build-container/toolchain.txt
 
       - name: Build and test
         run: make container-test ENGINE=docker IMAGE_READY=1 DEV=OFF
@@ -101,6 +117,7 @@ jobs:
             build-container/loader/tome.mix
             build-container/tome-*.zip
             build-container/WAMR-*.tar.gz
+            build-container/toolchain.txt
           if-no-files-found: error
 
   release:
@@ -110,6 +127,9 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: write
+      id-token: write          # the attestation's Sigstore certificate
+      attestations: write
+      artifact-metadata: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
 
@@ -122,10 +142,24 @@ jobs:
           fi
           echo "VERSION=$version" >> "$GITHUB_ENV"
 
+      # Tome only announces releases signed with a key in this file
+      # (docs/releasing.md): a release without one could never be signed.
+      - name: Release key
+        run: python3 -I tools/release_sign.py check-keys
+
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
         with:
           name: tome-build
           path: dist
+
+      - name: Attest build provenance
+        if: github.event.repository.visibility == 'public'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6  # v4.2.2
+        with:
+          subject-path: |
+            dist/tome-*.zip
+            dist/WAMR-*.tar.gz
+            dist/loader/tome.mix
 
       - name: Draft release
         env:
@@ -134,7 +168,7 @@ jobs:
         run: |
           cd dist
           wamr=$(echo WAMR-*.tar.gz)
-          files=(tome-"$VERSION".zip tome-sdk-"$VERSION".zip "$wamr")
+          files=(tome-"$VERSION".zip tome-sdk-"$VERSION".zip "$wamr" toolchain.txt)
           sha256sum "${files[@]}" > SHA256SUMS
           {
             echo "Unofficial, not affiliated with Blizzard Entertainment: read DISCLAIMER.md."
@@ -142,12 +176,23 @@ jobs:
             echo "- **tome-$VERSION.zip**: for players. Unpack it into your Warcraft III 1.27b folder (next to war3.exe); tome/README.txt inside says the rest."
             echo "- **tome-sdk-$VERSION.zip**: for mod makers (sdk/README.md)."
             echo "- **$wamr**: the WebAssembly runtime's source, as the build used it (with loader/third_party/wamr/patch.cmake)."
+            echo "- **toolchain.txt**: the build image's packages (docs/releasing.md: rebuilding a release to check it)."
             echo
             echo "SHA-256:"
             echo
             echo '```'
             cat SHA256SUMS
             echo '```'
+            echo
+            echo "SHA256SUMS.sig is the maintainer's signature of SHA256SUMS (\`tools/release_sign.py verify SHA256SUMS\`, keys in \`loader/release-keys.txt\`). Tome's update check only announces signed releases."
+            echo
+            if [ "${{ github.event.repository.visibility }}" = public ]; then
+              echo "Built by this repository's CI from \`$GITHUB_REF_NAME\` ($GITHUB_SHA). To check that a file (or an installed tome.mix) came from that build:"
+              echo
+              echo '```'
+              echo "gh attestation verify tome-$VERSION.zip --repo $GITHUB_REPOSITORY"
+              echo '```'
+            fi
           } > notes.md
           gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
             --title "Tome $VERSION" --notes-file notes.md "${files[@]}" SHA256SUMS

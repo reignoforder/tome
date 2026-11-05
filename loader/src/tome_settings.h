@@ -25,4 +25,13 @@ bool set(const std::string& key, const json::Value& value, std::string& error);
 // The widescreen setting; any thread, cheap enough for every frame.
 bool widescreen();
 
+// The update_check setting; any thread, without copying values().
+bool update_check_on();
+
+// The update_install setting; the same.
+bool update_install_on();
+
+// Whether tome/settings.json has `key` (the player chose it, or was asked).
+bool stored(const std::string& key);
+
 } // namespace tome::tome_settings

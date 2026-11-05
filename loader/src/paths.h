@@ -31,6 +31,9 @@ bool init_paths(HMODULE self, Paths& out);
 // folders only.
 std::vector<std::string> migrate_layout(const Paths& paths);
 
+// A loaded module's file (nullptr: the process's .exe), any length; "" on failure.
+std::wstring module_path(HMODULE module);
+
 std::string narrow(const std::wstring& wide);
 std::wstring widen(const std::string& utf8);
 

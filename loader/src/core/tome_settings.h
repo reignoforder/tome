@@ -8,12 +8,20 @@
 //   widescreen  bool, default on: the widescreen patch shows more of the map
 //               at the sides instead of stretching the 3D view
 //               (patches/widescreen.cpp)
+//   update_check  bool, default off: asks GitHub once a day for a newer Tome
+//               (update_check.cpp); asked on the first start, while the file
+//               doesn't have it
+//   update_install  bool, default off: with update_check, installs a signed
+//               newer version as soon as it's found instead of offering
+//               Update Now; it runs from the next start
 
 #include "settings.h"
 
 namespace tome::tome_settings {
 
 constexpr const char* kWidescreen = "widescreen";
+constexpr const char* kUpdateCheck = "update_check";
+constexpr const char* kUpdateInstall = "update_install";
 
 // The schema, parsed once.
 const settings::Schema& schema();

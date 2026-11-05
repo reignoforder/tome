@@ -24,6 +24,12 @@ make container-test  # the same in a container with the whole toolchain (what CI
 make e2e             # the real game, off screen: needs your own game files
 ```
 
+With [ccache](https://ccache.dev) installed, every build folder compiles
+through it (`TOME_CCACHE`, on by default): rebuilds of unchanged code come
+from its cache, as do files another build folder compiled with the same
+options (`build-cov`'s `--coverage` and the release build's `TOME_DEV=0`
+make most of theirs differ from `build`'s).
+
 **The end-to-end test runs only on your machine.** It needs the files of a
 Warcraft III 1.27b install in `input/1.27b/` (`input/README.md`), which this
 repository doesn't have and CI can't use. Run it before a pull request
@@ -76,7 +82,8 @@ binaries needs a license compatible with that, its license text in
 ## Pull requests
 
 - One topic per pull request, with tests for what it changes.
-- `make test` passes (CI runs it in the container, with a short fuzz run);
+- `make test` passes (CI runs it in the container, with a short fuzz run,
+  when a maintainer starts it: it doesn't run on pull requests by itself);
   say whether you ran `make e2e`.
 - Update the docs it affects: `README.md`, `sdk/README.md` and
   `sdk/docs/tome-mod-json.md` for mod makers, `CHANGELOG.md` for anything

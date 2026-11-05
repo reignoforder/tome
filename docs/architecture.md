@@ -1623,6 +1623,99 @@ API version 10: `popup`, `popup_close`, `restart_game`.
   mod's `assets/` from the map script, and plays a game started from the
   main menu to check the `map` and `restart` modes.
 
+## Update check
+
+Tome's only connection of its own, and only once the player allows it.
+
+- **Asking:** Tome's setting `update_check` (`core/tome_settings.*`, off by
+  default). While `tome/settings.json` doesn't have it, the first main menu
+  of a start shows a popup (4 s after Setup, like other UI from code)
+  asking; either answer is saved there, a popup taken away asks again next
+  start. The Tome > Settings page changes it later; turning it on checks
+  at once if a check is due.
+- **Checking** (`update_check.cpp`): at most once a day
+  (`core/update_check.h`, `due`), a GET of GitHub's
+  `repos/reignoforder/tome/releases/latest` over WinHTTP (https only, TLS
+  1.2 asked for explicitly for Windows 7, 15 s timeouts, a 1 MiB cap,
+  user agent `Tome/<version>`) on a thread of its own; the result goes to
+  the main thread. HTTP 404 means no release yet. A failed check is logged
+  and shown on the Tome page, and doesn't count as a check (the next start
+  tries again).
+- **The reply is untrusted** (`parse_release`, `fuzz/fuzz_update.cpp`):
+  only `tag_name` (an optional `v` and a semver, `[A-Za-z0-9.+-]` only),
+  `draft` and `prerelease` are read; the release page's URL is made from the
+  tag (`release_page`), never taken from the reply.
+- **Only signed releases are announced:** for a newer version, Tome fetches
+  the release's `SHA256SUMS` and `SHA256SUMS.sig` (`asset_url`) and checks
+  the signature (over the version and `SHA256SUMS`) against the keys built
+  in from `loader/release-keys.txt`, and that `tome-<version>.zip` is listed
+  (`verify_release`). Anything else is a failed check: logged, on the Tome
+  page, no popup. The zip's hash goes into `update.json` and the popup.
+  `docs/releasing.md` has the signing side.
+- **Telling:** a newer version than this one gets a popup (Update Now;
+  Release Page, which `ShellExecute`s the page; Not Now), once per version
+  (`notified`), and the Tome page's "Updates:" line shows it from then on.
+- **Installing automatically:** with `update_install` on (Tome > Settings,
+  off by default; only with `update_check`), `notify` starts the install
+  instead of showing the popup, once per version (a failed one shows its
+  popup and isn't retried by itself), and the "Tome Updated" popup says it
+  was automatic. It never restarts the game.
+- **Installing (Update Now, one click):** a thread
+  downloads `tome-<version>.zip` (64 MiB cap) and goes on only if its
+  SHA-256 is the one the signed `SHA256SUMS` listed. `plan_install` takes
+  only `tome.mix` and Tome's texts (`tome/README.txt`, `DISCLAIMER.txt`,
+  `licenses/`), never anything else a zip carries (mods, settings, other
+  files); every entry is unpacked in memory first (Tome's zip reader:
+  unsafe names refused). Windows doesn't let a loaded DLL be overwritten,
+  but renamed: the new one is written as `tome.mix.new` (read back and
+  hashed), the loaded one renamed to `tome.mix.old`, the new one to
+  `tome.mix`; the game only loads `*.mix`, so neither leftover runs. Any
+  failure before the last rename leaves the old `tome.mix`. The thread has
+  Windows' file virtualization off (a copy of the process token), so a game
+  folder under Program Files without admin rights fails cleanly instead of
+  writing into the VirtualStore. Right after the swap, `update.json` gets the
+  new `tome.mix`'s SHA-256 (`installed_mix`), before the install finishes,
+  in case the game closes first. Then "Restart Now / Later" (`restart.h`);
+  a failure offers the release page. Restart Now's helper runs from the
+  file this session's code came from (`update_check::loaded_file`: now
+  `tome.mix.old`), not the new `tome.mix`, whose `TomeRestartW` may take
+  other arguments or not load at all.
+- **Rollback:** at startup (the bootstrap thread, as soon as the log is
+  open: before the mods' first load), `tome.mix.old` kept by an update
+  (`old_from_update`: the `tome.mix` in place hashes to `installed_mix`;
+  any other `tome.mix.old`, left by hand or under a developer's build
+  deployed since, is neither rolled back to nor deleted, and the stale
+  `installed_mix` is cleared) with this version's start
+  failing twice in a row (`crash_loop::failed_starts`, as read before this
+  start counted) moves this `tome.mix` to `tome.mix.failed` and the old one
+  back, and records the version in `update.json` (`rolled_back`: never
+  offered again). This start still runs the new version (it's loaded); the
+  old one runs from the next. Once a start has reached the main menu and settled,
+  `tome.mix.old` is removed (not if an update was installed meanwhile: then
+  it's this version, the new one's way back). A clean shutdown after the main menu counts as
+  a good start (`crash_loop::on_shutdown`, except in a crash loop's safe
+  mode), so restarting from the popup
+  within 5 s isn't a failure. It can't help a `tome.mix` that never gets to
+  run its startup.
+- **Once per version:** a version counts as shown (`notified`) when the
+  player answers Release Page or Not Now, or when its install finishes
+  (either way); an install the game closed in the middle of is offered (or
+  installed automatically) again at the next start. A check that finishes
+  while an install runs or after one is dropped: the next start checks again.
+  With `update_check` off, nothing found before is shown or installed.
+- `tome/update.json` keeps the last successful check's time, the latest
+  version and tag, its zip's signed hash, the version last shown, a
+  version that was rolled back, and the hash of the `tome.mix` an update
+  installed (`installed_mix`, cleared once its `tome.mix.old` is removed or
+  rolled back to).
+- **Developer builds** never ask or check without `TOME_DEBUG_UPDATE_URL`
+  (the URL to ask instead, `http://` allowed; the release's files are
+  fetched from `<tag>/SHA256SUMS[.sig]` next to it): the tests start from
+  fresh `TOME_HOME`s and would get the question every time.
+  `TOME_DEBUG_RELEASE_KEY` adds a test key. Checked by hand with a local
+  file server: the question, the check, the popup with a release signed by
+  the test key, and refusals with no key and with another key.
+
 ## Threads
 
 | Thread | Does |
@@ -1630,7 +1723,7 @@ API version 10: `popup`, `popup_close`, `restart_game`.
 | Main (game) | DllMain, InitNatives hook, mod lifecycle after startup, menu, events and chat commands |
 | Bootstrap | first mod load, hashing, window discovery; exits |
 | Watcher | file notifications and polling; posts to main |
-| Short-lived | `post_delayed` timers, `TOME_DEBUG_CLICKS` |
+| Short-lived | `post_delayed` timers, `TOME_DEBUG_CLICKS`, the update check's request |
 
 ## Testing
 

@@ -39,6 +39,7 @@ add_executable(tome_tests
     test_tome_hpp.cpp
     test_objects.cpp
     test_units.cpp
+    test_update_check.cpp
     test_utf8.cpp
     test_verify.cpp
     test_wasm_abi.cpp
@@ -52,6 +53,7 @@ add_executable(tome_tests
 target_link_libraries(tome_tests PRIVATE tome_core)
 # For checking the mapping files against the local install, if present.
 target_compile_definitions(tome_tests PRIVATE TOME_TEST_GAME_DIR="${TOME_GAME_DIR}")
+target_compile_definitions(tome_tests PRIVATE TOME_TEST_RELEASE_KEYS="${CMAKE_SOURCE_DIR}/loader/release-keys.txt")
 target_compile_options(tome_tests PRIVATE -Wall -Wextra -fno-exceptions -fno-rtti)
 target_link_options(tome_tests PRIVATE -static)
 
@@ -141,6 +143,9 @@ if(Python3_FOUND)
     target_compile_definitions(tome_host_tests PRIVATE TOME_TEST_SIGNED=1)
     add_test(NAME tome_sign_selftest
         COMMAND ${Python3_EXECUTABLE} -I "${CMAKE_SOURCE_DIR}/sdk/support/tome_sign.py" selftest)
+    # Release signatures: the same message and signature as test_update_check.cpp.
+    add_test(NAME tome_release_sign_selftest
+        COMMAND ${Python3_EXECUTABLE} -I "${CMAKE_SOURCE_DIR}/tools/release_sign.py" selftest)
     # Every source file says its license (tools/spdx.py lists them with git).
     find_package(Git QUIET)
     if(Git_FOUND AND EXISTS "${CMAKE_SOURCE_DIR}/.git")

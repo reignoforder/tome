@@ -12,6 +12,18 @@ constexpr const char* kSchema = R"({
       "title": "Widescreen",
       "default": true,
       "description": "Shows more of the map at the sides on a screen wider than 4:3, instead of stretching the picture. Also in multiplayer."
+    },
+    "update_check": {
+      "type": "boolean",
+      "title": "Check for Updates",
+      "default": false,
+      "description": "Once a day at startup, asks GitHub whether there's a newer Tome and says so. Installs only when you click Update Now (or with Install Updates Automatically on); sends nothing about you or your mods."
+    },
+    "update_install": {
+      "type": "boolean",
+      "title": "Install Updates Automatically",
+      "default": false,
+      "description": "With Check for Updates on: installs a new Tome as soon as it's found, if it's signed with Tome's release key, without asking. It runs from the next start; the game isn't restarted for it."
     }
   }
 })";

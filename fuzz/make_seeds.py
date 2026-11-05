@@ -115,6 +115,16 @@ add("signature", '{"schema": 1, "key": "AAAA", "signature": ""}')
 add("signature", KEY)
 add("signature", "QQ==")
 
+# The update check: GitHub's latest-release reply and tome/update.json.
+add("update", '{"tag_name": "v0.2.0", "name": "Tome 0.2.0", "draft": false, "prerelease": false, '
+              '"html_url": "https://github.com/reignoforder/tome/releases/tag/v0.2.0"}')
+add("update", '{"tag_name": "v1.0.0-rc.1", "prerelease": true}')
+add("update", '{"last_check": 1793750400, "latest": "0.2.0", "tag": "v0.2.0", "notified": "0.1.0"}')
+add("update", "a" * 64 + "  tome-0.2.0.zip\n" + "b" * 64 + "  tome-sdk-0.2.0.zip\n\0"
+              '{"schema": 1, "key": "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=", "signature": '
+              '"IJMzA9ZjeAREI7UyI1cmUdEWpUqMUGNMAjQqZOhi9fEnv6uLgnrTf6/w+b91fLCFwsNHFhbn+6jPv5TJU3xxBg=="}')
+add("update", "# release keys\n11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=\n")
+
 # A native's signature, then argument words and strings.
 add("wasm_layout", b"(Hunit;RS)Hunit;\n" + bytes([5, 0, 16, 0]) + b"abcde" + bytes(8) + b"xyz")
 add("wasm_layout", b"(ISC)V\n" + bytes(12))

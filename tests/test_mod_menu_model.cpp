@@ -333,7 +333,18 @@ TEST(menu_tome_settings_page) {
     CHECK_EQ(v.rows[0].name, std::string("Widescreen"));
     CHECK_EQ(v.rows[0].button, std::string("On"));
     CHECK(!v.rows[0].info.empty());
-    CHECK(v.footer[0].empty());  // one page
+    // Widescreen, Check for Updates, Install Updates Automatically: two
+    // rows each, so 4 rows take two pages.
+    CHECK_EQ(v.rows[2].name, std::string("Check for Updates"));
+    CHECK_EQ(v.footer[0], std::string("Previous"));
+    CHECK_EQ(v.footer[1], std::string("Next"));
+    click_footer(s, d, 4, 1);  // Next
+    View second = build(s, d, 4);  // kept: CHECK_EQ holds references to what it compares
+    CHECK_EQ(second.rows[0].name, std::string("Install Updates Automatically"));
+    CHECK_EQ(second.rows[0].button, std::string("Off"));
+    click_footer(s, d, 4, 0);  // Previous
+    View first = build(s, d, 4);
+    CHECK_EQ(first.rows[0].name, std::string("Widescreen"));
     CHECK_EQ(v.footer[2], std::string("Keybinds"));
     CHECK_EQ(v.footer[3], std::string("Back"));
 

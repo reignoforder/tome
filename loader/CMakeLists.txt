@@ -2,6 +2,19 @@
 include(${CMAKE_SOURCE_DIR}/cmake/embed_mappings.cmake)
 tome_embed_mappings("${CMAKE_CURRENT_BINARY_DIR}/generated/embedded_mappings.cpp" "${CMAKE_SOURCE_DIR}/mappings")
 
+# The release keys (release-keys.txt) as one string in tome.mix; the update
+# check parses it (core/update_check.h, parse_keys).
+set(TOME_RELEASE_KEYS_FILE "${CMAKE_CURRENT_SOURCE_DIR}/release-keys.txt")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${TOME_RELEASE_KEYS_FILE}")
+file(READ "${TOME_RELEASE_KEYS_FILE}" TOME_RELEASE_KEYS_TEXT)
+file(CONFIGURE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/release_keys.cpp" @ONLY CONTENT
+"// Generated from loader/release-keys.txt by loader/CMakeLists.txt.
+namespace tome::update_check {
+extern const char* const kReleaseKeysText;
+const char* const kReleaseKeysText = R\"tome_keys(@TOME_RELEASE_KEYS_TEXT@)tome_keys\";
+}
+")
+
 # Monocypher (third_party/monocypher, BSD-2 or CC0): Ed25519 signature
 # checks for tome.sig (core/signature.*). Its own warnings, not Tome's.
 add_library(monocypher STATIC
@@ -143,6 +156,7 @@ add_library(tome_core STATIC
     src/core/signature.cpp
     src/core/tome_settings.cpp
     src/core/units.cpp
+    src/core/update_check.cpp
     src/core/verify.cpp
     src/core/version.cpp
     src/core/wasm_abi.cpp
@@ -207,6 +221,8 @@ add_library(tome_runtime OBJECT
     src/storm.cpp
     src/tome_settings.cpp
     src/units.cpp
+    src/update_check.cpp
+    ${CMAKE_CURRENT_BINARY_DIR}/generated/release_keys.cpp
     src/unwind.cpp
     src/wasm_mods.cpp
     src/watcher.cpp
@@ -245,7 +261,7 @@ target_link_options(tome_loader PRIVATE
     $<$<CONFIG:Release>:-s>
 )
 
-target_link_libraries(tome_runtime PUBLIC bcrypt version ole32 wamr)
+target_link_libraries(tome_runtime PUBLIC bcrypt version ole32 winhttp wamr)
 # Linking an object library adds its objects (and its definitions) to tome.mix.
 target_link_libraries(tome_loader PRIVATE tome_runtime)
 
@@ -285,9 +301,12 @@ if(TOME_DEV)
         VERBATIM
     )
 else()
+    find_package(Python3 COMPONENTS Interpreter QUIET)  # cmake/repro_zip.py
     add_custom_target(dist
         COMMAND ${CMAKE_COMMAND} -DMIX=$<TARGET_FILE:tome_loader> -DOUT=${CMAKE_BINARY_DIR}/tome-${PROJECT_VERSION}.zip
-            -DVERSION=${PROJECT_VERSION} -DSOURCE=${CMAKE_SOURCE_DIR} -P ${CMAKE_SOURCE_DIR}/cmake/dist.cmake
+            -DVERSION=${PROJECT_VERSION} -DSOURCE=${CMAKE_SOURCE_DIR}
+            -DPYTHON=${Python3_EXECUTABLE} -DZIP_TOOL=${CMAKE_SOURCE_DIR}/cmake/repro_zip.py
+            -P ${CMAKE_SOURCE_DIR}/cmake/dist.cmake
         DEPENDS tome_loader
         COMMENT "Packing the player download"
         VERBATIM
