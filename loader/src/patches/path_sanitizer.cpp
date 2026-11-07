@@ -46,6 +46,7 @@
  */
 #include "patches.h"
 
+#include "core/log_guard.h"
 #include "core/path_guard.h"
 #include "hooks.h"
 #include "log.h"
@@ -162,13 +163,12 @@ bool g_preload_unsafe = false;
 size_t g_custom_map_data_max = path_guard::kMaxPathLen;
 
 // A map can call these natives in a loop with an arbitrary (long, multi-line)
-// name: log the first refusals in full, then only every kLogEvery-th, and
-// print at most kLogChars of the name with control characters replaced, so a
-// map can neither flood tome.log nor forge lines in it. The first refusal of
-// each native for each reason is logged too, whatever came before it (at most
-// 2 * kCount lines), so one is never lost behind other refusals.
-constexpr unsigned long kLogFirst = 20;
-constexpr unsigned long kLogEvery = 1000;
+// name: log the first refusals in full, then only every kEvery-th
+// (log::Throttle), and print at most kLogChars of the name with control
+// characters replaced, so a map can neither flood tome.log nor forge lines
+// in it. The first refusal of each native for each reason is logged too,
+// whatever came before it (at most 2 * kCount lines), so one is never lost
+// behind other refusals.
 constexpr size_t kLogChars = 160;
 enum Reason { kTooLong, kEscapes, kReasons };
 bool g_logged[kCount][kReasons] = {};
@@ -193,7 +193,7 @@ bool escapes(size_t i, uint32_t jass_string) {
     const Reason reason = too_long ? kTooLong : kEscapes;
     const bool first_of_kind = !g_logged[i][reason];
     g_logged[i][reason] = true;
-    if (first_of_kind || total <= kLogFirst || total % kLogEvery == 0) {
+    if (first_of_kind || log::Throttle::logs(total)) {
         char shown[kLogChars + 1];
         size_t n = 0;
         for (; n < kLogChars && path[n]; ++n) {
@@ -287,7 +287,7 @@ bool list_native_runs(size_t i) {
     }
     if (!g_preload_unsafe) return true;
     ++g_list_refused;
-    if (g_list_refused <= kLogFirst || g_list_refused % kLogEvery == 0) {
+    if (log::Throttle::logs(g_list_refused)) {
         TOME_WARN("path-sanitizer: refused %s() -- the preload list holds a name that escapes the data folder "
                   "(total %lu)", kListSpecs[i].name, g_list_refused);
     }

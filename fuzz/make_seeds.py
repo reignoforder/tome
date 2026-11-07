@@ -39,6 +39,13 @@ for text in [
 ]:
     add("handshake", text)
 
+# Mods' messages: "<sender><value as 4 bytes><mission>\t<key>" per action.
+def netmsg_line(sender, part, count, mission, key):
+    return bytes([sender]) + struct.pack("<i", part | count << 8) + mission.encode() + b"\t" + key.encode()
+add("netmsg", netmsg_line(1, 0, 1, "1 1 hello", "aGVsbG8="))
+add("netmsg", netmsg_line(1, 0, 2, "1 2 my-mod", "A" * 252) + b"\n" + netmsg_line(1, 1, 2, "1 2 my-mod", "AAAA"))
+add("netmsg", netmsg_line(2, 0, 1, "1 3 hello", ""))
+
 for text in ["/tome list", "/tome enable hello", "/tome disable my-mod", "/tome reload", "/tome logs warn 20", "/Hello  some  args ",
              "/x\targ", "/tome help"]:
     add("chat", text)

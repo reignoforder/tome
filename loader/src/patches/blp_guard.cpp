@@ -30,6 +30,7 @@
 #include "patches.h"
 
 #include "core/blp.h"
+#include "core/log_guard.h"
 #include "hooks.h"
 #include "log.h"
 #include "patch.h"
@@ -91,10 +92,8 @@ uint32_t g_buffer_offset = 0;
 uint32_t g_size_offset = 0;
 std::atomic<unsigned long> g_refused_total{0};  // textures may load off the main thread
 
-// A map or mod could hand the game many bad textures; log the first few in
-// full, then rarely, so tome.log can't be flooded.
-constexpr unsigned long kLogFirst = 20;
-constexpr unsigned long kLogEvery = 1000;
+// A map or mod could hand the game many bad textures: log::Throttle keeps
+// them from flooding tome.log.
 
 // AFTER CBLPFile::Open(this, name, context) -> int (1 on success). `this` is
 // args[0] (thiscall). On success the object holds the loaded file at
@@ -112,7 +111,7 @@ void TOME_CALL on_blp_open(tome_mod*, tome_hook_call* call, void*) {
 
     call->result = 0;  // the game treats this exactly like a wrong-magic file
     const unsigned long total = ++g_refused_total;
-    if (total <= kLogFirst || total % kLogEvery == 0) {
+    if (log::Throttle::logs(total)) {
         TOME_WARN("blp-guard: refused a malformed texture (%s, %u bytes); it won't be decoded (total %lu)", reason,
                   size, total);
     }

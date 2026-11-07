@@ -55,6 +55,9 @@ MODS="$HOME_DIR/tome/mods"
 STATE="$HOME_DIR/tome/state.json"
 LOG="$HOME_DIR/tome/tome.log"
 mkdir -p "$MODS"
+# Every launch with Stop on Memory Corruption on (Tome > Settings, off by
+# default): the game must run through the whole test with it.
+printf '{"harden_heap": true}\n' >"$HOME_DIR/tome/settings.json"
 TOME_HOME_WIN="$(winepath -w "$HOME_DIR" 2>/dev/null)"
 [[ -n "$TOME_HOME_WIN" ]] || die "winepath couldn't convert $HOME_DIR"
 WINE_PID=""
@@ -390,12 +393,12 @@ check "Assets at startup: $ASSET_FILES files from 3 mods \(0 overridden" "mods' 
 check "Asset probe .*: [0-9]+ bytes, fnv1a $PROBE_HASH" "the game reads the mod's texture instead of its own"
 check "Bootstrap complete" "bootstrap finished" 15
 if [[ "$GAME_VERSION" == 1.27b ]]; then
-    check "Patches: [0-9]+ applied, 0 skipped: memhack-guard applied.*path-sanitizer applied.*blp-guard applied.*d3d-reset-lights applied.*gl-context-restore applied.*background-mute applied.*widescreen applied.*ambient-sound applied" "every built-in patch applied"
+    check "Patches: [0-9]+ applied, 0 skipped: memhack-guard applied.*path-sanitizer applied.*blp-guard applied.*d3d-reset-lights applied.*gl-context-restore applied.*background-mute applied.*widescreen applied.*ambient-sound applied.*lan-map-guard applied" "every built-in patch applied"
 else
     # Another build may leave a patch out: for want of its symbols
     # (mappings/<version>.json), or its variant for that build says why.
     for patch in memhack-guard path-sanitizer blp-guard d3d-reset-lights gl-context-restore background-mute widescreen \
-        ambient-sound; do
+        ambient-sound lan-map-guard; do
         check "Patches: .*$patch (applied|skipped \(${GAME_VERSION//./\\.} has no mapping for|skipped \(not for ${GAME_VERSION//./\\.}: )" \
             "$patch applied (or not for this build)"
     done
@@ -403,9 +406,12 @@ else
 fi
 check "Game objects: 31 of 31 properties mapped; jass_call learns the natives" "every game object property mapped"
 check_absent "blp-guard.*unclamped" "the BLP header-copy clamp was applied"
+check "Tome settings: .*stop on memory corruption on" "the heap setting read"
+check "Stop on memory corruption: (on|set, but Wine's heap doesn't act on it)" "heap termination on corruption set"
 check "Main-thread dispatcher installed" "main-thread dispatcher installed"
 check "Events: hooked screens, map load, game start and end, frames, game ticks, shutdown, chat, pause, units, spells, damage, experience, players, resources, keys, menus, dialogs, levels and saved games" "event hooks installed"
 check "\[hello\] 100 ticks" "tick events reach mods"
+check "\[hello\] the host is player 0" "host_player: the local player hosts a single player game"
 check "\[hello-cpp\] loaded \(Tome [0-9.]+, Warcraft III ${GAME_VERSION//./\\.}, game\.dll at 0x[0-9a-f]{8}\)" "a C++ mod loaded"
 check "\[hello-cpp\] CTextFrame::SetText is a thiscall function at 0x[0-9a-f]{8} \(void\(CTextFrame\* this" \
     "a C++ mod resolved a mapped name"

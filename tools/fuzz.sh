@@ -6,7 +6,7 @@
 #   tools/fuzz.sh [seconds per target, default 60] [target ...]
 #   tools/fuzz.sh 300 handshake zip
 #
-# Targets: handshake chat zip inflate json jass paths blp signature update wasm_abi wasm_layout wamr (fuzz/fuzz_<name>.cpp).
+# Targets: handshake netmsg chat zip inflate json jass paths blp signature update wasm_abi wasm_layout wamr (fuzz/fuzz_<name>.cpp).
 # The corpus grows in build-fuzz/corpus/<target> from run to run, seeded by
 # fuzz/make_seeds.py. A crashing input lands in build-fuzz/crashes/<target>/;
 # after fixing it, copy it to fuzz/regressions/<target>/ so later runs start
@@ -19,7 +19,7 @@ BUILD="$(realpath -m "${FUZZ_BUILD:-$ROOT/build-fuzz}")"
 SECONDS_EACH="${1:-60}"
 shift || true
 TARGETS=("$@")
-[[ ${#TARGETS[@]} -gt 0 ]] || TARGETS=(handshake chat zip inflate json jass paths blp signature update wasm_abi wasm_layout wamr)
+[[ ${#TARGETS[@]} -gt 0 ]] || TARGETS=(handshake netmsg chat zip inflate json jass paths blp signature update wasm_abi wasm_layout wamr)
 
 cmake -S "$ROOT/fuzz" -B "$BUILD" -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_BUILD_TYPE=RelWithDebInfo >/dev/null
 cmake --build "$BUILD"

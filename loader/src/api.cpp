@@ -3,6 +3,7 @@
 
 #include "events.h"
 #include "frames.h"
+#include "handshake.h"
 #include "hooks.h"
 #include "intermod.h"
 #include "keybinds.h"
@@ -10,6 +11,7 @@
 #include "mod_manager.h"
 #include "mod_mappings.h"
 #include "natives.h"
+#include "net_messages.h"
 #include "objects.h"
 #include "popups.h"
 #include "settings_api.h"
@@ -88,6 +90,11 @@ const tome_symbol* TOME_CALL api_resolve(const char* name) {
         if (std::strcmp(sym.name, name) == 0) return &sym;
     }
     return mod_mappings::resolve(name);  // "<mod id>/<name>": a mod's own mapping file
+}
+
+int32_t TOME_CALL api_host_player() {
+    if (!frames::on_main_thread()) return -1;
+    return handshake::host_slot();
 }
 
 size_t TOME_CALL api_read_game_file(const char* name, void* buffer, size_t size) {
@@ -190,6 +197,8 @@ void init_api(const GameBuild& build) {
     g_api.register_native = api_register_native;
     g_api.resolve = api_resolve;
     g_api.read_game_file = api_read_game_file;
+    g_api.host_player = api_host_player;
+    net_messages::fill_api(g_api);
     frames::fill_api(g_api);
     hooks::init(build.base, build.known ? build.known->data : nullptr);
     mod_mappings::init(build.base);

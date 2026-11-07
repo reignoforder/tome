@@ -75,6 +75,11 @@ helpers check for you.
   each object is still there before it touches it. In a multiplayer game
   or a replay, only `"sync": "required"` mods may change properties or run
   natives.
+- **The game's host** [17]: which player created the current game
+  (`host_player`), the same on every player's computer, also in replays.
+- **Messages between players** [18]: send up to 1 KiB to your mod on every
+  player's computer (`net_send`, `on_net_message`), all at the same point
+  of the game, the replay included.
 
 A mod built against an older `tome.h` keeps working with a newer Tome: the
 API only ever grows.

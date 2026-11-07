@@ -10,10 +10,12 @@
 // on both sides; a player without Tome sees the host's (readable) lines. The
 // host refuses to start while a player's set differs or hasn't arrived.
 //
-// A client can't tell which player hosts (the game doesn't say where Tome
-// can read it), so it answers every player who sends a set and says so when
-// more than one did: a player pretending to host can't divert the replies the
-// real host checks, only add a note.
+// A client knows the host by its net id where the build maps it (the game's
+// router gives a game's creator player number 1: set_host), and counts only
+// the host's set. It answers every player who sends a set all the same, so a
+// player pretending to host can't divert the replies the real host checks;
+// it only gets a note naming it. Without the mapping, a second sender is
+// noted, since the client can't tell which one hosts.
 //
 // In a game, every player with required mods sends one SyncStoredInteger
 // action per mod right after the start. Actions reach every player and are
@@ -21,6 +23,7 @@
 // sets and says who differs.
 
 #include <map>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -147,6 +150,14 @@ public:
     // the lobby (people, not computers). `now`: seconds, any clock.
     void update(bool host, const ModSet& local, const std::vector<LobbyPlayer>& others, double now);
 
+    // Client: the host's net id (the player whose number is 1, which a
+    // game's creator always is: NetGetPlayerNumber), or -1 if unknown.
+    // Known, only the host's set counts: another player who sends one is
+    // named in a note and ignored (it still gets a reply, so a wrong id
+    // can't keep the real host from starting). Unknown, a second sender is
+    // noted, since a client can't tell which one hosts.
+    void set_host(int id) { host_id_ = id; }
+
     // A Tome line (is_tome_line) from player `from`.
     void receive(int from, std::string_view text);
 
@@ -185,6 +196,8 @@ private:
     // host's; each sender gets our replies.
     std::map<int, ModSet> claims_;
     bool warned_no_host_ = false;
+    int host_id_ = -1;
+    std::set<int> ignored_;  // client: non-hosts whose sets were ignored (noted once each)
     std::vector<Outgoing> outgoing_;
     std::vector<std::string> notes_;
 };

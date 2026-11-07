@@ -18,6 +18,7 @@ json::Value g_values = json::Value::object();  // every setting, defaults filled
 std::atomic<bool> g_widescreen{true};
 std::atomic<bool> g_update_check{false};
 std::atomic<bool> g_update_install{false};
+bool g_harden_heap_at_start = false;  // set once, by init
 
 // Call with g_lock held exclusively. Logs what's wrong in the file only
 // when `warn` (at startup): a later set() would repeat it.
@@ -49,9 +50,10 @@ void init(const Paths& paths) {
         }
     }
     refresh(true);
-    TOME_INFO("Tome settings: widescreen %s, update check %s, automatic install %s", g_widescreen ? "on" : "off",
-              !g_stored.find(kUpdateCheck) ? "not asked yet" : g_update_check ? "on" : "off",
-              g_update_install ? "on" : "off");
+    g_harden_heap_at_start = get_bool(g_values, kHardenHeap);
+    TOME_INFO("Tome settings: widescreen %s, update check %s, automatic install %s, stop on memory corruption %s",
+              g_widescreen ? "on" : "off", !g_stored.find(kUpdateCheck) ? "not asked yet" : g_update_check ? "on" : "off",
+              g_update_install ? "on" : "off", g_harden_heap_at_start ? "on" : "off");
 }
 
 json::Value values() {
@@ -88,6 +90,11 @@ bool update_check_on() {
 
 bool update_install_on() {
     return g_update_install.load(std::memory_order_relaxed);
+}
+
+bool harden_heap_at_start() {
+    SharedLock hold(g_lock);
+    return g_harden_heap_at_start;
 }
 
 bool stored(const std::string& key) {

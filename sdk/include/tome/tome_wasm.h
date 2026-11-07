@@ -211,6 +211,12 @@ TOME_WASM_IMPORT(get_keyed_property) int32_t tome_get_keyed_property(uint32_t ob
 TOME_WASM_IMPORT(set_keyed_property) int32_t tome_set_keyed_property(uint32_t object, int32_t property, uint32_t key, double value);
 /* Every unit, item, destructable or player (TOME_OBJECT_*) as handles, up to `max`; how many there are, -1 if not. */
 TOME_WASM_IMPORT(list_objects) int32_t tome_list_objects(int32_t type, uint32_t* out, int32_t max);
+/* The current game's host: its player slot (0 = Player 1), -1 outside a game (tome.h, host_player). */
+TOME_WASM_IMPORT(host_player) int32_t tome_host_player(void);
+/* Messages between players (tome.h, net_send): up to TOME_NET_MAX_MESSAGE bytes to this mod on every
+ * player's computer, from the game's first step on; tome_on_net_message (below) receives them. */
+TOME_WASM_IMPORT(net_send) int32_t tome_net_send(const void* data, uint32_t size);
+TOME_WASM_IMPORT(on_net_message) int32_t tome_raw_on_net_message(uint32_t callback);
 /* One argument or the result of jass_call: the member the native's signature
  * says. Handles are JASS handle ids here (tome_handle_of), not this module's
  * object handles; strings are UTF-8. */
@@ -286,6 +292,8 @@ typedef void (*tome_message_fn)(const char* topic, const void* data, uint32_t si
  * if it's one of this call's own arguments of that type (others become
  * null). Natives returning code aren't available. */
 typedef uint32_t (*tome_native_fn)(const uint32_t* args, void* user);
+/* A message from `player` (its slot); `replay` 1 while a replay plays it back. */
+typedef void (*tome_net_message_fn)(int32_t player, const void* data, uint32_t size, int32_t replay, void* user);
 
 int32_t tome_register_command(const char* name, tome_text_fn fn, void* user);  /* fn gets the arguments */
 int32_t tome_on_setting_changed(tome_text_fn fn, void* user);                  /* fn gets the key */
@@ -295,6 +303,7 @@ int32_t tome_frame_on_click(tome_frame_t button, tome_click_fn fn, void* user);
 int32_t tome_on_keybind(const char* id, tome_text_fn fn, void* user);          /* fn gets the id */
 int32_t tome_subscribe(const char* topic, tome_message_fn fn, void* user);
 int32_t tome_register_native(const char* name, tome_native_fn fn, void* user);
+int32_t tome_on_net_message(tome_net_message_fn fn, void* user);
 /* fn may be NULL; *id (may be NULL) gets the popup's id. */
 int32_t tome_popup(const char* title, const char* text, const char* const* options, int32_t option_count,
                    int32_t default_option, int32_t cancel_option, tome_popup_fn fn, void* user, uint32_t* id);

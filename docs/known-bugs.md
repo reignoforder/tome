@@ -281,6 +281,46 @@ copy, with a mip past its end, checks the
 clamp is applied, and checks the guard refuses the file without crashing the
 game. Covers maps and mods alike.
 
+### Map downloads from a host
+
+**Read from the code on 1.27b (Nov 2026; same on 1.26a).** When a player
+joins a LAN or Battle.net game, the host sends the map's path as it has it
+(`Maps\FrozenThrone\(2)EchoIsles.w3x`), its size and checksums. The
+client checks the path with the map transfer's `MapTransfer::IsValidName`
+(game.dll `0x979000`), then looks for the map at that path under the game
+folder (`0x9789E0`), then by its base name anywhere under `Maps\`, and
+only if neither matches downloads it into `Maps\Download\<base name>`
+(`0x979090`; files up to 128 MB). The game's check refuses an absolute
+path, any of `*/:><|&+^?"`, an extension other than `.w3m` and `.w3x`, and a
+base name that is a DOS device (`nul`, `con`, `prn`, `aux`, `com1`–`9`,
+`lpt1`–`9`), compared up to the last dot. So the download can't be written
+outside `Maps\Download\`, nor get another extension. Two gaps remain:
+
+- **`..` components pass.** A host can point the client's lookup at a
+  `.w3m`/`.w3x` anywhere relative to the game folder, and with enough of
+  them anywhere on its drive: the client opens and checksums the file, tells
+  the host whether it matches, and plays it if it does. That leaks whether a
+  file the host knows exists on the player's disk, and loads a map from
+  outside `Maps\`.
+- **A device name with a second dot passes** (`com1.x.w3x`, also `conin$`,
+  `conout$` and the superscript ports, which the game's table lacks). Windows
+  before 11 still opens the device for such a name: the lookup reads from a
+  port or the console (a read that may never return), and the download
+  writes the map to it.
+
+Not reached: UNC paths and other drives (the game folder is put in front),
+and the base name the download is written under.
+
+**Fix implemented (lan-map-guard, built-in patch).** An AFTER handler on
+`MapTransfer::IsValidName` also refuses what the path sanitizer's
+`path_guard::is_unsafe` refuses: `..` components, device names by Windows'
+own rules, `:`, rooted paths, names over 259 characters. The transfer is
+then not made, as for a name the game refuses, and the client can't join
+with that map. A host's own maps have plain relative paths. The hook is
+reserved. `tests/game` calls the real check through the guard (a host's
+real paths pass, the game's own refusals stay, the gaps above are
+refused); not checked against a modified host in a LAN game.
+
 ## Fixed only after 1.27b
 
 These are all still present in 1.27b.
@@ -643,11 +683,9 @@ path, BLP) plus the path-length limits are what exists today.
    how old, is unknown — no FreeType strings found). `tests/game` loads
    game.dll without running it, so it could host a direct fuzzer over these
    parsers (slow under Wine, but it would find real bugs).
-5. **Replays (`.w3g`) and saves (`.w3z`), and LAN map downloads.** Files
-   players receive from others. For LAN downloads, check where the client
-   stores a downloaded map and whether the host-supplied name is cleaned
-   (path traversal by a malicious host is the classic bug). Replays feed the
-   same action parser as live network play (#6).
+5. **Replays (`.w3g`) and saves (`.w3z`).** Files players receive from
+   others. Replays feed the same action parser as live network play (#6).
+   (LAN map downloads: done, lan-map-guard; "Map downloads from a host".)
 6. **Network actions from other players.** A modified client can send
    malformed action blocks (selection counts, slots, handle ids). Tome already
    hooks the action dispatch for events, so a validation layer could sit there;
@@ -695,6 +733,9 @@ path, BLP) plus the path-length limits are what exists today.
     images). Not viable: ACG (would break Tome's own hooks and mod loading),
     strict handles (may break the game). Each should be off-by-default or
     individually tested, per the stability-first rule.
+    **Heap termination: done** (Nov 2026) as a setting, off by default
+    (Tome > Settings > Stop on Memory Corruption, `architecture.md`,
+    "Settings"); the image-load policy is still open.
 
 ## Sources
 

@@ -105,7 +105,7 @@ static void end(uint32_t saved) {
 
 /* --- callbacks --------------------------------------------------------------- */
 
-enum kind { K_TEXT = 1, K_EVENT, K_UI, K_CLICK, K_POPUP, K_MESSAGE, K_NATIVE };
+enum kind { K_TEXT = 1, K_EVENT, K_UI, K_CLICK, K_POPUP, K_MESSAGE, K_NATIVE, K_NET };
 
 typedef struct entry {
     int kind;
@@ -205,6 +205,10 @@ static void callback(uint32_t id, uint32_t ptr, uint32_t len) {
         ((tome_message_fn)e->fn)((const char*)data, data + 4 + topic_len, len - 4 - topic_len, e->user);
         break;
     }
+    case K_NET:
+        /* [player][replay][data] */
+        if (len >= 8) ((tome_net_message_fn)e->fn)((int32_t)word(data), data + 8, len - 8, (int32_t)word(data + 4), e->user);
+        break;
     }
 }
 
@@ -255,6 +259,11 @@ int32_t tome_on_keybind(const char* key, tome_text_fn fn, void* user) {
 int32_t tome_subscribe(const char* topic, tome_message_fn fn, void* user) {
     const uint32_t id = add(K_MESSAGE, (void*)fn, user);
     return id ? registered(id, tome_raw_subscribe(topic, (uint32_t)tome_strlen(topic), id)) : TOME_ERR_INVALID_ARGUMENT;
+}
+
+int32_t tome_on_net_message(tome_net_message_fn fn, void* user) {
+    const uint32_t id = add(K_NET, (void*)fn, user);
+    return id ? registered(id, tome_raw_on_net_message(id)) : TOME_ERR_INVALID_ARGUMENT;
 }
 
 int32_t tome_register_native(const char* name, tome_native_fn fn, void* user) {

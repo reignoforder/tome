@@ -130,6 +130,7 @@ add_library(tome_core STATIC
     src/core/frames.cpp
     src/core/game_lock.cpp
     src/core/handshake.cpp
+    src/core/netmsg.cpp
     src/core/edition.cpp
     src/core/hash_cache.cpp
     src/core/hooks.cpp
@@ -199,6 +200,7 @@ add_library(tome_runtime OBJECT
     src/mod_mappings.cpp
     src/mod_menu.cpp
     src/mods_ready.cpp
+    src/net_messages.cpp
     src/natives.cpp
     src/overlay.cpp
     src/packages.cpp
@@ -211,6 +213,7 @@ add_library(tome_runtime OBJECT
     src/patches/execute_func_guard.cpp
     src/patches/gl_context_restore.cpp
     src/patches/global_string_guard.cpp
+    src/patches/lan_map_guard.cpp
     src/patches/memhack_guard.cpp
     src/patches/movie_frame_length.cpp
     src/patches/movie_display_reset.cpp

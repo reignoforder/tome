@@ -24,6 +24,25 @@ Tome has three version numbers, which move on their own:
 A release lists the API version it ships. A release that adds API keeps the
 API version of each addition in `tome.h` and `sdk/README.md` ("[14]").
 
+## Unreleased
+
+API version 18.
+
+- **Mods: messages between players** (`net_send`, `on_net_message`, also for
+  WebAssembly mods): up to 1 KiB to the same mod on every player's computer,
+  in the same game step, recorded in replays. From a game's first step on
+  (not at `GAME_START`); in multiplayer, for `"sync": "required"` mods.
+- **Mods: the game's host** (`host_player`, also for WebAssembly mods): the
+  player slot of the player who created the current game.
+- **The lobby handshake knows the host**: a client counts only the host's
+  required mods and names any other player who sends a set. The host's
+  router stamps every lobby line's sender, so a client can't pass for the
+  host (checked in a LAN game).
+- **lan-map-guard** (built-in patch): refuses a host's map path that would
+  make the client open a file outside `Maps\` or a device.
+- **Stop on Memory Corruption** (Tome > Settings, off by default): Windows'
+  heap termination on corruption, from the next start.
+
 ## [0.1.0] - unreleased
 
 The first public release. Warcraft III 1.27b (game.dll 1.27.1.7085) only;

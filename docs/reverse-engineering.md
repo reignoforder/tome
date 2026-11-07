@@ -1186,10 +1186,48 @@ block at `client + index * 0x304`: `+0x278` its state (3 and up: in a game),
 | CPlayerWar3 race | `+0x260` | `GetPlayerRace` (`0x2017C0`, found from the native table's name string) maps the handle with `0x1EDE10` and returns this int, or 1 for no player: 1 human, 2 orc, 3 undead, 4 night elf. The player array's length is `CGameWar3+0x54` (`CGameWar3.player_count`). |
 
 Net ids in a LAN lobby: the host had 128 and the joining player 129 (the
-second of `0x3299A0`'s lists), so scan every byte, not 0–63. Not found: which
-net id the host has, as seen by a client, in general. Candidates: the
-per-player flag at `+0x3C` of a player entry (`0x32B800` tests it for the
-local player before enabling a button), or the lowest id from 128.
+second of `0x3299A0`'s lists), so scan every byte, not 0–63.
+
+**Who hosts** (Nov 2026; `NetGetPlayerNumber`). The game's router hands out
+player numbers from 1, and a game is created with its creator in it: the
+`CNetEventGameCreate` handler (`0x32DF40`) sets the host flag (`+0x28C`) and
+adds the local player with the number the event carries (`+0x18`; the
+single player path `0x32AF10` passes 1 itself). `CNetEventGameJoin`
+(`0x32DFE0`) adds a joining player the same way without the flag, and
+`CNetEventPlayerJoin` (`0x32E230`) the others. In the lobby, player number n
+is net id `0x80 | (n - 1)` (`0x3245C0`, `ret 8`: entry `+0x18` the number,
+`+0x19` the name (16 bytes), `+0x36` the net id). When the game starts the
+entries move to the first list under their game slots (`0x32FF80` from
+`0x32CF10`, which also moves the local id), keeping their numbers. So the
+host is the player whose number is 1: net id 128 in the lobby, its slot in
+the game. `NetGetPlayerNumber` (`0x32B5F0`, `fastcall(id, net_index)`, the
+number in al, 0 for none) gives a net id's number, and `0x32B790` the
+reverse (inlined on 1.26a; its `NetGetPlayerNumber` is `0x53ED90`). Lobby
+slots (`0x29FEA0`'s table, `+0x18`: slots at `+8`, 9 bytes each) hold the
+number in their first byte. A replay plays on net client 1 (`+0x610`), where
+number 1 is the recorded game's host.
+
+Checked in LAN games between two instances (`tools/e2e-multiplayer.sh`): the
+host is 128 in the lobby on both sides, player 0 in the game on both sides,
+and player 0 in the replay. The Battle.net provider (`NetProviderBNET`)
+differs from the LAN one (`NetProviderLTCP`) only in the transport; player
+numbers come from the shared router (`NetRouter.cpp`) and client code, and a
+Battle.net game is hosted by its creator's game like a LAN one, so the host
+is player 1 there too. Not checked by running a Battle.net game. A game
+hosted by a bot (GHost-like hosts) numbers players its own way; Tome warns
+when it hosts under another number, and clients answer every sender.
+
+**Senders can't be faked.** A lobby line's sender (`CNetEventLobby.sender`,
+`+0x15`) is what the host's router saw: the send path (`0x32CA60`) takes the
+sender from the local client (`NetClient.local_id`, `+0x2DC`), and a client
+that set it to 128 for one send (`TOME_DEBUG_LOBBY_AS`, as a modified client
+could) still reached the host as 129 (checked in the LAN test, on 1.27b and
+1.26a: 1.26a's client chain, block size and id offset are the same, through
+`NetClient::Registry` `0x53F340`; on 1.27b it's `0x32AEE0`, a thunk that
+calls `0x06C180` with `0xD`, the registry entry of the chain above: client
+`[[entry + 0x10] + 0x8]`). Lines reach
+other players through the host, so they get the same sender. A modified
+host can still claim anything; it's the host.
 
 ### Esc menu (in games)
 
@@ -1500,6 +1538,29 @@ call sites in game.dll:
 | 401 / 403 | SMemAlloc / SMemFree |
 | 501 / 506 / 507 | SStrCopy / SStrLen / SStrDup |
 | 578 | SStrPrintf |
+
+## Map downloads (for the lan-map-guard patch)
+
+Found from the string `Maps\Download\` (Nov 2026). The map transfer is a
+small file-transfer service in the network library: `0x32BDB0` registers it
+through `0x96A680` → `0x97B820` with the extension list `.w3m;.w3x`
+(`+0x2DA`), the search folder `Maps\` (`+0x3DE`) and the download folder
+`Maps\Download\` (`+0x4E2`), each 0x104 bytes, guarded by a
+`CRITICAL_SECTION` at `+0x2C2` (`0x956D0`/`0x96320` are Enter/Leave). A
+transfer record (`0x987730`) has the path at `+0xC`, the local path found or
+written at `+0x110`, the size at `+0x214`, the checksum at `+0x21C`, the
+buffer at `+0x238` and the bytes received at `+0x23C`.
+
+| What | 1.27b | 1.26a | Notes |
+|------|-------|-------|-------|
+| MapTransfer::IsValidName | `0x979000` | `0x656D70` | `int __thiscall(this, const char* name)`, `ret 4`. 0 if `0x91F00` says the path is absolute (`/` first, `X:`, or `\\`), if it has one of `*/:><\|&+^?"` (`0x91EC0`), if its base name (`0x91D30`: after the last `\` or `/`) has `\/*/:><\|&+^?"` or is a device (`0x91B60`: the part before the last dot against `nul con prn aux com1-9 lpt1-9`, table at `.data 0xCD6EF8`), or if its extension isn't in the list (`0x9788F0`). `..` passes. |
+| Client: start a transfer | `0x989260` | | Parses the host's message (`0x97C750`: path, size up to `0x8000000`, checksums), calls IsValidName on the path, and makes a transfer record with it. |
+| Host: offer a file | `0x985280` | | Calls IsValidName on the host's own path, `0x978D80` reads the file. |
+| Find the map locally | `0x9789E0` | | Game folder (`0x91C20`) + the path as sent, checked by size and checksum (`0x978F20`, through Storm's `SFileOpenFileEx`); then the base name searched under each folder in `+0x3DE` (`0x978CE0`). |
+| Write the download | `0x979090` | | Game folder + `Maps\Download\` + the base name of the path (`0x91D30`), `CreateFile(GENERIC_WRITE, CREATE_ALWAYS)` (`0x93770`). Called from the last part's handler (`0x988276`) once the size and checksum match. |
+
+So a host's path is used as sent only for the first lookup; the written file
+always lands in `Maps\Download\` under its base name.
 
 ## BLP textures (for the BLP guard)
 

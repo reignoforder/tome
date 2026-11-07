@@ -181,6 +181,25 @@ void start_exit_watch() {
     if (thread) CloseHandle(thread);
 }
 
+// The harden_heap setting (Tome > Settings, Stop on Memory Corruption): Windows
+// then ends the process when a heap function finds the heap corrupted,
+// instead of carrying on (war3.exe is linked for Windows XP, so it doesn't
+// get this by default). Process-wide, for every heap, and it can't be undone,
+// so it's read once per start. The process ends through the system's
+// critical-failure path (STATUS_HEAP_CORRUPTION, 0xC0000374), which may skip
+// exception filters: then there's no Tome crash report, only Windows' own
+// (event log, Error Reporting). Not checked on Windows yet.
+void harden_heap() {
+    if (!tome_settings::harden_heap_at_start()) return;
+    if (!HeapSetInformation(nullptr, HeapEnableTerminationOnCorruption, nullptr, 0)) {
+        TOME_WARN("Stop on memory corruption: HeapSetInformation failed (error %lu)", GetLastError());
+    } else if (running_on_wine()) {
+        TOME_INFO("Stop on memory corruption: set, but Wine's heap doesn't act on it");
+    } else {
+        TOME_INFO("Stop on memory corruption: on (the process ends if a heap is found corrupted)");
+    }
+}
+
 DWORD bootstrap() {
     // Until log::open succeeds, TOME_* lines go to the debugger only.
     if (!g_paths_ok) {
@@ -328,6 +347,7 @@ DWORD bootstrap() {
     overlay::log_probe();
 
     tome_settings::init(g_paths);
+    harden_heap();
     HWND window = find_game_window(60000);
     if (window && main_thread::install(window)) {
         TOME_INFO("Main-thread dispatcher installed on the game window (main thread %lu)",

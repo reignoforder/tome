@@ -491,6 +491,23 @@ void TOME_CALL on_message(tome_mod*, const char* topic, const void* data, size_t
     if (!deliver_message(cb, topic, data, size) && cb->impl->depth == 0) fail_call();
 }
 
+// A message between players: [player i32][replay i32][data]. Its own frame,
+// so the block is freed before fail_call (whose unwind skips destructors).
+bool deliver_net_message(Callback* cb, const tome_net_message* m) {
+    std::string block(8, '\0');
+    for (int i = 0; i < 4; ++i) {
+        block[i] = static_cast<char>(static_cast<uint32_t>(m->player) >> (8 * i));
+        block[4 + i] = static_cast<char>(static_cast<uint32_t>(m->replay) >> (8 * i));
+    }
+    if (m->data && m->data_size) block.append(static_cast<const char*>(m->data), m->data_size);
+    return cb->impl->send(cb->id, [&](uint32_t) { return block; });
+}
+
+void TOME_CALL on_net_message_cb(tome_mod*, const tome_net_message* m, void* user) {
+    auto* cb = static_cast<Callback*>(user);
+    if (!deliver_net_message(cb, m) && cb->impl->depth == 0) fail_call();
+}
+
 // --- imports (module "tome") ------------------------------------------------
 // Results are tome_result values unless they say otherwise. Out-parameters
 // (ptr, capacity) return the full length (UINT32_MAX for a buffer outside
@@ -1087,6 +1104,28 @@ int32_t w_set_keyed_property(wasm_exec_env_t env, uint32_t handle, int32_t prope
 
 int32_t w_set_property(wasm_exec_env_t env, uint32_t handle, int32_t property, double value) {
     return w_set_keyed_property(env, handle, property, 0, value);
+}
+
+int32_t w_host_player(wasm_exec_env_t) {
+    return api()->host_player();
+}
+
+int32_t w_net_send(wasm_exec_env_t env, uint32_t data, uint32_t size) {
+    Impl* impl = impl_of(env);
+    std::vector<uint8_t> bytes;
+    if (!wasm::read_bytes(impl->memory(), data, size, TOME_NET_MAX_MESSAGE, bytes)) {
+        TOME_ERROR("[%s] net_send: the message is outside the module's memory or larger than %d bytes",
+                   impl->mod->id.c_str(), TOME_NET_MAX_MESSAGE);
+        return TOME_ERR_INVALID_ARGUMENT;
+    }
+    return api()->net_send(impl->mod, bytes.data(), static_cast<uint32_t>(bytes.size()));
+}
+
+int32_t w_on_net_message(wasm_exec_env_t env, uint32_t callback) {
+    Impl* impl = impl_of(env);
+    if (!impl->can_take_callbacks("on_net_message")) return TOME_ERR_INVALID_ARGUMENT;
+    Callback* cb = impl->callback(callback);
+    return impl->registered(cb, api()->on_net_message(impl->mod, on_net_message_cb, cb));
 }
 
 // Every object of a type, as the module's handles (u32s) in `out`, up to

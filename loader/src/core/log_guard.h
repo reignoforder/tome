@@ -19,6 +19,16 @@ namespace tome::log {
 // most `max_bytes` (at a UTF-8 character boundary) with "..." after it.
 std::string printable(std::string_view text, size_t max_bytes);
 
+// For a guard that refuses something untrusted input can make it refuse
+// over and over (a map in a loop, a host, bad textures): whether to log the
+// refusal numbered `total` (from 1). The first kFirst in full, then every
+// kEvery-th, so tome.log can't be flooded and a long run still shows up.
+struct Throttle {
+    static constexpr unsigned long kFirst = 20;
+    static constexpr unsigned long kEvery = 1000;
+    static constexpr bool logs(unsigned long total) { return total <= kFirst || total % kEvery == 0; }
+};
+
 // How big tome.log may grow. Past `soft` bytes only warnings and errors are
 // written (a crash report still gets in); past `hard`, nothing. The first
 // line dropped gets a notice, once.

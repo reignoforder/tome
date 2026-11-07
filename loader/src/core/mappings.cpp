@@ -620,6 +620,12 @@ bool bind_build(const mappings::Build& build, BuildMappings& out, std::vector<st
     bind("NetGetPlayerName", Kind::Function, net.player_name);
     bind("NetGetLocalPlayer", Kind::Function, net.local_player);
     bind("NetIsHost", Kind::Function, net.is_host);
+    bind_optional("NetGetPlayerNumber", Kind::Function, net.get_player_number);
+    bind_optional("NetClient::Registry", Kind::Function, net.client_registry);
+    bind_optional("NetClientRegistry.holder", Kind::Offset, net.registry_holder_offset);
+    bind_optional("NetClientHolder.client", Kind::Offset, net.holder_client_offset);
+    bind_optional("NetClient.block_size", Kind::Constant, net.client_block_size);
+    bind_optional("NetClient.local_id", Kind::Offset, net.client_local_id_offset);
     bind("NetIsReplay", Kind::Function, net.is_replay);
     bind("CNetEventSyncStoredInteger::Init", Kind::Function, net.sync_init);
     bind("CNetEventSyncStoredInteger.sender", Kind::Offset, net.sync_sender_offset);

@@ -36,8 +36,9 @@ extern "C" {
  * 13: the map script's memhack pattern (script_shadows, map_script_shadows).
  * 14: the game's files (read_game_file). 15: the game's edition (tome_game_info.edition).
  * 16: game objects (object_type, object_of, handle_of, player_object, unit_info, get_property,
- * set_property, jass_call, get_keyed_property, set_keyed_property, list_objects). */
-#define TOME_API_VERSION 16
+ * set_property, jass_call, get_keyed_property, set_keyed_property, list_objects).
+ * 17: the game's host (host_player). 18: messages between players (net_send, on_net_message). */
+#define TOME_API_VERSION 18
 
 #define TOME_CALL __cdecl
 /* C linkage in C++ too: Tome looks the lifecycle functions up by their plain names. */
@@ -678,6 +679,24 @@ typedef void (TOME_CALL *tome_service_fn)(tome_mod* mod, const char* name, int32
 typedef void (TOME_CALL *tome_message_fn)(tome_mod* mod, const char* topic, const void* data, size_t size,
                                           void* user);
 
+/*
+ * Messages between players (API version 18): a mod's message reaches the
+ * same mod on every player's computer, the sender's own included, at the
+ * same point of the game (the game's synced actions carry it), so the
+ * players can act on it alike. A replay plays them back. Only in a game.
+ */
+#define TOME_NET_MAX_MESSAGE 1024
+
+typedef struct tome_net_message {
+    uint32_t size;       /* sizeof(tome_net_message) as Tome built it */
+    int32_t player;      /* the sender's player slot (0 = Player 1), as the host's game saw it */
+    const void* data;    /* valid only during the call */
+    uint32_t data_size;  /* 0 .. TOME_NET_MAX_MESSAGE */
+    int32_t replay;      /* 1 while a replay plays it back */
+} tome_net_message;
+
+typedef void (TOME_CALL *tome_net_message_fn)(tome_mod* mod, const tome_net_message* message, void* user);
+
 /* `popup` is the id popup() gave; `choice` an index into options, or TOME_POPUP_CLOSED. */
 typedef void (TOME_CALL *tome_popup_fn)(tome_mod* mod, uint32_t popup, int32_t choice, void* user);
 
@@ -1263,6 +1282,36 @@ typedef struct tome_api {
      * or game tick). Main thread.
      */
     int32_t (TOME_CALL *list_objects)(int32_t type, void** out, int32_t max);
+
+    /* --- API version 17: the game's host --- */
+
+    /* The player slot (0 = Player 1) of the current game's host: the player
+     * who created the game, whose computer the others' traffic goes through.
+     * In a replay, the recorded game's host; in single player, the local
+     * player. -1 outside a game, or where Tome can't tell (a build it
+     * doesn't map this for). The same on every player's computer. Main
+     * thread. */
+    int32_t (TOME_CALL *host_player)(void);
+
+    /* --- API version 18: messages between players (see tome_net_message) --- */
+
+    /* Sends `size` bytes (up to TOME_NET_MAX_MESSAGE) to this mod on every
+     * player's computer, this one included: each gets it through
+     * on_net_message, in the same order, a moment later (a game turn).
+     * Only in a game from its first step on (the first GAME_TICK; not yet
+     * at GAME_START, when the players may not all be in place), not while
+     * watching a replay, and in a multiplayer
+     * game only for a "sync": "required" mod (every player has it):
+     * TOME_ERR_UNAVAILABLE otherwise, or when the mod sends more than 16
+     * messages a second. TOME_ERR_INVALID_ARGUMENT for too many bytes or
+     * NULL data with a size. Main thread. */
+    tome_result (TOME_CALL *net_send)(tome_mod* mod, const void* data, uint32_t size);
+
+    /* Calls `fn` on the main thread for each message this mod's copies
+     * send (net_send), from any player, until the mod is disabled. Any
+     * thread (tome_mod_enable). A message from another player is untrusted
+     * input: check what it says. */
+    tome_result (TOME_CALL *on_net_message)(tome_mod* mod, tome_net_message_fn fn, void* user);
 } tome_api;
 
 /*
@@ -1429,6 +1478,18 @@ static inline int32_t tome_get_selection(const tome_api* api, tome_unit* units, 
 static inline int tome_has_objects(const tome_api* api) {
     return api->api_version >= 16 &&
            api->size >= offsetof(tome_api, list_objects) + sizeof(api->list_objects);
+}
+
+/* True if the running Tome has messages between players (version 18). */
+static inline int tome_has_net_messages(const tome_api* api) {
+    return api->api_version >= 18 &&
+           api->size >= offsetof(tome_api, on_net_message) + sizeof(api->on_net_message);
+}
+
+/* True if the running Tome can tell the game's host (version 17). */
+static inline int tome_has_host_player(const tome_api* api) {
+    return api->api_version >= 17 &&
+           api->size >= offsetof(tome_api, host_player) + sizeof(api->host_player);
 }
 
 static inline tome_result tome_get_unit_info(const tome_api* api, const void* unit, tome_unit* out) {

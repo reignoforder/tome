@@ -310,6 +310,52 @@ TEST(handshake_lobby_two_senders) {
     CHECK_EQ(out[0].to, 1);
 }
 
+TEST(handshake_lobby_known_host) {
+    // With the host known (Alice, 1), Carol's (3) claim to host is named and
+    // ignored: only Alice's set is compared. Both still get replies.
+    Lobby client;
+    ModSet set = {mod("hello")};
+    client.set_host(1);
+    client.update(false, set, {{1, "Alice"}, {3, "Carol"}}, 0);
+    deliver(client, 3, encode(LineKind::Required, {}));
+    deliver(client, 1, encode(LineKind::Required, set));
+    deliver(client, 3, encode(LineKind::Required, {}));  // again: noted once
+    std::vector<std::string> notes = client.take_notes();
+    CHECK_EQ(notes.size(), size_t(2));
+    CHECK_EQ(notes[0], std::string("Carol sent required mods, but Carol isn't the host (Alice): ignored."));
+    CHECK(contains(notes[1], "Your required mods match the host's"));
+    std::vector<Outgoing> out = client.take_outgoing();
+    CHECK(!lines_to(out, 1).empty());
+    CHECK(!lines_to(out, 3).empty());
+
+    // A change of mods is compared with Alice's set only.
+    client.update(false, {}, {{1, "Alice"}, {3, "Carol"}}, 1);
+    notes = client.take_notes();
+    CHECK_EQ(notes.size(), size_t(1));
+    CHECK(contains(notes[0], "differ from the host's"));
+
+    // A host that never sends its set is named in the warning.
+    Lobby waiting;
+    waiting.set_host(1);
+    waiting.update(false, set, {{1, "Alice"}}, 0);
+    waiting.update(false, set, {{1, "Alice"}}, Lobby::kHostWait);
+    notes = waiting.take_notes();
+    CHECK_EQ(notes.size(), size_t(1));
+    CHECK(contains(notes[0], "The host (Alice) didn't send"));
+
+    // ...also when another player sent a set: Carol's (ignored) doesn't
+    // stand in for Alice's.
+    Lobby silenced;
+    silenced.set_host(1);
+    silenced.update(false, set, {{1, "Alice"}, {3, "Carol"}}, 0);
+    deliver(silenced, 3, encode(LineKind::Required, set));
+    silenced.take_notes();
+    silenced.update(false, set, {{1, "Alice"}, {3, "Carol"}}, Lobby::kHostWait);
+    notes = silenced.take_notes();
+    CHECK_EQ(notes.size(), size_t(1));
+    if (!notes.empty()) CHECK(contains(notes[0], "The host (Alice) didn't send"));
+}
+
 TEST(handshake_typed_lines_stay_visible) {
     // Lines a person types that only look like Tome's don't decode, so
     // they're shown as usual (the hook hides only decoded lines).

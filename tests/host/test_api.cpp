@@ -292,6 +292,26 @@ TEST(host_tome_settings_read_and_written) {
     CHECK(text.find("\"later\"") != std::string::npos);
 }
 
+// harden_heap is off by default and read once per start: a change waits for
+// the next one (Windows can't turn heap termination off again).
+TEST(host_tome_settings_harden_heap_at_start) {
+    Home home;
+    Session session;
+    CHECK(session.start(home));
+    tome::tome_settings::init(home.paths());
+    CHECK_LOG("stop on memory corruption off");
+    CHECK(!tome::tome_settings::harden_heap_at_start());
+    std::string error;
+    CHECK(tome::tome_settings::set("harden_heap", tome::json::Value::boolean(true), error));
+    CHECK(!tome::tome_settings::harden_heap_at_start());  // from the next start
+    tome::tome_settings::init(home.paths());
+    CHECK_LOG("stop on memory corruption on");
+    CHECK(tome::tome_settings::harden_heap_at_start());
+    CHECK(tome::tome_settings::set("harden_heap", tome::json::Value::boolean(false), error));
+    tome::tome_settings::init(home.paths());
+    CHECK(!tome::tome_settings::harden_heap_at_start());
+}
+
 TEST(host_tome_settings_invalid_file_uses_defaults) {
     Home home;
     Session session;
@@ -673,6 +693,18 @@ TEST(host_objects_outside_a_game) {
     CHECK_EQ(api->list_objects(TOME_OBJECT_OTHER, listed, 4), -1);
     CHECK_EQ(api->list_objects(TOME_OBJECT_UNIT, nullptr, 4), -1);
     CHECK_EQ(api->list_objects(TOME_OBJECT_UNIT, listed, -1), -1);
+    // No game: nobody hosts.
+    CHECK(tome_has_host_player(api));
+    CHECK_EQ(api->host_player(), -1);
+    // Messages between players: only in a game; bad arguments first.
+    CHECK(tome_has_net_messages(api));
+    char bytes[TOME_NET_MAX_MESSAGE + 1] = {};
+    CHECK_EQ(api->net_send(mod, nullptr, 4), TOME_ERR_INVALID_ARGUMENT);
+    CHECK_EQ(api->net_send(mod, bytes, TOME_NET_MAX_MESSAGE + 1), TOME_ERR_INVALID_ARGUMENT);
+    CHECK_EQ(api->net_send(nullptr, bytes, 4), TOME_ERR_INVALID_ARGUMENT);
+    CHECK_EQ(api->net_send(mod, bytes, TOME_NET_MAX_MESSAGE), TOME_ERR_UNAVAILABLE);
+    CHECK_EQ(api->net_send(mod, nullptr, 0), TOME_ERR_UNAVAILABLE);
+    CHECK_EQ(api->on_net_message(mod, nullptr, nullptr), TOME_ERR_INVALID_ARGUMENT);
 }
 
 // Keybinds: a broken keybinds.json, the game's CustomKeys.txt, keys asked

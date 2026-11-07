@@ -14,6 +14,10 @@
 //   update_install  bool, default off: with update_check, installs a signed
 //               newer version as soon as it's found instead of offering
 //               Update Now; it runs from the next start
+//   harden_heap  bool, default off: at startup, turns on Windows' heap
+//               termination on corruption for the game process
+//               (HeapEnableTerminationOnCorruption; bootstrap.cpp); from the
+//               next start, since it can't be turned off in a running process
 
 #include "settings.h"
 
@@ -22,6 +26,7 @@ namespace tome::tome_settings {
 constexpr const char* kWidescreen = "widescreen";
 constexpr const char* kUpdateCheck = "update_check";
 constexpr const char* kUpdateInstall = "update_install";
+constexpr const char* kHardenHeap = "harden_heap";
 
 // The schema, parsed once.
 const settings::Schema& schema();

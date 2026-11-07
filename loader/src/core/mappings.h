@@ -251,6 +251,13 @@ struct BuildMappings {
         uint32_t player_name;               // NetGetPlayerName
         uint32_t local_player;              // NetGetLocalPlayer
         uint32_t is_host;                   // NetIsHost
+        uint32_t get_player_number;         // NetGetPlayerNumber (optional: 0 when not mapped)
+        // Optional, for TOME_DEBUG_LOBBY_AS only (developer builds).
+        uint32_t client_registry;           // NetClient::Registry
+        uint32_t registry_holder_offset;    // NetClientRegistry.holder
+        uint32_t holder_client_offset;      // NetClientHolder.client
+        uint32_t client_block_size;         // NetClient.block_size
+        uint32_t client_local_id_offset;    // NetClient.local_id
         uint32_t is_replay;                 // NetIsReplay
         uint32_t sync_init;                 // CNetEventSyncStoredInteger::Init
         uint32_t sync_sender_offset;        // CNetEventSyncStoredInteger.sender

@@ -28,6 +28,7 @@ pub(crate) enum Callback {
     Click(Rc<dyn Fn(Frame)>),
     Popup(Rc<dyn Fn(u32, Option<usize>)>),
     Message(MessageFn),
+    Net(Rc<dyn Fn(i32, &[u8], bool)>),
     Native(Rc<dyn Fn(&Args) -> Ret>),
 }
 
@@ -177,6 +178,12 @@ pub fn callback(id: u32, addr: usize, len: u32) {
                 return;
             }
             f(&String::from_utf8_lossy(&data[4..4 + n]), &data[4 + n..])
+        }
+        Callback::Net(f) => {
+            // [player][replay][data]
+            if let (Some(player), Some(replay)) = (word(data, 0), word(data, 4)) {
+                f(player as i32, &data[8..], replay != 0)
+            }
         }
         Callback::Native(_) => {}
     }

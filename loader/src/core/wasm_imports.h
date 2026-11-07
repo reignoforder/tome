@@ -85,4 +85,7 @@ constexpr size_t kMaxModuleSize = 16u << 20;
     X(get_keyed_property, "(iiii)i") \
     X(set_keyed_property, "(iiiF)i") \
     X(list_objects, "(iii)i") \
-    X(jass_call, "(iiiiiii)i")
+    X(jass_call, "(iiiiiii)i") \
+    X(host_player, "()i") \
+    X(net_send, "(ii)i") \
+    X(on_net_message, "(i)i")

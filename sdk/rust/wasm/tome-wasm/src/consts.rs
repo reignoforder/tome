@@ -5,8 +5,9 @@
 
 #![allow(missing_docs)]
 
-pub const TOME_API_VERSION: u32 = 16;
+pub const TOME_API_VERSION: u32 = 18;
 pub const TOME_POPUP_CLOSED: i32 = -1;
+pub const TOME_NET_MAX_MESSAGE: u32 = 1024;
 
 // tome_result
 pub const TOME_OK: i32 = 0;

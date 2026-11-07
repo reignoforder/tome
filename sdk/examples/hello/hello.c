@@ -140,6 +140,10 @@ static void TOME_CALL on_game_event(tome_mod* mod, const tome_event_info* info, 
     if (info->event == TOME_EVENT_GAME_START) {
         game_ticks = 0;
         orders = 0;
+        /* API version 17: who hosts (in single player, the local player). */
+        if (tome_has_host_player(api)) {
+            tome_logf(api, mod, TOME_LOG_INFO, "the host is player %d", (int)api->host_player());
+        }
         if (game_start_callback) {
             int32_t result = 0;
             tome_result status = api->jass_code_call(game_start_callback, &result);

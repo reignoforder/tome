@@ -83,5 +83,8 @@ imports! {
     fn get_keyed_property(object: u32, property: i32, key: u32, value: *mut f64) -> i32;
     fn set_keyed_property(object: u32, property: i32, key: u32, value: f64) -> i32;
     fn list_objects(kind: i32, out: *mut u32, max: i32) -> i32;
+    fn host_player() -> i32;
+    fn net_send(data: *const u8, size: u32) -> i32;
+    fn on_net_message(callback: u32) -> i32;
     fn jass_call(name: *const u8, len: u32, args: *const u32, count: i32, result: *mut u32, text: *mut u8, capacity: u32) -> i32;
 }

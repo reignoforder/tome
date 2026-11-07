@@ -136,3 +136,17 @@ TEST(path_guard_checks_every_toc_line) {
     CHECK(toc_is_unsafe("C:\\x.fdf"));
     CHECK(toc_is_unsafe("a.fdf\nnul"));
 }
+
+// lan-map-guard (patches/lan_map_guard.cpp) applies is_unsafe to the map
+// path a game's host sends: a host's real paths pass, a lookup outside Maps
+// or of a device doesn't.
+TEST(path_guard_host_map_paths) {
+    CHECK(!is_unsafe("Maps\\FrozenThrone\\(2)EchoIsles.w3x"));
+    CHECK(!is_unsafe("Maps\\Download\\DotA v6.83d.w3x"));
+    CHECK(!is_unsafe("Maps/Scenario/(4)Map.w3m"));
+    CHECK(is_unsafe("..\\..\\Users\\me\\x.w3x"));
+    CHECK(is_unsafe("Maps\\..\\..\\x.w3x"));
+    CHECK(is_unsafe("Maps\\com1.x.w3x"));  // the game compares only up to the last dot
+    CHECK(is_unsafe("Maps\\conin$.w3x"));
+    CHECK(is_unsafe("\\\\host\\share\\x.w3x"));
+}

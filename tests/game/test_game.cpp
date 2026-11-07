@@ -104,7 +104,8 @@ TEST(game_startup_patches_apply) {
     if (name == "1.27b") CHECK(report.rfind(" applied, 0 skipped: ", std::string::npos) != std::string::npos);
     for (const char* patch : {"memhack-guard", "path-sanitizer", "blp-guard", "d3d-reset-lights", "gl-context-restore",
                               "background-mute", "widescreen", "ambient-sound", "movie-display-reset",
-                              "movie-frame-length", "execute-func-guard", "global-string-guard"}) {
+                              "movie-frame-length", "execute-func-guard", "global-string-guard",
+                              "lan-map-guard"}) {
         const std::string applied = std::string(patch) + " applied";
         const std::string unmapped = std::string(patch) + " skipped (" + name + " has no mapping for ";
         const std::string not_for = std::string(patch) + " skipped (not for " + name + ": ";  // its variant says why
@@ -154,6 +155,61 @@ TEST(game_startup_patches_apply) {
                                  "dialogs, levels and saved games"));
     if (!tome::handshake::install(base, known, report)) test::fail(__FILE__, __LINE__, "handshake: " + report);
     if (!tome::mod_menu::install_game_hooks(report)) test::fail(__FILE__, __LINE__, "Esc menu: " + report);
+}
+
+// lan-map-guard on the game's own check of a host's map path
+// (MapTransfer::IsValidName).
+// The check reads only its transfer object's lock (+0x2C2, a
+// CRITICAL_SECTION) and extension list (+0x2DA, ".w3m;.w3x" as the game
+// registers it), so a zeroed object with those two will do.
+TEST(game_lan_map_guard_refuses_host_paths) {
+    tome::GameBuild build;
+    HMODULE game = load_game(build);
+    if (!game) return;
+    const tome::mappings::Symbol* sym = build.known->data->find("MapTransfer::IsValidName");
+    if (!sym) {
+        std::printf("  skipped: %s doesn't map MapTransfer::IsValidName\n", build.known->data->name.c_str());
+        return;
+    }
+    using IsValidName = int(__thiscall*)(void* self, const char* name);
+    const auto is_valid = reinterpret_cast<IsValidName>(reinterpret_cast<uintptr_t>(game) + sym->value);
+    alignas(16) static char transfer[0x600];
+    std::memset(transfer, 0, sizeof(transfer));
+    auto* lock = reinterpret_cast<CRITICAL_SECTION*>(transfer + 0x2C2);
+    InitializeCriticalSection(lock);
+    std::strcpy(transfer + 0x2DA, ".w3m;.w3x");
+
+    // The game alone (each test is a process of its own: nothing hooked yet)
+    // lets '..' and a device name with a second dot through.
+    CHECK(!tome::hooks::find("MapTransfer::IsValidName"));
+    CHECK_EQ(is_valid(transfer, "..\\..\\Users\\x.w3x"), 1);
+    CHECK_EQ(is_valid(transfer, "Maps\\com1.x.w3x"), 1);
+    CHECK_EQ(is_valid(transfer, "Maps\\con.w3x"), 0);
+
+    Home home;
+    host::open_log(home);
+    std::string report;
+    CHECK(tome::patches::install(reinterpret_cast<uintptr_t>(game), *build.known, report));
+    if (report.find("lan-map-guard applied") == std::string::npos) {
+        test::fail(__FILE__, __LINE__, "lan-map-guard: " + report);
+        DeleteCriticalSection(lock);
+        return;
+    }
+
+    // A host's real paths, and the game's own refusals (unchanged).
+    CHECK_EQ(is_valid(transfer, "Maps\\FrozenThrone\\(2)EchoIsles.w3x"), 1);
+    CHECK_EQ(is_valid(transfer, "Maps\\Download\\my map.w3m"), 1);
+    CHECK_EQ(is_valid(transfer, "Maps\\x.txt"), 0);       // extension
+    CHECK_EQ(is_valid(transfer, "C:\\Maps\\x.w3x"), 0);   // absolute
+    CHECK_EQ(is_valid(transfer, "Maps\\con.w3x"), 0);     // device
+    // What only the guard refuses: the game lets these through.
+    CHECK_EQ(is_valid(transfer, "..\\..\\Users\\x.w3x"), 0);
+    CHECK_EQ(is_valid(transfer, "Maps\\..\\..\\x.w3x"), 0);
+    CHECK_EQ(is_valid(transfer, "Maps\\com1.x.w3x"), 0);
+    CHECK_EQ(is_valid(transfer, "Maps\\conout$.w3x"), 0);
+    CHECK_EQ(is_valid(transfer, ("Maps\\" + std::string(300, 'a') + ".w3x").c_str()), 0);
+    CHECK_LOG("lan-map-guard: refused the map path \"..\\..\\Users\\x.w3x\" from a game's host");
+    DeleteCriticalSection(lock);
 }
 
 // The hook engine on every mapped function's real prologue: each one is

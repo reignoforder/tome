@@ -3,15 +3,18 @@
 
 #include "core/game_lock.h"
 #include "core/handshake.h"
+#include "core/netmsg.h"
 #include "events.h"
 #include "frames.h"
 #include "hooks.h"
 #include "log.h"
 #include "mod_manager.h"
+#include "net_messages.h"
 #include "units.h"
 
 #include <windows.h>
 
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <vector>
@@ -43,6 +46,9 @@ PlayerNameFn g_player_name = nullptr;
 NetIndexFn g_local_player = nullptr;
 NetIndexFn g_is_host = nullptr;
 IsReplayFn g_is_replay = nullptr;
+using PlayerNumberFn = uint8_t(__fastcall*)(int player, int net_index);
+PlayerNumberFn g_player_number = nullptr;  // null when the build doesn't map it
+uintptr_t g_game_base = 0;
 SyncInitFn g_sync_init = nullptr;
 SyncValueDestroyFn g_sync_value_destroy = nullptr;
 SendActionFn g_send_action = nullptr;
@@ -96,6 +102,17 @@ std::unique_ptr<Lobby> g_lobby;
 void* g_lobby_room = nullptr;  // the CGameChatroom g_lobby belongs to
 double g_last_poll = 0;
 
+// The net id of player number 1, the game's creator (its host), on net
+// client `index`: in a lobby 128, in a game its player slot. -1 if the build
+// doesn't map NetGetPlayerNumber or there's no such player.
+int host_net_id(int index) {
+    if (!g_player_number) return -1;
+    for (int id = 0; id < kMaxPlayerId; ++id) {
+        if (g_player_number(id, index) == 1) return id;
+    }
+    return -1;
+}
+
 int net_index(void* room) {
     return field<int32_t>(room, g_build->net.chatroom_net_index_offset);
 }
@@ -107,11 +124,47 @@ void show(void* room, const std::string& text) {
     g_add_text(area, line.c_str());
 }
 
+// TOME_DEBUG_LOBBY_AS=<net id> (developer builds): the first reply a
+// client sends goes out with its local id set to <net id> for the call, as a
+// modified client would send it, to see what sender the host reads
+// (tools/e2e-multiplayer.sh). The local client's id byte, or null.
+uint8_t* local_id_byte(int index) {
+    const auto& n = g_build->net;
+    if (!n.client_registry || !n.client_block_size) return nullptr;
+    using RegistryFn = char*(__cdecl*)();
+    char* entry = reinterpret_cast<RegistryFn>(g_game_base + n.client_registry)();
+    char* holder = entry ? field<char*>(entry, n.registry_holder_offset) : nullptr;
+    char* client = holder ? field<char*>(holder, n.holder_client_offset) : nullptr;
+    if (!client) return nullptr;
+    return reinterpret_cast<uint8_t*>(client + index * n.client_block_size + n.client_local_id_offset);
+}
+
+int debug_send_as() {
+    static int s_as = [] {
+        char env[16] = {};
+        if (!TOME_DEV || !GetEnvironmentVariableA("TOME_DEBUG_LOBBY_AS", env, sizeof(env))) return -1;
+        return std::atoi(env);
+    }();
+    return s_as;
+}
+
 void send_line(void* room, int to, const std::string& text) {
     const auto& n = g_build->net;
     std::vector<uint32_t> buffer((n.lobby_event_size + 0x40) / 4, 0);
     g_lobby_init(buffer.data(), static_cast<int>(n.lobby_event_chat));
     set_text_field(buffer.data(), n.lobby_event_text_offset, text);
+    static bool s_spoofed = false;
+    const int as = debug_send_as();
+    uint8_t* id = !s_spoofed && as >= 0 && text.rfind("[Tome] My mods", 0) == 0 ? local_id_byte(net_index(room)) : nullptr;
+    if (id) {
+        s_spoofed = true;
+        const uint8_t real = *id;
+        *id = static_cast<uint8_t>(as);
+        g_send_lobby(to, buffer.data(), net_index(room));
+        *id = real;
+        TOME_INFO("Handshake: debug: sent a reply as net id %d (really %d)", as, real);
+        return;
+    }
     g_send_lobby(to, buffer.data(), net_index(room));
 }
 
@@ -169,9 +222,23 @@ void poll_lobby() {
         const char* name = g_player_name(id, index);
         if (name && *name) others.push_back({id, name});
     }
+    // Who hosts: the player with number 1 (net::host_id), when the build
+    // maps NetGetPlayerNumber; -1 if unknown.
+    const int host_id = host_net_id(index);
+    if (host && host_id >= 0 && host_id != local) {
+        static bool s_warned = false;
+        if (!s_warned) {
+            s_warned = true;
+            TOME_WARN("Handshake: hosting, but player number 1 is net id %d, not this client's %d: Tome clients "
+                      "will count that player's required mods as the host's (they still answer this host)",
+                      host_id, local);
+        }
+    }
     // What the lobby looks like to Tome, logged when it changes.
     std::string seen = "net index " + std::to_string(index) + ", local id " + std::to_string(local) +
-                       (host ? ", hosting" : ", joined") + ", players:";
+                       (host ? ", hosting" : ", joined") +
+                       (host_id < 0 || host_id == local ? std::string() : ", host " + std::to_string(host_id)) +
+                       ", players:";
     for (const LobbyPlayer& p : others) seen += " " + std::to_string(p.id) + " " + p.name;
     static std::string s_last_seen;
     if (seen != s_last_seen) {
@@ -179,6 +246,7 @@ void poll_lobby() {
         TOME_INFO("Handshake: lobby: %s", seen.c_str());
     }
     Lobby& lobby = lobby_for(room);
+    lobby.set_host(host ? -1 : host_id);  // a host knows itself
     lobby.update(host, local_set(), others, now_seconds());
     flush(room);
 }
@@ -254,21 +322,48 @@ bool g_replay = false;
 bool g_sent = false;
 bool g_reported = false;
 
-void send_set(const ModSet& set) {
+void send_action(std::string_view file, std::string_view mission, std::string_view key, int32_t value) {
     const auto& n = g_build->net;
-    for (const SyncMod& mod : set) {
-        std::vector<uint32_t> buffer((n.sync_size + 0x40) / 4, 0);
-        void* action = buffer.data();
-        g_sync_init(action);
-        set_text_field(action, n.sync_file_offset, kCacheFile);
-        set_text_field(action, n.sync_mission_offset, kMission);
-        set_text_field(action, n.sync_key_offset, encode_key(mod));
-        int32_t total = static_cast<int32_t>(set.size());
-        std::memcpy(static_cast<char*>(action) + n.sync_value_offset, &total, sizeof(total));
-        g_send_action(action, 0);
-        g_sync_value_destroy(static_cast<char*>(action) + n.sync_value_object_offset);
-    }
+    std::vector<uint32_t> buffer((n.sync_size + 0x40) / 4, 0);
+    void* action = buffer.data();
+    g_sync_init(action);
+    set_text_field(action, n.sync_file_offset, file);
+    set_text_field(action, n.sync_mission_offset, mission);
+    set_text_field(action, n.sync_key_offset, key);
+    std::memcpy(static_cast<char*>(action) + n.sync_value_offset, &value, sizeof(value));
+    g_send_action(action, 0);
+    g_sync_value_destroy(static_cast<char*>(action) + n.sync_value_object_offset);
+}
+
+void send_set(const ModSet& set) {
+    for (const SyncMod& mod : set) send_action(kCacheFile, kMission, encode_key(mod), static_cast<int32_t>(set.size()));
     TOME_INFO("Handshake: sent this game %zu required mod(s): %s", set.size(), describe(set).c_str());
+}
+
+// The host's player slot in the current game (host_slot()), found on first
+// use or at its first step (in single player, the local player's); -1
+// without the mapping, or not found.
+int g_host_slot = -1;
+bool g_host_found = false;  // find_host_slot ran in this game
+
+void find_host_slot() {
+    g_host_found = true;
+    g_host_slot = -1;
+    // A live game is net client 0; a replay plays on 1 (net client +0x610).
+    const int index = g_replay ? 1 : 0;
+    const int id = host_net_id(index);
+    if (id < 0 || id >= kMaxPlayerSlots) {
+        int humans = 0;
+        for (int slot = 0; slot < kMaxPlayerSlots; ++slot) humans += units::is_human(slot);
+        if (g_player_number && humans > 1) {
+            TOME_INFO("Handshake: no host found in this game (player number 1 is %d)", id);
+        }
+        return;
+    }
+    g_host_slot = id;
+    const char* net_name = g_player_name(id, index);
+    TOME_INFO("Handshake: the host is player %d (%s; net name %s)", id, units::player_name(id).c_str(),
+              net_name ? net_name : "none");
 }
 
 void report() {
@@ -300,9 +395,18 @@ void report() {
 void TOME_CALL before_sync_integer(tome_mod*, tome_hook_call* call, void*) {
     const void* event = reinterpret_cast<const void*>(static_cast<uintptr_t>(call->args[0]));
     const auto& n = g_build->net;
-    if (text_field(event, n.sync_file_offset) != kCacheFile || text_field(event, n.sync_mission_offset) != kMission) {
+    const std::string file = text_field(event, n.sync_file_offset);
+    if (file == netmsg::kCacheFile) {
+        // A mod's message (net_messages.cpp). The game would store each
+        // part in a game cache; nothing reads it, so it doesn't run.
+        call->skip_original = 1;
+        call->result = 1;
+        net_messages::receive(field<uint8_t>(event, n.sync_sender_offset), text_field(event, n.sync_mission_offset),
+                              text_field(event, n.sync_key_offset), field<int32_t>(event, n.sync_value_offset),
+                              g_replay);
         return;
     }
+    if (file != kCacheFile || text_field(event, n.sync_mission_offset) != kMission) return;
     std::string key = text_field(event, n.sync_key_offset);
     int sender = field<uint8_t>(event, n.sync_sender_offset);
     int total = field<int32_t>(event, n.sync_value_offset);
@@ -337,6 +441,7 @@ struct HookSpec {
 bool install(uintptr_t game_base, const BuildMappings& build, std::string& report) {
     g_build = &build;
     const auto& n = build.net;
+    g_game_base = game_base;
     g_glue_get = reinterpret_cast<GlueGetFn>(game_base + build.game.glue_get);
     g_add_text = reinterpret_cast<AddTextFn>(game_base + n.text_area_add_text);
     g_lobby_init = reinterpret_cast<LobbyInitFn>(game_base + n.lobby_event_init);
@@ -345,6 +450,7 @@ bool install(uintptr_t game_base, const BuildMappings& build, std::string& repor
     g_local_player = reinterpret_cast<NetIndexFn>(game_base + n.local_player);
     g_is_host = reinterpret_cast<NetIndexFn>(game_base + n.is_host);
     g_is_replay = reinterpret_cast<IsReplayFn>(game_base + n.is_replay);
+    if (n.get_player_number) g_player_number = reinterpret_cast<PlayerNumberFn>(game_base + n.get_player_number);
     g_sync_init = reinterpret_cast<SyncInitFn>(game_base + n.sync_init);
     g_sync_value_destroy = reinterpret_cast<SyncValueDestroyFn>(game_base + n.sync_value_destroy);
     g_send_action = reinterpret_cast<SendActionFn>(game_base + n.send_action);
@@ -392,12 +498,15 @@ void check_lock() {
 
 void on_game_start() {
     if (!g_build) return;
+    net_messages::on_game_start();
     g_record.reset();
     g_game_log.reset();
     g_in_game = true;
     g_replay = g_is_replay() != 0;
     g_sent = false;
     g_reported = false;
+    g_host_found = false;
+    g_host_slot = -1;
     check_lock();
 }
 
@@ -409,6 +518,8 @@ void on_game_tick(double game_time) {
         check_lock();
         ModSet local = local_set();
         if (!g_replay && !local.empty()) send_set(local);
+        // Again if a mod asked at the start and it wasn't found then.
+        if (!g_host_found || g_host_slot < 0) find_host_slot();
     }
     if (!g_reported && game_time >= kReportAfter) {
         g_reported = true;
@@ -418,7 +529,32 @@ void on_game_tick(double game_time) {
 
 void on_game_end() {
     g_in_game = false;
+    g_host_slot = -1;
     mod_manager().set_game_lock(false);
+}
+
+bool in_game() {
+    return g_in_game;
+}
+
+bool in_replay() {
+    return g_in_game && g_replay;
+}
+
+bool game_stepped() {
+    return g_in_game && g_sent;
+}
+
+bool send_sync_action(std::string_view file, std::string_view mission, std::string_view key, int32_t value) {
+    if (!g_build || !g_in_game || g_replay) return false;
+    send_action(file, mission, key, value);
+    return true;
+}
+
+int host_slot() {
+    if (!g_in_game || !g_build) return -1;
+    if (!g_host_found) find_host_slot();
+    return g_host_slot;
 }
 
 } // namespace tome::handshake

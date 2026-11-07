@@ -33,6 +33,16 @@ TEST(log_printable_cuts_long_text) {
     CHECK_EQ(printable("\xf0\x9f\x98\x80", 3), std::string("..."));
 }
 
+TEST(log_throttle_logs_the_first_then_rarely) {
+    using tome::log::Throttle;
+    for (unsigned long n = 1; n <= Throttle::kFirst; ++n) CHECK(Throttle::logs(n));
+    CHECK(!Throttle::logs(Throttle::kFirst + 1));
+    CHECK(!Throttle::logs(Throttle::kEvery - 1));
+    CHECK(Throttle::logs(Throttle::kEvery));
+    CHECK(!Throttle::logs(Throttle::kEvery + 1));
+    CHECK(Throttle::logs(5 * Throttle::kEvery));
+}
+
 TEST(log_size_cap_writes_below_the_soft_limit) {
     SizeCap cap(100, 150);
     for (int i = 0; i < 10; ++i) {

@@ -13,6 +13,7 @@ add_executable(tome_tests
     test_frames.cpp
     test_game_lock.cpp
     test_handshake.cpp
+    test_netmsg.cpp
     test_hash.cpp
     test_hash_cache.cpp
     test_hooks.cpp
@@ -67,6 +68,9 @@ tome_add_mod(hook_b SOURCES e2e/mods/hook-b/hook_b.c METADATA e2e/mods/hook-b/to
 tome_add_mod(crash SOURCES e2e/mods/crash/crash.c METADATA e2e/mods/crash/tome.mod.json)
 set_target_properties(hook_a PROPERTIES OUTPUT_NAME hook-a)
 set_target_properties(hook_b PROPERTIES OUTPUT_NAME hook-b)
+# sync-test's code; tools/e2e-multiplayer.sh puts it next to the fixture's assets.
+tome_add_mod(sync_test SOURCES e2e/mods/sync-test/sync_test.c METADATA e2e/mods/sync-test/tome.mod.json FOLDER sync-test)
+set_target_properties(sync_test PROPERTIES OUTPUT_NAME sync-test)
 
 # The hook engine and the crash guard on real code in this process: the
 # Windows side of loader/src/hooks.cpp and guard.cpp, compiled in directly

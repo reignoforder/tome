@@ -355,6 +355,13 @@ pub fn player_object(slot: i32) -> Option<u32> {
     (object != 0).then_some(object)
 }
 
+/// The current game's host: its player slot (0 = Player 1), the same on
+/// every player's computer; `None` outside a game.
+pub fn host_player() -> Option<i32> {
+    let slot = unsafe { raw::host_player() };
+    (slot >= 0).then_some(slot)
+}
+
 /// A unit as the selection describes it, if it's a live unit.
 pub fn unit_info(unit: u32) -> Option<OwnedUnit> {
     let block = read_out(256, |out, cap| unsafe { raw::unit_info(unit, out, cap) })?;
@@ -692,6 +699,24 @@ pub fn publish(topic: &str, data: &[u8]) -> usize {
     let (ptr, len) = str_arg(topic);
     let size = u32::try_from(data.len()).unwrap_or(u32::MAX);
     usize::try_from(unsafe { raw::publish(ptr, len, data.as_ptr(), size) }).unwrap_or(0)
+}
+
+// --- messages between players ----------------------------------------------
+
+/// Sends `data` (up to `consts::TOME_NET_MAX_MESSAGE` bytes) to this mod on
+/// every player's computer, this one included, at the same point of the
+/// game. Only in a game from its first step (the first game tick, not yet at
+/// game start); in multiplayer only for a "sync": "required" mod.
+pub fn net_send(data: &[u8]) -> Result<()> {
+    let size = u32::try_from(data.len()).unwrap_or(u32::MAX);
+    check(unsafe { raw::net_send(data.as_ptr(), size) })
+}
+
+/// `f` gets every message this mod's copies send (the sender's player slot,
+/// the data, whether a replay plays it back). Untrusted input from other
+/// players: check what it says.
+pub fn on_net_message(f: impl Fn(i32, &[u8], bool) + 'static) -> Result<()> {
+    rt::register(Callback::Net(Rc::new(f)), |id| unsafe { raw::on_net_message(id) }).map(drop)
 }
 
 // --- files --------------------------------------------------------------------

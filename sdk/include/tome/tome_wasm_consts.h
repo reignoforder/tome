@@ -4,8 +4,9 @@
 
 /* tome.h's enums for WebAssembly mods (tome_wasm.h). */
 
-#define TOME_API_VERSION 16
+#define TOME_API_VERSION 18
 #define TOME_POPUP_CLOSED (-1)
+#define TOME_NET_MAX_MESSAGE 1024
 
 typedef enum tome_result {
     TOME_OK = 0,

@@ -31,6 +31,10 @@ bool update_check_on();
 // The update_install setting; the same.
 bool update_install_on();
 
+// The harden_heap setting, as read at startup (init): a change applies from
+// the next start.
+bool harden_heap_at_start();
+
 // Whether tome/settings.json has `key` (the player chose it, or was asked).
 bool stored(const std::string& key);
 

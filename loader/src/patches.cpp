@@ -21,6 +21,7 @@ extern const Patch kMovieDisplayReset;
 extern const Patch kMovieFrameLength;
 extern const Patch kExecuteFuncGuard;
 extern const Patch kGlobalStringGuard;
+extern const Patch kLanMapGuard;
 
 const Patch* const kAll[] = {
     &kMemhackGuard,
@@ -35,6 +36,7 @@ const Patch* const kAll[] = {
     &kMovieFrameLength,
     &kExecuteFuncGuard,
     &kGlobalStringGuard,
+    &kLanMapGuard,
 };
 
 namespace {

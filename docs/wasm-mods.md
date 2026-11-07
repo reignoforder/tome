@@ -102,6 +102,8 @@ outside memory; nothing is terminated.
 | `register_native` | same | below |
 | `jass_code_call`, `jass_code_execute` | same | Tome checks code values, as for DLLs |
 | `object_type`, `object_of`, `handle_of`, `player_object`, `unit_info`, `get_property`, `set_property`, `get_keyed_property`, `set_keyed_property`, `list_objects` | same | objects are handles (below); `tome_object_type_of` in C (`tome_object_type` is the enum); `unit_info` writes a `tome_wasm_unit` |
+| `host_player` | same | `tome_host_player` in C, `host_player()` (an `Option`) in Rust |
+| `net_send`, `on_net_message` | same | `tome_net_send` and `tome_on_net_message(fn(player, data, size, replay, user), user)` in C; `net_send(&[u8])` and `on_net_message(\|player, data, replay\| ...)` in Rust |
 | `jass_call` | same | arguments one word each (`tome_jass_value`), strings as pointers to NUL-terminated text in the module's memory, copied in; a string result copied into a buffer of the module's (`tome_jass_call` in C, `jass_call` in Rust); the same checks as for DLLs (below) |
 | `resolve`, `hook`, `unhook`, `hook_call_next` | **no** | addresses and raw arguments |
 | `service_*`, `on_service` | **no** | function tables; `publish`/`subscribe` instead |

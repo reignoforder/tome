@@ -985,6 +985,21 @@
       "sig": "int(int net_index)",
       "bytes": "56 8b f1 57 b9 0d 00 00 00 e8 b2 43 f8 ff 8b 40"
     },
+    "NetGetPlayerNumber": {
+      "kind": "function", "rva": "0x0053ed90", "conv": "fastcall",
+      "sig": "int(int player, int net_index)",
+      "bytes": "56 57 8b f9 b9 0d 00 00 00 8b f2 e8 30 47 f8 ff",
+      "doc": "As on 1.27b: the number of a net id through 0x53E080 (list +0x18); 0 without a player. Plain ret."
+    },
+    "NetClient::Registry": {
+      "kind": "function", "rva": "0x0053f340", "conv": "cdecl", "sig": "void*(void)",
+      "bytes": "b9 0d 00 00 00 e9 86 41 f8 ff cc cc cc cc cc cc",
+      "doc": "As on 1.27b: 0x4C34D0 with 0xD (the only such thunk). NetGetLocalPlayer (0x53EDD0) reads the same chain, block size and id offset."
+    },
+    "NetClientRegistry.holder": { "kind": "offset", "value": "0x10" },
+    "NetClientHolder.client": { "kind": "offset", "value": "0x8" },
+    "NetClient.block_size": { "kind": "constant", "value": "0x304" },
+    "NetClient.local_id": { "kind": "offset", "value": "0x2dc" },
     "NetIsReplay": {
       "kind": "function", "rva": "0x0053f160", "conv": "cdecl",
       "sig": "int(void)",
@@ -1244,6 +1259,12 @@
     "CBLPFile.buffer": { "kind": "offset", "value": "0x4a4" },
     "CBLPFile.size": { "kind": "offset", "value": "0x4a8" },
     "CBLPFile.header_copy": { "kind": "data", "rva": "0x0078a854", "doc": "1.26a: mov ecx,0x127 / mov edi,eax / rep movsd (9 bytes; blp-guard's 1.26a variant)." },
+    "MapTransfer::IsValidName": {
+      "kind": "function", "rva": "0x00656d70", "conv": "thiscall",
+      "sig": "int(void* this, const char* name)",
+      "bytes": "81 ec 08 01 00 00 a1 ?? ?? ?? ?? 33 c4 89 84 24 04 01 00 00 56 8b b4 24 10 01 00 00 57 8b f9 8b",
+      "size": "0x81"
+    },
     "CSound::InitMIDI": {
       "kind": "function", "rva": "0x003dbde0", "conv": "thiscall",
       "sig": "void(CSound* this, const char* label, int fade_in, int fade_out)",

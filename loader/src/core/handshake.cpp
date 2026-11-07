@@ -220,6 +220,7 @@ void Lobby::update(bool host, const ModSet& local, const std::vector<LobbyPlayer
     };
     for (auto it = peers_.begin(); it != peers_.end();) it = present(it->first) ? std::next(it) : peers_.erase(it);
     for (auto it = claims_.begin(); it != claims_.end();) it = present(it->first) ? std::next(it) : claims_.erase(it);
+    for (auto it = ignored_.begin(); it != ignored_.end();) it = present(*it) ? std::next(it) : ignored_.erase(it);
     for (const LobbyPlayer& p : others) peers_[p.id].name = p.name;
 
     if (host_) {
@@ -239,11 +240,19 @@ void Lobby::update(bool host, const ModSet& local, const std::vector<LobbyPlayer
     if (changed) {
         for (const auto& [id, set] : claims_) send(id, LineKind::Reply, local_);
         // Our player saw how the old set compared: say how the new one does.
-        if (claims_.size() == 1) note_claim(claims_.begin()->first, claims_.begin()->second, true);
+        if (host_id_ >= 0) {
+            if (auto it = claims_.find(host_id_); it != claims_.end()) note_claim(it->first, it->second, true);
+        } else if (claims_.size() == 1) {
+            note_claim(claims_.begin()->first, claims_.begin()->second, true);
+        }
     }
-    if (claims_.empty() && !local_.empty() && !warned_no_host_ && now - joined_at_ >= kHostWait) {
+    // With the host known, only its set counts: an ignored player's set
+    // (also in claims_, for the replies) doesn't mean the host sent one.
+    const bool host_sent = host_id_ >= 0 ? claims_.count(host_id_) != 0 : !claims_.empty();
+    if (!host_sent && !local_.empty() && !warned_no_host_ && now - joined_at_ >= kHostWait) {
         warned_no_host_ = true;
-        note("The host didn't send its required mods (it may not run Tome). Yours (" + describe(local_) +
+        note("The host" + (host_id_ >= 0 ? " (" + name_of(host_id_) + ")" : std::string()) +
+             " didn't send its required mods (it may not run Tome). Yours (" + describe(local_) +
              ") run only for you, and the game may desync.");
     }
 }
@@ -269,7 +278,21 @@ void Lobby::receive(int from, std::string_view text) {
     }
 
     if (line.kind != LineKind::Required) return;
-    bool first = claims_.empty() || (claims_.size() == 1 && claims_.count(from));
+    if (host_id_ >= 0 && from != host_id_) {
+        // Not the host: its set doesn't count. It still gets a reply (our
+        // set, which every player may know), so a host Tome took for
+        // another player can still check us and start.
+        if (ignored_.insert(from).second) {
+            note(name_of(from) + " sent required mods, but " + name_of(from) + " isn't the host (" +
+                 name_of(host_id_) + "): ignored.");
+        }
+        claims_[from] = set;
+        send(from, LineKind::Reply, local_);
+        return;
+    }
+    // With the host known this is the host's set; otherwise it counts as the
+    // host's only while it's the only one.
+    bool first = host_id_ >= 0 || claims_.empty() || (claims_.size() == 1 && claims_.count(from));
     claims_[from] = set;
     note_claim(from, set, first);
     send(from, LineKind::Reply, local_);
@@ -278,7 +301,7 @@ void Lobby::receive(int from, std::string_view text) {
 void Lobby::note_claim(int from, const ModSet& set, bool first) {
     Difference d = compare(set, local_);
     if (!first) {
-        // Only the host's set counts; this client can't tell which one that is.
+        // Only the host's set counts; without the host's id this client can't tell which one that is.
         note(name_of(from) + " also sent required mods, but only the host's count. " +
              (d.empty() ? "Yours match " + name_of(from) + "'s."
                         : "Yours differ from " + name_of(from) + "'s: " + explain(d, name_of(from)) + "."));

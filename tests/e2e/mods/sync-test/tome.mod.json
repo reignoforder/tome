@@ -3,9 +3,10 @@
   "id": "sync-test",
   "version": "1.0.0",
   "name": "Sync test",
-  "description": "Assets-only test mod that every player of a game needs (the multiplayer handshake).",
+  "description": "Test mod that every player of a game needs (the multiplayer handshake, messages between players).",
   "game": "1.27b",
   "tome": "*",
+  "entry": "sync-test.dll",
   "sync": "required",
   "reload": "live"
 }

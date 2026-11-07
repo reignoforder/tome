@@ -24,6 +24,12 @@ constexpr const char* kSchema = R"({
       "title": "Install Updates Automatically",
       "default": false,
       "description": "With Check for Updates on: installs a new Tome as soon as it's found, if it's signed with Tome's release key, without asking. It runs from the next start; the game isn't restarted for it."
+    },
+    "harden_heap": {
+      "type": "boolean",
+      "title": "Stop on Memory Corruption",
+      "default": false,
+      "description": "Ends the game at once if Windows finds its memory corrupted, as an exploit might do, instead of running on. From the next start; not under Wine."
     }
   }
 })";

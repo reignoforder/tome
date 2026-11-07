@@ -1247,6 +1247,17 @@ reason to make a fix a patch rather than ship it as a mod.
   returns 0, the null string; otherwise it calls `CreateString`. The call's
   byte is `??` in `CreateJassString`'s mapped bytes, so mods can still hook
   it (their handlers run before the check). Reserves nothing.
+- **lan-map-guard** (`patches/lan_map_guard.cpp`, `docs/known-bugs.md`,
+  "Map downloads from a host"): the map path a game's host sends goes
+  through the map transfer's own check, `MapTransfer::IsValidName`, before
+  the client looks it up under the game folder and, failing that, downloads
+  it. The game refuses absolute paths, `:` and wildcards, extensions other
+  than `.w3m`/`.w3x` and device names compared up to the last dot, but not
+  `..` components or `com1.x.w3x`. An AFTER handler (last priority) also
+  refuses what `path_guard::is_unsafe` refuses, so no transfer is made and
+  the client can't join with that map. Logged like the path sanitizer's
+  refusals (the first 20, then every 1000th). Reserves the function.
+  `tests/game` calls the real check through the guard.
 
 ## Multiplayer handshake
 
@@ -1275,11 +1286,18 @@ report on both sides and in a replay; in `make e2e` since 2026-11-02
     told before). A host without required mods sends nothing, so players
     without Tome see nothing;
   - a client answers each player who sent it a set (`[Tome] My mods 1/1:
-    ...`), and again when its own set changes. It can't tell which player
-    hosts (the game doesn't say where Tome can read it), so it notes when
-    more than one player sent a set; a player pretending to host can add a
-    note but can't divert the replies the real host checks. A client with
-    required mods that gets no set within 5 s is told the host may not run Tome;
+    ...`), and again when its own set changes. It knows the host: the
+    player whose number is 1 (`NetGetPlayerNumber` on every id: the game's
+    router gives a game's creator number 1; `reverse-engineering.md`, "The
+    network client"), and counts only the host's set: another player who
+    sends one is named in a note and ignored. Senders come from the host's
+    router, so a client can't pass for the host (the LAN test sends a line
+    claiming the host's id, `TOME_DEBUG_LOBBY_AS`, and checks the host sees
+    the real one). Such a player still gets a reply, so a host Tome got
+    wrong somewhere could still check its players and start. A host that
+    isn't number 1 logs a warning. On a build without the mapping, the
+    client notes when more than one player sent a set instead. A client with
+    required mods that gets no set within 5 s is told the host (by name) may not run Tome;
   - `CGameChatroom::OnChatReceived` (before) hides lines that decode as
     Tome's and passes them on; anything else, "[Tome] ..." typed by a person
     included, shows as usual. Notes go into the lobby's chat area
@@ -1301,6 +1319,10 @@ report on both sides and in a replay; in `make e2e` since 2026-11-02
   who sent nothing counts as having none. Differences are shown with
   `display_text` and logged; in a replay, the recorded players are compared
   with the viewer's mods.
+- **The game's host** (`handshake::host_slot`, `host_player` for mods): in
+  a game, the player slot of player number 1, found on first use (net client
+  0, or 1 in a replay) and logged (`Handshake: the host is player 0 (...)`);
+  -1 outside a game or without `NetGetPlayerNumber`.
 - **Limits on what other players send:** a set of more than `kMaxMods`
   (256) mods is dropped, whether it comes as lobby lines (`Assembler`) or as
   game actions (`GameRecord::add`), so a modified client can't make the
@@ -1370,6 +1392,52 @@ client's with `nsenter -n`. What it took:
   `text:`). The game list's rows have no names: the client clicks the
   first at its position.
 
+
+## Messages between players
+
+API version 18 (`net_send`, `on_net_message`; `loader/src/net_messages.cpp`,
+the wire format in `core/netmsg.*`, unit-tested and fuzzed). A mod's message
+reaches the same mod on every player's computer, the sender's included.
+
+- **The channel:** the game's SyncStoredInteger actions, as the handshake's
+  sets in games (`handshake::send_sync_action`). They reach every player at
+  the same point of the game, in order, and the replay records them, so mods
+  can act on a message alike everywhere (a required mod may change the game
+  in response without a desync). Each action is one part: game cache
+  `TomeNet`, mission `1 <message id> <mod id>`, key up to 189 bytes of the
+  message in base64 (the text fields hold no NUL; 252 characters fit the
+  key's 0x100 bytes), value `part | count << 8`. A message is up to 1024
+  bytes (`TOME_NET_MAX_MESSAGE`), so at most 6 actions.
+- **Receiving:** the handshake's `OnNetSyncStoredInteger` hook hands
+  `TomeNet` actions to `net_messages::receive` and skips the game's own
+  handling (it would store each part in a game cache nothing reads). The
+  sender is the action's player slot, which the host's game stamps
+  (`reverse-engineering.md`, "Senders can't be faked"). The reassembler
+  keeps one message in progress per sender (a player's parts come in a
+  row), drops anything malformed or out of order (logged, 10 per player
+  per game), and never holds more than 1024 bytes per sender. A whole
+  message goes to every `on_net_message` listener of the mod with that id,
+  each under `guard::run` (a crash disables that mod); in a multiplayer
+  game only if that mod is required (no other mod can send there, so such
+  a message is forged: dropped, logged once). Listeners go with
+  the mod's other registrations when it's disabled.
+- **Sending:** only in a game from its first step on (the first
+  `GAME_TICK`; `handshake::game_stepped`), not in a replay (the game sends
+  nothing there), and in a multiplayer game only from a `"sync": "required"` mod:
+  the handshake makes sure every player has those, so every player gets the
+  messages, and no player without Tome fills a game cache with them. At
+  most 16 messages a second per mod (`TOME_ERR_UNAVAILABLE` past that,
+  logged once). Message ids count up per mod. Not at `GAME_START`: the
+  players may not all be in place yet, so the game lock (and with it the
+  required-mods rule) is only final once the first step checks it again,
+  and the handshake sends its own sets then too.
+- **Tests:** `tests/test_netmsg.cpp`, `fuzz/fuzz_netmsg.cpp` (reassembled
+  messages are valid and re-encode to themselves), host tests for the
+  arguments, and the two-instance LAN game (`tools/e2e-multiplayer.sh`):
+  sync-test's `/synctest` sends a line and 1000 bytes from the client and a
+  line from the host, and both sides check each arrives whole from the right
+  player. Not checked: playback in a replay (the test's replay runs without
+  sync-test). No lobby channel yet: messages are for games.
 ## Hooks
 
 `loader/src/hooks.cpp` (patching, Windows) and `loader/src/core/hooks.cpp`,
@@ -1576,6 +1644,17 @@ API version 4 (`hook`, `unhook`, `hook_call_next` in `tome.h`).
 
 ## Settings
 
+- **Tome's own** (`core/tome_settings.cpp`, Tome > Settings): Widescreen,
+  Check for Updates, Install Updates Automatically, and Stop on Memory
+  Corruption (`harden_heap`, off by default): read once at startup, it calls
+  `HeapSetInformation(HeapEnableTerminationOnCorruption)` (`bootstrap.cpp`,
+  `harden_heap`), which `war3.exe` (linked for Windows XP) doesn't get by
+  default. Windows can't undo it in a running process, so a change applies
+  from the next start. The process then ends through Windows' critical
+  failure path (`0xC0000374`), which may skip exception filters, so there may
+  be no Tome crash report, only Windows' own (event log, Error Reporting).
+  Not checked on Windows yet; Wine accepts the call but its heap ignores it
+  (the e2e test runs every launch with it on).
 - `"config"` in `tome.mod.json` names a schema (`core/settings.h`: boolean,
   integer, number with minimum/maximum/step, string with an `enum` or
   `maxLength`; title, description, default). It's read with the metadata;

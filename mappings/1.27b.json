@@ -1053,6 +1053,21 @@
       "bytes": "56 57 8b f9 b9 0d 00 00 00 e8 72 01 d4 ff 8b 40",
       "doc": "Whether this client hosts the game: 1 for game type 'NONE', 0 once the client's state (+0x278 of its block) is 3 or more (the game started), otherwise the flag at +0x28C of its block. The Start button checks it. Plain ret."
     },
+    "NetGetPlayerNumber": {
+      "kind": "function", "rva": "0x0032b5f0", "conv": "fastcall",
+      "sig": "int(int player, int net_index)",
+      "bytes": "53 56 8b d9 b9 0d 00 00 00 57 8b fa e8 7f 0b d4",
+      "doc": "The player number of a net id (the game's router numbers players from 1, and a game's creator is 1), 0 without such a player: [list +0x18] through 0x329CD0. The host is the id whose number is 1, in the lobby (128: lobby ids are 0x80 | (number - 1), 0x3245C0) and in a game (ids are renumbered to game slots, 0x32FF80). Its inverse is 0x32B790. Plain ret; the number in al. docs/reverse-engineering.md, The network client."
+    },
+    "NetClient::Registry": {
+      "kind": "function", "rva": "0x0032aee0", "conv": "cdecl", "sig": "void*(void)",
+      "bytes": "b9 0d 00 00 00 e9 96 12 d4 ff cc cc cc cc cc cc",
+      "doc": "The registry entry the net client hangs off (0x06C180 with 0xD): the client is [[entry + NetClientRegistry.holder] + NetClientHolder.client], null without one. Only the TOME_DEBUG_LOBBY_AS check uses it (developer builds)."
+    },
+    "NetClientRegistry.holder": { "kind": "offset", "value": "0x10" },
+    "NetClientHolder.client": { "kind": "offset", "value": "0x8" },
+    "NetClient.block_size": { "kind": "constant", "value": "0x304", "doc": "Each local client's block: net client + index * this." },
+    "NetClient.local_id": { "kind": "offset", "value": "0x2dc", "doc": "uint8 in a block: the local player's net id (NetGetLocalPlayer). The send path (0x32CA60) reads the sender from here." },
     "NetIsReplay": {
       "kind": "function", "rva": "0x0032c110", "conv": "cdecl", "sig": "int(void)",
       "bytes": "b9 0d 00 00 00 e8 66 00 d4 ff 8b 40 10 8b 48 08",
@@ -1418,6 +1433,13 @@
     "CBLPFile.header_copy": {
       "kind": "data", "rva": "0x008e97e6",
       "doc": "The fixed-size header copy in CBLPFile::Open (mov ecx,0x127; rep movsd): blp-guard patches it to clamp the copy to the file's length. Bytes b9 27 01 00 00 f3 a5."
+    },
+    "MapTransfer::IsValidName": {
+      "kind": "function", "rva": "0x00979000", "conv": "thiscall",
+      "sig": "int(void* this, const char* name)",
+      "bytes": "55 8b ec 81 ec 08 01 00 00 a1 ?? ?? ?? ?? 33 c5 89 45 fc 56 8b 75 08 57 8b f9 8b",
+      "size": "0x8b",
+      "doc": "The map transfer's check of a file name a host sends (the client's start-download handler 0x989260 calls it on the host's map path before making a transfer, and the host's sender 0x985280 on its own): 0 for an absolute path (0x91F00), any of */:><|&+^?\" (0x91EC0), a base name that is a DOS device (0x91B60: nul, con, prn, aux, com1-9, lpt1-9, compared up to the last dot) or an extension other than the transfer's list (0x9788F0: .w3m;.w3x, at +0x2DA). Backslashes and '..' components pass: the client then looks the path up under the game folder as sent (0x9789E0) before searching Maps\\ by base name. The download itself is written to Maps\\Download\\<base name> (0x979090). ret 4. The lan-map-guard patch hooks it (AFTER). See docs/reverse-engineering.md, Map downloads."
     },
     "CSound::InitMIDI": {
       "kind": "function", "rva": "0x002385b0", "conv": "thiscall",
