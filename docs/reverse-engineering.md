@@ -74,9 +74,14 @@ Everything below is about 1.27b; RVAs in this document are 1.27b's.
     `0x4C5CF0` without reloading it. A hook must give back the caller's
     ecx and edx, and pass its eax into the original (the hook engine does:
     `architecture.md`, hooks).
-- **Not mapped (no use in Tome):** COptionsMenu::SetPanel and ::Save,
-  CBattleNetGateways::LoadRegistry, CSlider::SetValue, CameraPresets (not a
-  table in 1.26a), CrashHandler::*, Scheduler::SetPeriod,
+- **Mapped for mods:** COptionsMenu::SetPanel (`0x55F950`; 1.26a's tab
+  cases in COptionsMenu::OnEvent call it through one-line wrappers,
+  `0x55FA70`/`0x55FA80`/`0x55FA90`, where 1.27b inlines them),
+  COptionsMenu::Save (`0x55F4E0`, the third call of the OK handler
+  `0x55FAA0`, as in 1.27b's) and Scheduler::SetPeriod (`0x62B040`, called
+  only by Options::ApplyValue's maxfps case).
+- **Not mapped (no use in Tome):** CBattleNetGateways::LoadRegistry,
+  CSlider::SetValue, CameraPresets (not a table in 1.26a), CrashHandler::*,
   CGxDeviceD3d::WndProc.
 
 ## How Tome gets in
@@ -319,6 +324,14 @@ exploit by forcing a cross-type shadow's `desc+0x10` to the global's type-id.
   missing `endfunction` and still reaches a later `endfunction`, and a script
   that ends inside a function crashes 1.27b itself, with or without Tome.
 
+Both functions are reserved (mods can't hook them), so their mappings have
+a `size`, the length to the `int3` padding after them: `Jass::compile`
+`0x102` (1.26a `0x458900`, `0x10A`) and `JassScanner::nextToken` `0x5C8`
+(1.26a `0x45FF30`, `0x5F4`), which takes in its `switch`'s jump table
+(`jmp [ebx*4+0x924EC0]`, 1.26a `[eax*4+0x46044C]`) at its end. A linear
+disassembly that stops at the first `ret` past every branch target ends
+`nextToken` in the middle: the table's cases end in `ret`s too.
+
 Restoring when the scanner hands out `endfunction` isn't too early: the
 e2e map's functions end with `return <local>` and `set <local> = 7` right
 before `endfunction`, and both compile and run against the local
@@ -471,6 +484,17 @@ glow when a hero gains a point whether the button shows or not, so
 Enhanced Options hides them again each frame. Checked in game: hidden and
 shown twice, with a Paladin that had a point to spend.
 
+**Health bars** (`healthbars`, `0x2B`, the Gameplay panel's Always Show
+Health Bars): applying the option, and the game UI as it's built, store it
+at `CGameUI.healthbars`. Names of the functions guessed.
+
+| What | 1.27b | 1.26a | Notes |
+|------|-------|-------|-------|
+| CGameUI.healthbars | `+0x1D8` | `+0x1D8` | int: the option. HealthBars::Update inverts the health bar keys with it: on, bars show unless a key is held. |
+| HealthBars::Update | `0x386620` | `0x39B2D0` | `void __thiscall()`, plain `ret`. A per-frame update of an in-game UI object (called from `0x385FDC` on its own `this`; not the CGameUI, class not known). Reads the keys into its flags: friendly bars (`+0x180`) while key 2 (Alt) or `0x112` is down, enemy bars (`+0x17C`) while 2 or `0x113` is; both inverted when `CGameUI::Get(1, 0)`'s `+0x1D8` is on. With neither, hides every shown bar but the hovered unit's (`0x390320`); else `0x38E4E0` runs HealthBars::Consider on an eighth of the units each frame. |
+| HealthBars::Consider | `0x397B90` | `0x37D0D0` | `void __fastcall(CUnit* unit, int friendly, int enemy)`, `ret 4`. Shows a living, visible unit's bar if it isn't shown yet (`+0x280` bit `0x100`) and its owner is allied to the local player (or `+0x60` bit 1) when friendly, or not when enemy: CUnit::SetHealthBarShown(1, hovered), then lists it among the shown bars. |
+| CUnit::SetHealthBarShown | `0x654E20` | `0x2C7460` | `void __thiscall(int shown, int hovered)`, `ret 8`. Shows or hides the unit's health bar (made on first use at `+0x50`). Every path ends here: HealthBars::Consider, hiding all, and the hovered unit's. |
+
 **Controls** (`CControl` and its subclasses: CHECKBOX, SLIDER, POPUPMENU):
 
 | What | RVA | Notes |
@@ -503,7 +527,9 @@ work on the local player's camera, `CGameUI+0x254` (`0x36B190` returns it),
 through GameCamera::SetField (`0x362ED0`, `void __thiscall(int field, float
 value, float duration, int)`, `ret 0x10`) and GetField (`0x360740`, float
 on the x87 stack, `ret 4`). Fields as common.j numbers them: 0 target
-distance (1650), 1 far z (5000), 2 angle of attack, ... The classic mouse
+distance (1650), 1 far z (5000), 2 angle of attack (304: 56 degrees below
+the horizon), 3 field of view (70), ...; SetField takes degrees, GetField
+gives radians. The classic mouse
 wheel steps through four zoom levels, `.rdata 0xA9F4E0` (heights 160,
 angles 304/311/318/325, distances 1650/1600/1500/1400), loaded with movaps at
 `0x35EAA2` and `0x360122`: it only zooms in from the default. CGameUI::Get
@@ -1183,6 +1209,28 @@ in its own panel, so it doesn't happen there).
 | CGameUI.esc_menu | `+0x228` | The CEscMenu, made by `0x39D7E0` once per game. Its main panel is at `+0x18`. |
 | CEscMenu::Reset | `0x3CDD10` | `void __thiscall()`: options panel to state 0, main panel to SetPanel(1). F10 and the Menu button (`0x36FD99`) call it, then SetMode(esc_menu, 1). |
 
+The menu's mode (`0x3CF230`, `void __thiscall(int mode)`, `ret 4`; the
+shown panel object at `+0x14`) picks among its panel objects: 0 the main
+panel (`+0x18`), 1 and 2 Save Game and Load Game (`+0x20`), 3 Options
+(`CEscMenu.options_panel`, `+0x1C`). Reset's "state 0" is that mode 0.
+
+The Options panel (`CEscMenuOptionsPanel`, `EscMenuOptionsPanel.fdf`) is a
+list (Gameplay, Video, Sound, Network, Previous Menu) and four sub-panels
+that share an OK/Cancel bar. Its OnEvent (slot 3, `0x3BD5A0`) switches on
+the command: 0 Gameplay, 1 Sound, 2 Video and 3 Network load their panel's
+controls and call SetPanel with 2, 4, 3 and 5; 4 is Previous Menu; 9 OK;
+10 Cancel (Esc too, through the key handler `0x3BF4A0`); 5–8 are its
+sliders and menus. Going back (`0x3C2D40`; Previous Menu, and the end of
+OK and Cancel) goes from a sub-panel (2–5) to the list and from the list
+to the Esc menu's main panel; for any other panel number it does nothing.
+The box doesn't change size between them (0.288 × 0.384, `EscMenuBackdrop`).
+
+| What | 1.27b | 1.26a | Notes |
+|------|-------|-------|-------|
+| CEscMenuOptionsPanel::SetPanel | `0x3CF8A0` | `0x344D60` | `void __thiscall(int panel)`, `ret 4`. 1 the list (`+0x174`), 2 Gameplay (`+0x18C`), 3 Video (`+0x1C0`), 4 Sound (`+0x1F4`), 5 Network (`+0x21C`); a sub-panel also shows the OK/Cancel bar (`+0x22C`). Hides the others (vtable `+0xD0`), shows its own (`+0xD4`), stores the number at `+0x168`; returns at once if it's already shown. Another number is only stored, which leaves room for a mod's panel; OK and Cancel do nothing for it, so the mod goes back itself (SetPanel(1)). |
+| CEscMenuOptionsPanel::OnOK | `0x3C2810` | `0x36D600` | `int __thiscall()`, plain `ret`: stores the shown sub-panel's controls (2–5), then goes back (`0x3C2D40`). |
+| CEscMenuOptionsPanel::OnCancel | `0x3BC9D0` | `0x36D660` | `int __thiscall()`, plain `ret`: puts the shown sub-panel's controls back (2–5), then goes back. Esc calls it too. |
+
 ### Edit boxes
 
 `CEditBox` (vtable `0xA8C62C`; the glue screens' `CGlueEditBoxWar3` and the
@@ -1363,7 +1411,9 @@ call sites in game.dll:
 ## BLP textures (for the BLP guard)
 
 The game decodes BLP1 textures in one place: `CBLPFile::Open` (RVA
-`0x8E9790`, `int __thiscall(this, const char* name, void* context)`, `ret 8`).
+`0x8E9790`, `int __thiscall(this, const char* name, void* context)`, `ret 8`;
+`0x9F` bytes to the `int3` padding, its mapping's `size`; 1.26a `0x78A800`,
+`0x9E`).
 It loads the whole file, stores the buffer pointer at `this+0x4A4` and the
 file length at `this+0x4A8`, copies a fixed `0x127`-dword header to `this+8`,
 then checks the magic (`"BLP1"` = `0x31504C42`). On a wrong magic it returns 0

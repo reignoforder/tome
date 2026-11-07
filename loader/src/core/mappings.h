@@ -40,6 +40,11 @@ struct Symbol {
     // Function only: its first bytes, checked against the loaded game.dll
     // before anything is patched. -1 matches any byte (relocated addresses).
     std::vector<int16_t> bytes;
+    // Function only, optional: its length in bytes, from its RVA (jump
+    // tables in it count). 0: not known. Tome's mapping has it for the
+    // functions it reserves (hooks::reserve), so a mod's name for a place
+    // inside one is reserved too.
+    uint32_t size = 0;
     std::string doc;
 };
 
@@ -62,6 +67,17 @@ struct ParseResult {
 
 // Validates one build file. Every error names the symbol it's about.
 ParseResult parse_build(const json::Value& root, Build& out);
+
+// Validates a mod's own mapping file for the running build
+// (<mod>/mappings/<build>.json, docs/architecture.md "Mods' own mappings"):
+// "schema" and "symbols" as in parse_build. The build header is optional;
+// a field it has must match `running`'s. `out` gets `running`'s header.
+ParseResult parse_mod_build(const json::Value& root, const Build& running, Build& out);
+
+// A mod's symbols go by "<mod id>/<name in its file>", e.g.
+// "mymod/CUnit::Foo" (Tome's own names never have a '/'). Splits one; false
+// if `name` isn't of that form.
+bool split_mod_symbol(std::string_view name, std::string_view& id, std::string_view& local);
 
 // Parses a "bytes" pattern: two lowercase hex digits or "??" per byte,
 // separated by single spaces.

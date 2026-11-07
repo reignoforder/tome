@@ -55,7 +55,11 @@ struct ModMetadata {
     std::string wasm;
 
     std::string assets;
-    std::vector<std::string> requires_;  // mapped names / capabilities (§6.3)
+    // The folder of the mod's own mapping files, one per build
+    // (<folder>/<build>.json, e.g. mappings/1.27b.json): symbols it hooks or
+    // resolves as "<id>/<name>". Empty: "mappings", if that folder exists.
+    std::string mappings;
+    std::vector<std::string> requires_;  // mapped names ("<id>/<name>" for a mod's own) / capabilities (§6.3)
     std::vector<std::string> natives;    // JASS declarations
     std::vector<std::string> provides;
 

@@ -195,6 +195,7 @@ add_library(tome_runtime OBJECT
     src/main_thread.cpp
     src/mappings.cpp
     src/mod_manager.cpp
+    src/mod_mappings.cpp
     src/mod_menu.cpp
     src/mods_ready.cpp
     src/natives.cpp

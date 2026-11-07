@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "mappings.h"
 
+#include <cstdio>
 #include <cmath>
 
 namespace tome::mappings {
@@ -90,7 +91,8 @@ bool is_lower_name(const std::string& s) {
 
 class Parser {
 public:
-    explicit Parser(Build& out) : out_(out) {}
+    // `running`: parse a mod's file for that build (parse_mod_build).
+    explicit Parser(Build& out, const Build* running = nullptr) : out_(out), running_(running) {}
 
     void error(std::string message) { errors_.push_back(std::move(message)); }
 
@@ -152,7 +154,7 @@ public:
             return;
         }
 
-        static const char* const kAllowed[] = {"kind", "rva", "value", "conv", "sig", "bytes", "target", "doc"};
+        static const char* const kAllowed[] = {"kind", "rva", "value", "conv", "sig", "bytes", "size", "target", "doc"};
         for (const auto& [key, value] : entry.members()) {
             bool allowed = false;
             for (const char* a : kAllowed) allowed = allowed || key == a;
@@ -179,6 +181,7 @@ public:
             }
             if (const std::string* sig = string_field(entry, "sig", where, true)) sym.signature = *sig;
         }
+        if (sym.kind != Kind::Function && entry.find("size")) error(where + ": only functions have a \"size\"");
         if (sym.kind == Kind::Import) {
             if (entry.find("bytes")) error(where + ": only functions have \"bytes\"");
         } else if (sym.kind == Kind::Function) {
@@ -192,6 +195,13 @@ public:
                     error(where + ": \"bytes\" must not start with \"??\"");
                 } else if (out_.size_of_image && sym.value + sym.bytes.size() > out_.size_of_image) {
                     error(where + ": \"bytes\" run past the end of the image");
+                }
+            }
+            if (entry.find("size") && u32_field(entry, "size", where, sym.size)) {
+                if (sym.size < sym.bytes.size()) {
+                    error(where + ": \"size\" must be at least as long as \"bytes\"");
+                } else if (out_.size_of_image && (sym.value >= out_.size_of_image || sym.size > out_.size_of_image - sym.value)) {
+                    error(where + ": \"size\" runs past the end of the image");
                 }
             }
         } else {
@@ -240,8 +250,11 @@ public:
         if (!schema || !schema->is_number()) {
             error("missing \"schema\"");
         } else if (schema->as_number() != kSchema) {
-            error("unsupported schema " + std::to_string(static_cast<long long>(schema->as_number())) +
-                  " (this Tome reads schema " + std::to_string(kSchema) + ")");
+            // Only a number that fits is printed: casting a huge one is undefined.
+            const double n = schema->as_number();
+            const std::string shown =
+                n > -1e9 && n < 1e9 ? std::to_string(static_cast<long long>(n)) : std::string("out of range");
+            error("unsupported schema " + shown + " (this Tome reads schema " + std::to_string(kSchema) + ")");
             return finish();
         }
 
@@ -252,17 +265,10 @@ public:
                 out_.module = module->as_string();
             }
         }
-        if (const std::string* name = string_field(root, "name", "build", true)) out_.name = *name;
-        if (const std::string* version = string_field(root, "file_version", "build", true)) {
-            out_.file_version = *version;
-        }
-        u32_field(root, "pe_timestamp", "build", out_.pe_timestamp);
-        u32_field(root, "size_of_image", "build", out_.size_of_image);
-        if (const std::string* sha = string_field(root, "sha256", "build", true)) {
-            if (sha->size() != 64 || !is_lower_hex(*sha)) {
-                error("build: \"sha256\" must be 64 lowercase hex digits");
-            }
-            out_.sha256 = *sha;
+        if (running_) {
+            mod_header(root);
+        } else {
+            header(root);
         }
 
         const json::Value* symbols = root.find("symbols");
@@ -276,6 +282,57 @@ public:
     }
 
 private:
+    void header(const json::Value& root) {
+        if (const std::string* name = string_field(root, "name", "build", true)) out_.name = *name;
+        if (const std::string* version = string_field(root, "file_version", "build", true)) {
+            out_.file_version = *version;
+        }
+        u32_field(root, "pe_timestamp", "build", out_.pe_timestamp);
+        u32_field(root, "size_of_image", "build", out_.size_of_image);
+        if (const std::string* sha = string_field(root, "sha256", "build", true)) {
+            if (sha->size() != 64 || !is_lower_hex(*sha)) {
+                error("build: \"sha256\" must be 64 lowercase hex digits");
+            }
+            out_.sha256 = *sha;
+        }
+    }
+
+    // A mod's file needs no header: the build is the one it's named after.
+    // Each field it does have must be the running build's, so a file copied
+    // from another build's folder is refused instead of patching at wrong
+    // addresses.
+    void mod_header(const json::Value& root) {
+        const Build& b = *running_;
+        auto same_string = [&](const char* key, const std::string& expected) {
+            const json::Value* v = root.find(key);
+            if (!v) return;
+            if (!v->is_string() || v->as_string() != expected) {
+                error(std::string("build: \"") + key + "\" isn't this build's (" + b.name + ": \"" + expected + "\")");
+            }
+        };
+        auto same_u32 = [&](const char* key, uint32_t expected) {
+            const json::Value* v = root.find(key);
+            uint32_t value = 0;
+            if (v && (!parse_u32(*v, value) || value != expected)) {
+                char text[16];
+                snprintf(text, sizeof(text), "0x%08x", static_cast<unsigned>(expected));
+                error(std::string("build: \"") + key + "\" isn't this build's (" + b.name + ": \"" + text + "\")");
+            }
+        };
+        if (out_.module != b.module) error("build: \"module\" must be \"" + b.module + "\"");
+        same_string("name", b.name);
+        same_string("file_version", b.file_version);
+        same_string("sha256", b.sha256);
+        same_u32("pe_timestamp", b.pe_timestamp);
+        same_u32("size_of_image", b.size_of_image);
+        out_.module = b.module;
+        out_.name = b.name;
+        out_.file_version = b.file_version;
+        out_.sha256 = b.sha256;
+        out_.pe_timestamp = b.pe_timestamp;
+        out_.size_of_image = b.size_of_image;  // the rva checks need it before the symbols
+    }
+
     ParseResult finish() {
         ParseResult r;
         r.ok = errors_.empty();
@@ -284,6 +341,7 @@ private:
     }
 
     Build& out_;
+    const Build* running_;
     std::vector<std::string> errors_;
 };
 
@@ -315,6 +373,19 @@ const Symbol* Build::find(std::string_view name) const {
 ParseResult parse_build(const json::Value& root, Build& out) {
     out = Build{};
     return Parser(out).run(root);
+}
+
+ParseResult parse_mod_build(const json::Value& root, const Build& running, Build& out) {
+    out = Build{};
+    return Parser(out, &running).run(root);
+}
+
+bool split_mod_symbol(std::string_view name, std::string_view& id, std::string_view& local) {
+    const size_t slash = name.find('/');
+    if (slash == std::string_view::npos || slash == 0 || slash + 1 == name.size()) return false;
+    id = name.substr(0, slash);
+    local = name.substr(slash + 1);
+    return local.find('/') == std::string_view::npos;
 }
 
 bool has_rva(Kind kind) {

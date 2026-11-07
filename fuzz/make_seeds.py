@@ -72,6 +72,11 @@ for path in sorted(glob.glob(os.path.join(ROOT, "sdk/examples/*/*.json")) +
                    glob.glob(os.path.join(ROOT, "tests/e2e/mods/*/tome.mod.json"))):
     add("json", open(path, "rb").read())
 add("json", '{"a": [1, 2.5e3, -0, true, false, null, "\\u00e9\\n"], "b": {}}')
+# A mod's own mapping file (tome.mod.json "mappings").
+add("json", '{"schema": 2, "name": "1.27b", "symbols": {'
+            '"CUnit::Foo": {"kind": "function", "rva": "0x100", "conv": "thiscall", "sig": "int(void* this)", '
+            '"bytes": "55 8b ec ?? 83"}, "Foo.size": {"kind": "offset", "value": 8}, '
+            '"Foo.call": {"kind": "call", "rva": "0x200", "target": "CUnit::Foo"}}}')
 
 add("jass", "globals\nunit G\nendglobals\nfunction f takes nothing returns nothing\n"
             "    local integer G\n    set G = 1\nendfunction\n")

@@ -195,6 +195,25 @@ TEST(metadata_wasm) {
     CHECK(has_error_containing(parse_text(with(R"("wasm": "w.wasm", "entry": "w.dll")"), bad), "not both"));
 }
 
+TEST(metadata_mappings_folder) {
+    auto with = [](const char* extra) {
+        return std::string(R"({"schema": 1, "id": "own-maps", "version": "1.0.0", "game": "*", "tome": "*", "sync": "client", )") +
+               extra + "}";
+    };
+    ModMetadata m;
+    auto r = parse_text(with(R"("mappings": "data/maps", "requires": ["own-maps/CUnit::Foo"])"), m);
+    for (const std::string& e : r.errors) test::fail(__FILE__, __LINE__, e);
+    CHECK(r.ok && r.warnings.empty());
+    CHECK_EQ(m.mappings, std::string("data/maps"));
+    CHECK(m.requires_.size() == 1 && m.requires_[0] == "own-maps/CUnit::Foo");
+    r = parse_text(with(R"("reload": "live")"), m);
+    CHECK(r.ok && m.mappings.empty());  // "mappings" if that folder exists
+
+    ModMetadata bad;
+    CHECK(has_error_containing(parse_text(with(R"("mappings": "../maps")"), bad), "\"mappings\" must be a path inside"));
+    CHECK(has_error_containing(parse_text(with(R"("mappings": 3)"), bad), "\"mappings\""));
+}
+
 TEST(metadata_edition) {
     auto with = [](const std::string& extra) {
         return R"({"schema": 1, "id": "edition-test", "version": "1.0.0", "game": "*", "tome": "*", "sync": "client")" +

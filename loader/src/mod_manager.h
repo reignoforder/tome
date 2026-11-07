@@ -159,6 +159,12 @@ private:
         std::string settings_error;
         json::Value stored_settings;  // the settings file as read; null if there's none
         FileStamp settings_stamp;     // of that file, taken before reading it; zero if there's none
+        // Its own mapping file for this build (tome.mod.json "mappings"):
+        // null if it has none. Its symbols go by "<id>/<name>".
+        std::shared_ptr<const mappings::Build> own_mappings;
+        bool mappings_checked = false;  // against the game's code (mod_mappings::verify)
+        std::wstring mappings_file;  // that file; empty if none
+        FileStamp mappings_stamp;
     };
 
     struct Runtime {
@@ -207,6 +213,13 @@ private:
         std::vector<std::string> errors;
         std::vector<std::string> warnings;
     };
+    struct ParsedMappings {
+        std::wstring file;
+        FileStamp stamp;  // zero: read it again
+        std::shared_ptr<const mappings::Build> build;  // null if it has errors
+        bool checked = false;  // build checked against the game's code (its errors are in errors)
+        std::vector<std::string> errors;
+    };
     struct ParsedSettings {
         bool schema_read = false;
         std::wstring schema_file;
@@ -228,8 +241,17 @@ private:
     std::wstring settings_file(const std::string& id) const { return paths_.mod_config_dir + L"\\" + widen(id) + L".json"; }
     static std::string settings_name(const std::string& id) { return "config\\" + id + ".json"; }
     // Declares the natives of every valid mod that targets this game build;
-    // a mod whose natives can't be declared becomes invalid (§5.5).
+    // a mod whose natives can't be declared becomes invalid (§5.5), and so
+    // does what requires its mappings (check_mod_requires).
     void declare_natives(std::vector<Installed>& installed) const;
+    // Reads the mod's mapping file for this build into `mod` (discover()).
+    void read_mappings(Installed& mod) const;
+    // Checks "requires" names from mods' mapping files ("<id>/<name>")
+    // against the mod named, once every mod is read (discover()).
+    void check_mod_requires(std::vector<Installed>& mods) const;
+    // Hands the mapping files of the valid mods that are on and allowed to
+    // mod_mappings (refresh); a locked mod keeps the table it runs with.
+    void publish_mappings(const mod_state::State& state, const std::vector<Installed>& installed) const;
     // Runs fn under the lock, then tells the mods about settings that changed meanwhile.
     void locked(const std::function<void()>& fn);
     std::vector<std::string> set_enabled_locked(const std::string& id, bool enabled);
@@ -296,9 +318,11 @@ private:
     };
     DiskPrint disk_fingerprint() const;
     // A "sync": "required" mod's identity in the multiplayer handshake
-    // (core/handshake.h): tome.mod.json, the DLL and every asset file, hashed;
-    // cached until one of them changes.
-    std::string sync_hash(const Installed& mod);
+    // (core/handshake.h): tome.mod.json, the DLL, its mapping file and every
+    // asset file, hashed, and the mapping files of the mods it names in
+    // "depends" or "requires" (from `installed`); cached until one of them
+    // changes.
+    std::string sync_hash(const Installed& mod, const std::vector<Installed>& installed);
     bool write_settings(const std::string& id);  // also records the new stamp
     // Sends what changed to settings_sink_; call without the lock held.
     void notify_settings(std::vector<std::pair<std::string, std::vector<std::string>>> changes) const;
@@ -329,6 +353,7 @@ private:
     std::map<std::string, std::pair<uint64_t, std::string>> sync_hashes_;  // by folder: files' stamps, hash
     mutable std::map<std::string, ParsedMeta> meta_cache_;
     mutable std::map<std::string, ParsedSettings> settings_cache_;
+    mutable std::map<std::string, ParsedMappings> mappings_cache_;
     // The last check of each folder's tome.sig, by folder (check_signature).
     struct CheckedSignature {
         std::string text;  // tome.sig

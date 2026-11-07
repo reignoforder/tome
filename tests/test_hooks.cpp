@@ -193,6 +193,22 @@ TEST(hooks_layout_refusals) {
                   "words of arguments"));
 }
 
+// Two mappings of one function share its patch only if they call it the same way.
+TEST(hooks_same_layout) {
+    using C = mappings::Convention;
+    CHECK(hooks::same_layout(layout(C::Cdecl, "int(int a, void* b)"), layout(C::Cdecl, "int(int x, Foo* y)")));
+    // A float argument is passed like an int; a float result isn't.
+    CHECK(hooks::same_layout(layout(C::Stdcall, "void(float a)"), layout(C::Stdcall, "void(int a)")));
+    CHECK(!hooks::same_layout(layout(C::Cdecl, "float(int a)"), layout(C::Cdecl, "int(int a)")));
+    CHECK(!hooks::same_layout(layout(C::Cdecl, "int(int a)"), layout(C::Stdcall, "int(int a)")));     // cleanup
+    CHECK(!hooks::same_layout(layout(C::Fastcall, "int(int a)"), layout(C::Stdcall, "int(int a)")));  // ecx
+    CHECK(!hooks::same_layout(layout(C::Cdecl, "int(int a)"), layout(C::Cdecl, "int(int a, int b)")));
+    // The same words, but one argument against two: refused, to be safe.
+    CHECK(!hooks::same_layout(layout(C::Cdecl, "int(double a)"), layout(C::Cdecl, "int(int a, int b)")));
+    CHECK(!hooks::same_layout(layout(C::Cdecl, "int64_t(int a)"), layout(C::Cdecl, "int(int a)")));   // edx:eax
+    CHECK(!hooks::same_layout(layout(C::Cdecl, "int(int n, ...)"), layout(C::Cdecl, "int(int n)")));
+}
+
 TEST(hooks_chain_order) {
     std::vector<hooks::Handler> chain;
     hooks::insert(chain, handler(TOME_HOOK_AFTER, 0, trace_handler, "a0", 1));

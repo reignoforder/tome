@@ -141,6 +141,9 @@ TEST(mappings_reject_bad_header) {
     r = parse_text(R"({"schema": 1, "symbols": {}})", b);
     CHECK(!r.ok);
     CHECK(has_error_containing(r, "unsupported schema 1"));
+    // Too big for an integer (fuzz/regressions/json/huge-mapping-schema.json: casting it was undefined).
+    r = parse_text(R"({"schema": 2222222222222222222222222222222222222221, "symbols": {}})", b);
+    CHECK(has_error_containing(r, "unsupported schema out of range"));
 }
 
 TEST(mappings_parse_bytes) {
@@ -304,4 +307,121 @@ TEST(mappings_bind_blp_symbols_are_optional) {
         CHECK(!bind_build(b, bound, errors));
         CHECK_EQ(errors.size(), size_t(1));
     }
+}
+
+namespace {
+
+mappings::ParseResult parse_mod_text(const std::string& text, const mappings::Build& running, mappings::Build& out) {
+    json::Value root;
+    auto r = json::parse(text, root);
+    if (!r.ok) {
+        test::fail(__FILE__, __LINE__, "bad JSON in test: " + r.error);
+        return {};
+    }
+    return mappings::parse_mod_build(root, running, out);
+}
+
+mappings::Build running_build() {
+    mappings::Build b;
+    b.name = "1.27b";
+    b.file_version = "1.27.1.7085";
+    b.pe_timestamp = 0x584a499e;
+    b.size_of_image = 0x1000;
+    b.sha256 = "d51e5680243fc90e19c9d6074f7fac433c466d3cf5f46e2364291725574d8236";
+    return b;
+}
+
+} // namespace
+
+// A mod's own file: no header needed, and the running build's is filled in.
+TEST(mappings_mod_file_without_a_header) {
+    const mappings::Build running = running_build();
+    mappings::Build b;
+    auto r = parse_mod_text(R"j({"schema": 2, "symbols": {
+        "CUnit::Foo": {"kind": "function", "rva": "0x100", "conv": "thiscall", "sig": "int(void* this, int a)",
+                       "bytes": "55 8b ec 83 ec 10"},
+        "CUnit.bar": {"kind": "offset", "value": "0x48"}
+    }})j", running, b);
+    for (const std::string& e : r.errors) test::fail(__FILE__, __LINE__, e);
+    CHECK(r.ok);
+    CHECK_EQ(b.name, std::string("1.27b"));
+    CHECK_EQ(b.module, std::string("game.dll"));
+    CHECK_EQ(b.size_of_image, 0x1000u);
+    CHECK_EQ(b.sha256, running.sha256);
+    const mappings::Symbol* fn = b.find("CUnit::Foo");
+    CHECK(fn && fn->kind == Kind::Function && fn->value == 0x100 && fn->bytes.size() == 6);
+    CHECK(b.find("CUnit.bar") && b.find("CUnit.bar")->value == 0x48);
+
+    // The same checks on symbols as Tome's own files, with the running build's size.
+    r = parse_mod_text(R"j({"schema": 2, "symbols": {
+        "Far": {"kind": "data", "rva": "0x2000"},
+        "NoBytes": {"kind": "function", "rva": "0x100", "conv": "cdecl", "sig": "void(void)"},
+        "has/slash": {"kind": "constant", "value": 1}
+    }})j", running, b);
+    CHECK(!r.ok);
+    CHECK(has_error_containing(r, "symbol \"Far\": rva is outside the image"));
+    CHECK(has_error_containing(r, "symbol \"NoBytes\": missing \"bytes\""));
+    CHECK(has_error_containing(r, "symbol \"has/slash\": names use"));
+}
+
+// "size": a function's length, optional; at least its bytes, inside the image.
+TEST(mappings_function_size) {
+    const mappings::Build running = running_build();
+    mappings::Build b;
+    auto r = parse_mod_text(R"j({"schema": 2, "symbols": {
+        "Sized": {"kind": "function", "rva": "0x100", "conv": "cdecl", "sig": "void(void)",
+                  "bytes": "55 8b ec 83 ec 10", "size": "0x40"},
+        "Unsized": {"kind": "function", "rva": "0x200", "conv": "cdecl", "sig": "void(void)",
+                    "bytes": "55 8b ec 83 ec 10"}
+    }})j", running, b);
+    for (const std::string& e : r.errors) test::fail(__FILE__, __LINE__, e);
+    CHECK(b.find("Sized") && b.find("Sized")->size == 0x40);
+    CHECK(b.find("Unsized") && b.find("Unsized")->size == 0);
+
+    r = parse_mod_text(R"j({"schema": 2, "symbols": {
+        "Short": {"kind": "function", "rva": "0x100", "conv": "cdecl", "sig": "void(void)",
+                  "bytes": "55 8b ec 83 ec 10", "size": 4},
+        "Long": {"kind": "function", "rva": "0x100", "conv": "cdecl", "sig": "void(void)",
+                 "bytes": "55 8b ec 83 ec 10", "size": "0x1000"},
+        "Data": {"kind": "data", "rva": "0x300", "size": 4}
+    }})j", running, b);
+    CHECK(!r.ok);
+    CHECK(has_error_containing(r, "symbol \"Short\": \"size\" must be at least as long as \"bytes\""));
+    CHECK(has_error_containing(r, "symbol \"Long\": \"size\" runs past the end of the image"));
+    CHECK(has_error_containing(r, "symbol \"Data\": only functions have a \"size\""));
+}
+
+// A header field it does have must be the running build's.
+TEST(mappings_mod_file_header_must_match) {
+    const mappings::Build running = running_build();
+    mappings::Build b;
+    auto r = parse_mod_text(R"({"schema": 2, "name": "1.27b", "file_version": "1.27.1.7085",
+        "pe_timestamp": "0x584a499e", "size_of_image": 4096,
+        "sha256": "d51e5680243fc90e19c9d6074f7fac433c466d3cf5f46e2364291725574d8236", "symbols": {}})", running, b);
+    for (const std::string& e : r.errors) test::fail(__FILE__, __LINE__, e);
+    CHECK(r.ok);
+
+    r = parse_mod_text(R"({"schema": 2, "name": "1.26a", "file_version": 3, "pe_timestamp": "0x1",
+        "sha256": "00", "module": "blizzard.ax", "symbols": {}})", running, b);
+    CHECK(!r.ok);
+    CHECK(has_error_containing(r, "build: \"name\" isn't this build's (1.27b: \"1.27b\")"));
+    CHECK(has_error_containing(r, "build: \"file_version\" isn't this build's"));
+    CHECK(has_error_containing(r, "build: \"pe_timestamp\" isn't this build's (1.27b: \"0x584a499e\")"));
+    CHECK(has_error_containing(r, "build: \"sha256\" isn't this build's"));
+    CHECK(has_error_containing(r, "build: \"module\" must be \"game.dll\""));
+
+    r = parse_mod_text(R"({"schema": 3, "symbols": {}})", running, b);
+    CHECK(has_error_containing(r, "unsupported schema 3"));
+    r = parse_mod_text(R"({"schema": 2})", running, b);
+    CHECK(has_error_containing(r, "missing \"symbols\" object"));
+}
+
+TEST(mappings_split_mod_symbol) {
+    std::string_view id, local;
+    CHECK(mappings::split_mod_symbol("mymod/CUnit::Foo", id, local));
+    CHECK(id == "mymod" && local == "CUnit::Foo");
+    CHECK(!mappings::split_mod_symbol("CUnit::Foo", id, local));
+    CHECK(!mappings::split_mod_symbol("/Foo", id, local));
+    CHECK(!mappings::split_mod_symbol("mymod/", id, local));
+    CHECK(!mappings::split_mod_symbol("a/b/c", id, local));
 }

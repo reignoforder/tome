@@ -4,6 +4,7 @@
 #include "core/x86.h"
 #include "guard.h"
 #include "log.h"
+#include "mod_mappings.h"
 #include "patch.h"
 #include "unwind.h"
 
@@ -20,9 +21,14 @@
 namespace tome::hooks {
 
 struct Target {
-    std::string name;
+    std::string name;  // the first name it was hooked by
     uintptr_t address = 0;
+    mappings::Convention convention = mappings::Convention::None;
+    std::string signature;
     Layout layout;
+    bool import = false;            // an import address table slot, not code
+    size_t moved = 0;               // code: the bytes moved to the trampoline, from `address` on
+    uint8_t original[5] = {};       // code: the bytes the jmp replaced
     uint8_t* entry = nullptr;       // push <this>; jmp tome_hook_entry
     uint8_t* trampoline = nullptr;  // the moved instructions; jmp back (an import: the imported function)
     SRWLOCK lock = SRWLOCK_INIT;
@@ -174,15 +180,87 @@ constexpr size_t kCodeBlock = 128;
 constexpr size_t kCodePage = 4096;
 
 SRWLOCK g_lock = SRWLOCK_INIT;  // the maps and the code allocator
-std::map<std::string, std::unique_ptr<Target>> g_targets;  // never freed: the patches stay
+std::vector<std::unique_ptr<Target>> g_owned;  // never freed: the patches stay
+std::map<std::string, Target*> g_targets;       // by every name it was hooked by
 std::map<uintptr_t, Target*> g_by_address;
 std::set<std::string> g_reserved;  // functions a built-in patch owns; mods can't hook/unhook them
+// Where those are in Tome's mapping: another name for one, or for a place
+// inside a function (its "size"), is reserved too.
+struct ReservedRange {
+    mappings::Kind kind;
+    uint32_t start, end;  // RVAs, end exclusive
+};
+std::vector<ReservedRange> g_reserved_at;
+// Handler::name for handlers hooked by another name than their target's own:
+// never freed, since handlers keep pointers into it.
+std::set<std::string> g_alias_names;
+// What each name hooked before it moved (a mod's file now maps it
+// elsewhere, find_or_install): its handlers there stay, and unhook by
+// that name still reaches them.
+std::map<std::string, std::vector<Target*>> g_former;
 uint8_t* g_code_page = nullptr;
 size_t g_code_used = kCodePage;
 std::atomic<uint64_t> g_seq{0};
 
 uintptr_t g_game_base = 0;
 const mappings::Build* g_build = nullptr;
+
+// Tome's mapping, then the mods' own files ("<mod id>/<name>").
+const mappings::Symbol* lookup(const std::string& name) {
+    if (const mappings::Symbol* sym = g_build ? g_build->find(name) : nullptr) return sym;
+    return mod_mappings::find(name);
+}
+
+std::string hex_address(uintptr_t address) {
+    char buf[16];
+    snprintf(buf, sizeof(buf), "0x%08lx", static_cast<unsigned long>(address));
+    return buf;
+}
+
+// Another name for a function or import slot that's hooked already (Tome's
+// name and a mod's own, or two mods'): it shares the patch if it passes its
+// arguments the same way and, for code, its bytes match what was there
+// before the patch. Under g_lock.
+Target* add_alias(const std::string& name, Target& t, mappings::Convention convention, const std::string& signature,
+                  const std::vector<int16_t>* bytes, std::string& error) {
+    Layout layout;
+    if (!layout_for(convention, signature, layout, error)) return nullptr;
+    if (!same_layout(layout, t.layout)) {
+        error = "the same function as \"" + t.name + "\" (" + mappings::to_string(t.convention) + " \"" +
+                t.signature + "\"), which this mapping says takes its arguments another way (" +
+                mappings::to_string(convention) + " \"" + signature + "\")";
+        return nullptr;
+    }
+    if (bytes) {
+        if (bytes->size() < kJmpSize || !readable(t.address, bytes->size())) {
+            error = hex_address(t.address) + " isn't readable code";
+            return nullptr;
+        }
+        // The first bytes are the patch's jmp now; the rest are as they were.
+        auto code = reinterpret_cast<const uint8_t*>(t.address);
+        for (size_t i = 0; i < bytes->size(); ++i) {
+            const uint8_t actual = i < kJmpSize ? t.original[i] : code[i];
+            if ((*bytes)[i] >= 0 && actual != (*bytes)[i]) {
+                char buf[96];
+                snprintf(buf, sizeof(buf), "byte %zu is 0x%02x, expected 0x%02x", i, actual, (*bytes)[i]);
+                error = buf;
+                return nullptr;
+            }
+        }
+    }
+    g_targets[name] = &t;
+    TOME_INFO("Hooked %s: the same function as %s", name.c_str(), t.name.c_str());
+    return &t;
+}
+
+// The code hook whose moved bytes overlap [address, address + size), if any.
+const Target* overlapping(uintptr_t address, size_t size) {
+    for (const auto& [at, t] : g_by_address) {
+        if (t->import || at == address) continue;
+        if (at < address + size && address < at + t->moved) return t;
+    }
+    return nullptr;
+}
 
 uint8_t* alloc_code() {
     if (g_code_used + kCodeBlock > kCodePage) {
@@ -217,6 +295,7 @@ bool write_patch(uintptr_t address, const uint8_t* entry, std::string& error) {
         error = "VirtualProtect failed";
         return false;
     }
+    note_original(address, kJmpSize);
     const uintptr_t word = address & ~uintptr_t(7);
     if (address - word + kJmpSize <= 8) {
         auto target = reinterpret_cast<volatile LONG64*>(word);
@@ -294,11 +373,28 @@ bool invoke_guarded(const Handler& h, tome_hook_call& call) {
     const char* what = h.phase == TOME_HOOK_BEFORE    ? "before hook"
                        : h.phase == TOME_HOOK_REPLACE ? "replace hook"
                                                       : "after hook";
+    // Each handler sees the name it hooked by, also inside another one's
+    // call_next (which may have hooked by another name).
+    const char* outer_name = call.name;
+    if (h.name) call.name = h.name;
+    bool ok = true;
     if (!h.mod) {  // Tome's own
         h.fn(h.mod, &call, h.user);
-        return true;
+    } else {
+        ok = guard::run(h.mod, what, call.name, [&] { h.fn(h.mod, &call, h.user); });
     }
-    return guard::run(h.mod, what, call.name, [&] { h.fn(h.mod, &call, h.user); });
+    call.name = outer_name;
+    return ok;
+}
+
+// Which target `name` hooks: none (unbound), or `target` again.
+void bind_name(const std::string& name, Target* target) {
+    ExclusiveLock hold(g_lock);
+    if (target) {
+        g_targets.try_emplace(name, target);
+    } else {
+        g_targets.erase(name);
+    }
 }
 
 } // namespace
@@ -321,20 +417,29 @@ Target* install(const std::string& name, uintptr_t address, mappings::Convention
     char buf[160];
     do {
         if (auto it = g_targets.find(name); it != g_targets.end()) {
-            result = it->second.get();
+            result = it->second;
             break;
         }
-        if (g_by_address.count(address)) {
-            error = "already hooked under the name \"" + g_by_address[address]->name + "\"";
+        if (auto it = g_by_address.find(address); it != g_by_address.end()) {
+            if (it->second->import) {
+                error = "an import slot hooked as \"" + it->second->name + "\", not a function";
+                break;
+            }
+            result = add_alias(name, *it->second, convention, signature, &bytes, error);
+            break;
+        }
+        if (const Target* other = overlapping(address, 1)) {
+            error = "inside the bytes the hook on \"" + other->name + "\" moved (at " + hex_address(other->address) + ")";
             break;
         }
         auto t = std::make_unique<Target>();
         t->name = name;
         t->address = address;
+        t->convention = convention;
+        t->signature = signature;
         if (!layout_for(convention, signature, t->layout, error)) break;
         if (bytes.size() < kJmpSize || !readable(address, bytes.size())) {
-            snprintf(buf, sizeof(buf), "0x%08lx isn't readable code", static_cast<unsigned long>(address));
-            error = buf;
+            error = hex_address(address) + " isn't readable code";
             break;
         }
         // The bytes were checked at startup; check again right before
@@ -371,6 +476,14 @@ Target* install(const std::string& name, uintptr_t address, mappings::Convention
             g_code_used -= kCodeBlock;
             break;
         }
+        if (const Target* other = overlapping(address, consumed)) {
+            error = "its first " + std::to_string(consumed) + " bytes would move the start of \"" + other->name +
+                    "\" (hooked at " + hex_address(other->address) + ")";
+            g_code_used -= kCodeBlock;
+            break;
+        }
+        t->moved = consumed;
+        std::memcpy(t->original, code, kJmpSize);
         std::memcpy(t->trampoline, moved.data(), moved.size());
         write_jmp(t->trampoline + moved.size(), code + consumed);
         t->entry[0] = 0x68;  // push imm32
@@ -387,7 +500,8 @@ Target* install(const std::string& name, uintptr_t address, mappings::Convention
                   static_cast<unsigned long>(address), consumed, raw->layout.params.size());
         g_by_address[address] = raw;
         result = raw;
-        g_targets[name] = std::move(t);
+        g_targets[name] = raw;
+        g_owned.push_back(std::move(t));
     } while (false);
     return result;
 }
@@ -399,20 +513,30 @@ Target* install_import(const std::string& name, uintptr_t slot, mappings::Conven
     char buf[160];
     do {
         if (auto it = g_targets.find(name); it != g_targets.end()) {
-            result = it->second.get();
+            result = it->second;
             break;
         }
-        if (g_by_address.count(slot)) {
-            error = "already hooked under the name \"" + g_by_address[slot]->name + "\"";
+        if (auto it = g_by_address.find(slot); it != g_by_address.end()) {
+            if (!it->second->import) {
+                error = "a function hooked as \"" + it->second->name + "\", not an import slot";
+                break;
+            }
+            result = add_alias(name, *it->second, convention, signature, nullptr, error);
+            break;
+        }
+        if (const Target* other = overlapping(slot, 4)) {
+            error = "inside the bytes the hook on \"" + other->name + "\" moved";
             break;
         }
         auto t = std::make_unique<Target>();
         t->name = name;
         t->address = slot;
+        t->convention = convention;
+        t->signature = signature;
+        t->import = true;
         if (!layout_for(convention, signature, t->layout, error)) break;
         if (!readable(slot, 4)) {
-            snprintf(buf, sizeof(buf), "0x%08lx isn't a readable import slot", static_cast<unsigned long>(slot));
-            error = buf;
+            error = hex_address(slot) + " isn't a readable import slot";
             break;
         }
         // Calls go on to whatever the slot holds now: the imported function,
@@ -444,6 +568,7 @@ Target* install_import(const std::string& name, uintptr_t slot, mappings::Conven
             g_code_used -= kCodeBlock;
             break;
         }
+        note_original(slot, 4);
         // One aligned write: another thread calls either the old or the new target.
         InterlockedExchange(entry, static_cast<LONG>(reinterpret_cast<uintptr_t>(t->entry)));
         VirtualProtect(const_cast<LONG*>(entry), 4, old_protect, &old_protect);
@@ -451,7 +576,8 @@ Target* install_import(const std::string& name, uintptr_t slot, mappings::Conven
                   static_cast<unsigned long>(slot), raw->layout.params.size());
         g_by_address[slot] = raw;
         result = raw;
-        g_targets[name] = std::move(t);
+        g_targets[name] = raw;
+        g_owned.push_back(std::move(t));
     } while (false);
     return result;
 }
@@ -459,27 +585,77 @@ Target* install_import(const std::string& name, uintptr_t slot, mappings::Conven
 Target* find(const std::string& name) {
     SharedLock hold(g_lock);
     auto it = g_targets.find(name);
-    return it != g_targets.end() ? it->second.get() : nullptr;
+    return it != g_targets.end() ? it->second : nullptr;
 }
 
 void reserve(const std::string& name) {
     ExclusiveLock hold(g_lock);
     g_reserved.insert(name);
+    if (const mappings::Symbol* sym = g_build ? g_build->find(name) : nullptr) {
+        const uint32_t size = sym->kind == mappings::Kind::Function && sym->size ? sym->size : 1;
+        g_reserved_at.push_back({sym->kind, sym->value, sym->value + size});
+    }
+}
+
+void unreserve(const std::string& name) {
+    ExclusiveLock hold(g_lock);
+    g_reserved.erase(name);
+    if (const mappings::Symbol* sym = g_build ? g_build->find(name) : nullptr) {
+        std::erase_if(g_reserved_at, [&](const ReservedRange& r) { return r.kind == sym->kind && r.start == sym->value; });
+    }
 }
 
 bool is_reserved(const std::string& name) {
     SharedLock hold(g_lock);
-    return g_reserved.count(name) != 0;
+    if (g_reserved.count(name)) return true;
+    // Another name for a reserved function (a mod's own mapping of it) is reserved too.
+    const mappings::Symbol* sym = lookup(name);
+    if (!sym || (sym->kind != mappings::Kind::Function && sym->kind != mappings::Kind::Import)) return false;
+    return std::any_of(g_reserved_at.begin(), g_reserved_at.end(), [&](const ReservedRange& r) {
+        return r.kind == sym->kind && sym->value >= r.start && sym->value < r.end;
+    });
 }
 
-Target* find_or_install(const std::string& name, std::string& error) {
-    if (Target* found = find(name)) return found;
+std::vector<Target*> targets_of(const std::string& name) {
+    SharedLock hold(g_lock);
+    std::vector<Target*> out;
+    if (auto it = g_targets.find(name); it != g_targets.end()) out.push_back(it->second);
+    if (auto it = g_former.find(name); it != g_former.end()) {
+        for (Target* t : it->second) {
+            if (std::find(out.begin(), out.end(), t) == out.end()) out.push_back(t);
+        }
+    }
+    return out;
+}
 
-    const mappings::Symbol* sym = g_build ? g_build->find(name) : nullptr;
+const char* handler_name(const Target* target, const std::string& name) {
+    ExclusiveLock hold(g_lock);
+    auto it = g_targets.find(name);
+    bool hooks_it = it != g_targets.end() && it->second == target;
+    if (auto former = g_former.find(name); !hooks_it && former != g_former.end()) {
+        hooks_it = std::find(former->second.begin(), former->second.end(), target) != former->second.end();
+    }
+    if (!hooks_it) return nullptr;
+    if (target->name == name) return target->name.c_str();  // kept as long as the target
+    return g_alias_names.insert(name).first->c_str();
+}
+
+namespace {
+
+// Hooks `name`, mapped as `sym` (null: not mapped).
+Target* install_symbol(const std::string& name, const mappings::Symbol* sym, std::string& error) {
     if (!sym) {
-        error = "not mapped for this build";
+        if (name.find('/') == std::string::npos) {
+            error = "not mapped for this build";
+        } else if (std::string why = mod_mappings::missing_reason(name); !why.empty()) {
+            error = "not mapped now: " + why;
+        } else {
+            error = "not in that mod's mapping file for this build";
+        }
         return nullptr;
     }
+    // Tome's mapping was checked at startup, mods' files when they were read
+    // (mod_mappings::verify).
     if (sym->kind == mappings::Kind::Import) {
         return install_import(name, g_game_base + sym->value, sym->convention, sym->signature, error);
     }
@@ -490,8 +666,32 @@ Target* find_or_install(const std::string& name, std::string& error) {
     return install(name, g_game_base + sym->value, sym->convention, sym->signature, sym->bytes, error);
 }
 
+} // namespace
+
+Target* find_or_install(const std::string& name, std::string& error) {
+    const mappings::Symbol* sym = lookup(name);
+    Target* bound = find(name);
+    // Tome's mapping stays as it is; a mod's file can change while the game
+    // runs (mod_mappings publishes it anew, or withdraws it), and the name
+    // then hooks what the file maps now, or nothing. What was hooked at the
+    // old place stays, and stays unhookable by that name.
+    if (bound && (sym ? bound->address == g_game_base + sym->value : name.find('/') == std::string::npos)) {
+        return bound;
+    }
+    if (bound && sym) bind_name(name, nullptr);
+    Target* t = install_symbol(name, sym, error);
+    if (!t && bound && sym) bind_name(name, bound);
+    if (t && bound && t != bound) {
+        ExclusiveLock hold(g_lock);
+        std::vector<Target*>& former = g_former[name];
+        if (std::find(former.begin(), former.end(), bound) == former.end()) former.push_back(bound);
+    }
+    return t;
+}
+
 void add(Target* target, Handler handler) {
     handler.seq = ++g_seq;
+    if (!handler.name) handler.name = target->name.c_str();
     ExclusiveLock hold(target->lock);
     auto chain = std::make_shared<std::vector<Handler>>(*target->handlers);
     insert(*chain, handler);
@@ -499,17 +699,22 @@ void add(Target* target, Handler handler) {
 }
 
 size_t remove(Target* target, tome_mod* mod, int32_t phase, tome_hook_fn fn, void* user,
-              std::vector<const void*>* removed_gates) {
+              std::vector<const void*>* removed_gates, const std::string* by_name) {
+    const char* name = by_name ? handler_name(target, *by_name) : nullptr;
+    if (by_name && !name) return 0;  // not a name of this target: nothing was hooked by it here
+    auto matches = [&](const Handler& h) {
+        return hooks::matches(h, mod, phase, fn, user) && (!by_name || h.name == name);
+    };
     ExclusiveLock hold(target->lock);
     auto chain = std::make_shared<std::vector<Handler>>(*target->handlers);
     // Calls that already hold the old chain skip these from now on.
     for (const Handler& h : *chain) {
-        if (h.mod == mod && h.phase == phase && h.fn == fn && h.user == user && h.gate) {
+        if (matches(h) && h.gate) {
             h.gate->revoked = true;
             if (removed_gates) removed_gates->push_back(h.gate.get());
         }
     }
-    size_t removed = hooks::remove(*chain, mod, phase, fn, user);
+    const size_t removed = std::erase_if(*chain, matches);
     if (removed) target->handlers = std::move(chain);
     return removed;
 }

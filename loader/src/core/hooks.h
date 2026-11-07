@@ -52,6 +52,12 @@ struct Layout {
 // cleans up.
 bool layout_for(mappings::Convention convention, const std::string& signature, Layout& out, std::string& error);
 
+// Whether two layouts call a function the same way: the same registers and
+// stack slots, the same cleanup and the same kind of result. Whether a
+// 32-bit argument is a float doesn't count (it's passed the same way). Two
+// mappings of one function (Tome's and a mod's) share its patch only then.
+bool same_layout(const Layout& a, const Layout& b);
+
 // One registration's state, shared by every snapshot of the chain that
 // holds it, so a mod can be unloaded only once none of its handlers runs.
 struct Gate {
@@ -72,6 +78,10 @@ struct Handler {
     bool last = false;
     tome_hook_fn fn = nullptr;
     void* user = nullptr;
+    // What tome_hook_call.name says for this handler: the name it hooked
+    // the function by (a mod's name for a function Tome hooks too, say).
+    // Null: the target's own name (hooks::add fills it in).
+    const char* name = nullptr;
     uint64_t seq = 0;  // registration order, for equal priorities
     std::shared_ptr<Gate> gate;  // optional
 };
@@ -80,6 +90,8 @@ struct Handler {
 // higher priority first, then earlier registration first.
 void insert(std::vector<Handler>& chain, const Handler& h);
 
+// Whether `h` was registered with all these fields.
+bool matches(const Handler& h, tome_mod* mod, int32_t phase, tome_hook_fn fn, void* user);
 // Removes the handlers matching all given fields; returns how many.
 size_t remove(std::vector<Handler>& chain, tome_mod* mod, int32_t phase, tome_hook_fn fn, void* user);
 size_t remove_all(std::vector<Handler>& chain, tome_mod* mod);

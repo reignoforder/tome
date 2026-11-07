@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// tome.mod.json and a settings schema (from mods): parse, then every reader
-// that takes the parsed value, and a round trip through serialize.
+// tome.mod.json, a settings schema and a mod's own mapping file (from mods):
+// parse, then every reader that takes the parsed value, and a round trip
+// through serialize.
 #include "core/json.h"
 #include "core/keys.h"
+#include "core/mappings.h"
 #include "core/metadata.h"
 #include "core/settings.h"
 
@@ -36,6 +38,24 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
             settings::display(s, *v);
             settings::step(s, *v, 1);
             settings::step(s, *v, -1);
+        }
+    }
+
+    // A mod's mapping file, as read for 1.27b (core/mappings.h).
+    static const mappings::Build running = [] {
+        mappings::Build b;
+        b.name = "1.27b";
+        b.file_version = "1.27.1.7085";
+        b.pe_timestamp = 0x584a499e;
+        b.size_of_image = 0x00e6e000;
+        b.sha256 = "d51e5680243fc90e19c9d6074f7fac433c466d3cf5f46e2364291725574d8236";
+        return b;
+    }();
+    mappings::Build own;
+    if (mappings::parse_mod_build(root, running, own).ok) {
+        for (const mappings::Symbol& sym : own.symbols) {
+            if (mappings::has_rva(sym.kind) && sym.value >= running.size_of_image) __builtin_trap();
+            if (sym.value + sym.bytes.size() > running.size_of_image && sym.kind == mappings::Kind::Function) __builtin_trap();
         }
     }
 

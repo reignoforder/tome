@@ -584,7 +584,7 @@ typedef enum tome_hook_phase {
 
 typedef struct tome_hook_call {
     uint32_t size;               /* sizeof(tome_hook_call) as known to Tome */
-    const char* name;            /* the hooked function, e.g. "CTextFrame::SetText" */
+    const char* name;            /* the hooked function as this handler named it, e.g. "CTextFrame::SetText" */
     /*
      * The arguments in the order of the mapping's signature, as 32-bit
      * words: `this` first for thiscall, floats as their bits
@@ -823,7 +823,11 @@ typedef struct tome_api {
      * Looks a name up in the mapping database, e.g. "CTextFrame::SetText" or
      * "CFrame.layout". Returns NULL if the name isn't mapped on this build.
      * List the names a mod can't work without in tome.mod.json "requires":
-     * Tome then refuses to load the mod on builds that lack them.
+     * Tome then refuses to load the mod on builds that lack them. A mod's own
+     * mapping file (tome.mod.json "mappings": mappings/<build>.json in the
+     * mod's folder, in the format of Tome's) adds names "<mod id>/<name>",
+     * e.g. "mymod/CUnit::Foo", which any mod can resolve, hook and require.
+     * The pointer stays valid for the session.
      */
     const tome_symbol* (TOME_CALL *resolve)(const char* name);
 
@@ -899,8 +903,13 @@ typedef struct tome_api {
     /*
      * Adds `fn` to the chain of the mapped function `name` (a FUNCTION in the
      * mapping database, e.g. "CTextFrame::SetText", or since API version 9 an
-     * IMPORT) in `phase` (a
-     * tome_hook_phase). Any thread; takes effect for calls that start
+     * IMPORT; or one from a mod's own mapping file, "<mod id>/<name>", see
+     * resolve) in `phase` (a
+     * tome_hook_phase). A function mapped under two names (Tome's and a
+     * mod's) has one chain for both if they pass its arguments the same way;
+     * each handler's tome_hook_call.name is the name it hooked by. A mod's
+     * mapping that passes them another way, or whose patch would overlap
+     * another hook's, fails with TOME_ERR_UNAVAILABLE. Any thread; takes effect for calls that start
      * afterwards. Revoked on disable; the mod's DLL is only freed once none
      * of its handlers is running. Fails with TOME_ERR_UNAVAILABLE if the
      * name isn't mapped, or if Tome can't hook that function (see tome.log:

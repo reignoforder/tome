@@ -13,6 +13,7 @@
 #include "keybinds.h"
 #include "log.h"
 #include "main_thread.h"
+#include "mod_mappings.h"
 #include "mod_menu.h"
 #include "natives.h"
 #include "packages.h"
@@ -285,6 +286,133 @@ void ModManager::declare_natives(std::vector<Installed>& installed) const {
             }
         }
     }
+    // A mod that failed here takes its mappings along: what requires them fails too.
+    check_mod_requires(installed);
+}
+
+void ModManager::read_mappings(Installed& mod) const {
+    if (!build_.known) return;
+    const mappings::Build& running = *build_.known->data;
+    const std::string folder = mod.meta.mappings.empty() ? "mappings" : mod.meta.mappings;
+    const std::wstring folder_path = mod.dir + L"\\" + to_windows_path(folder);
+    const std::string shown = folder + "/" + running.name + ".json";
+    const std::wstring file = folder_path + L"\\" + widen(running.name) + L".json";
+    FileStamp stamp;
+    if (!file_stamp(file, stamp)) {
+        // No file for this build: the mod maps nothing here, and a "requires"
+        // naming its symbols says so. A folder that isn't there at all is
+        // worth a warning only if tome.mod.json named it.
+        if (!mod.meta.mappings.empty() && GetFileAttributesW(folder_path.c_str()) == INVALID_FILE_ATTRIBUTES) {
+            mod.warnings.push_back("\"mappings\" folder \"" + mod.meta.mappings + "\" not found");
+        }
+        mappings_cache_.erase(mod.folder);
+        return;
+    }
+    ParsedMappings& cached = mappings_cache_[mod.folder];
+    if (cached.file != file || !(cached.stamp == stamp)) {
+        cached = {};
+        cached.file = file;
+        cached.stamp = stamp;
+        std::string text;
+        json::Value root;
+        json::ParseResult parsed;
+        if (!read_file(file, text)) {
+            cached.stamp = {};  // read again next time
+            cached.errors.push_back(shown + ": can't be read");
+        } else if (parsed = json::parse(text, root); !parsed.ok) {
+            cached.errors.push_back(shown + ": " + parsed.error);
+        } else {
+            auto build = std::make_shared<mappings::Build>();
+            mappings::ParseResult result = mappings::parse_mod_build(root, running, *build);
+            for (const std::string& e : result.errors) cached.errors.push_back(shown + ": " + e);
+            if (result.ok) cached.build = std::move(build);
+        }
+    }
+    // Against the game's code, as Tome's own file at startup: what resolve
+    // hands out and what's hooked is what the file says. Once it can be
+    // (not in DllMain's scan for the startup assets, before init).
+    if (cached.build && !cached.checked && mod_mappings::ready()) {
+        for (const std::string& e : mod_mappings::verify(*cached.build)) {
+            cached.errors.push_back(shown + ": " + e + " (a file for another build?)");
+        }
+        cached.checked = true;
+    }
+    if (!cached.errors.empty()) {
+        mod.errors.insert(mod.errors.end(), cached.errors.begin(), cached.errors.end());
+        mod.valid = false;
+        return;
+    }
+    mod.own_mappings = cached.build;
+    mod.mappings_checked = cached.checked;
+    mod.mappings_file = file;
+    mod.mappings_stamp = stamp;
+}
+
+void ModManager::check_mod_requires(std::vector<Installed>& mods) const {
+    if (!build_.known) return;
+    std::set<std::string> installed;
+    for (const Installed& mod : mods) installed.insert(mod.meta.id);
+    const std::string& build_name = build_.known->data->name;
+    // Against the valid mods at the start of each pass, so the order doesn't
+    // matter; again until none fails, since a mod that fails here takes its
+    // mappings along (only valid mods' are published).
+    for (bool failed = true; failed;) {
+        failed = false;
+        std::map<std::string, const mappings::Build*> mapped;  // valid mods by id; null: no file
+        for (const Installed& mod : mods) {
+            if (mod.valid) mapped[mod.meta.id] = mod.own_mappings.get();
+        }
+        for (Installed& mod : mods) {
+            if (!mod.valid) continue;
+            for (const std::string& name : mod.meta.requires_) {
+                if (name.find('/') == std::string::npos) continue;
+                std::string_view id, local;
+                std::string error;
+                if (!mappings::split_mod_symbol(name, id, local)) {
+                    error = "\"requires\" entry \"" + name + "\": a mod's mapping is \"<mod id>/<name>\"";
+                } else if (auto it = mapped.find(std::string(id)); it == mapped.end()) {
+                    error = "needs \"" + name + "\" from the mod " + std::string(id) +
+                            (installed.count(std::string(id)) ? ", which has errors" : ", which isn't installed");
+                } else if (!it->second || !it->second->find(local)) {
+                    error = "needs \"" + name + "\", which " + std::string(id) + "'s mappings don't have for " +
+                            build_name;
+                }
+                if (!error.empty()) {
+                    mod.errors.push_back(error);
+                    mod.valid = false;
+                    failed = true;
+                }
+            }
+        }
+    }
+}
+
+void ModManager::publish_mappings(const mod_state::State& state, const std::vector<Installed>& installed) const {
+    std::set<std::string> kept;
+    for (const Installed& mod : installed) {
+        if (!mod.valid) continue;
+        if (game_lock_ && locked_.count(mod.meta.id)) {  // runs with the table it had
+            kept.insert(mod.meta.id);
+            continue;
+        }
+        // A mapping file moves other mods' hooks: it counts as the mod's
+        // code (approval), and a mod that's off maps nothing.
+        if (!mod.own_mappings) {
+            mod_mappings::publish(mod.meta.id, nullptr);
+        } else if (!mod.mappings_checked) {
+            mod_mappings::publish(mod.meta.id, nullptr, "its mapping file wasn't checked yet");
+        } else if (approval_need(state, mod) != mod_state::Need::None) {
+            mod_mappings::publish(mod.meta.id, nullptr, "the mod " + mod.meta.id + " isn't allowed yet");
+        } else if (!wanted_by_user(state, mod.meta.id)) {
+            mod_mappings::publish(mod.meta.id, nullptr, "the mod " + mod.meta.id + " is off");
+        } else {
+            kept.insert(mod.meta.id);
+            mod_mappings::publish(mod.meta.id, mod.own_mappings);
+        }
+    }
+    for (const std::string& id : mod_mappings::ids()) {
+        if (!kept.count(id) && !(game_lock_ && locked_.count(id))) mod_mappings::publish(id, nullptr);
+    }
 }
 
 std::vector<ModManager::Installed> ModManager::discover() const {
@@ -348,8 +476,10 @@ std::vector<ModManager::Installed> ModManager::discover() const {
                 if (cached.valid && build_.known) {
                     // Names with a single ':' are capabilities ("property:mana", core/objects.h);
                     // only "property:" ones are checked so far. "Class::Method" is a mapping.
+                    // "<id>/<name>" is a mod's own mapping (check_mod_requires).
                     const mappings::Build* data = build_.known->data;
                     for (const std::string& name : cached.meta.requires_) {
+                        if (name.find('/') != std::string::npos) continue;
                         const bool capability =
                             name.find(':') != std::string::npos && name.find("::") == std::string::npos;
                         std::string error;
@@ -390,6 +520,7 @@ std::vector<ModManager::Installed> ModManager::discover() const {
                 }
             }
             if (!mod.meta.config.empty()) read_settings_schema(mod);
+            read_mappings(mod);
             std::string assets = mod.meta.assets.empty() ? "assets" : mod.meta.assets;
             std::wstring assets_dir = mod.dir + L"\\" + to_windows_path(assets);
             DWORD attributes = GetFileAttributesW(assets_dir.c_str());
@@ -404,7 +535,8 @@ std::vector<ModManager::Installed> ModManager::discover() const {
                                  [](const auto& f) { return mod_state::is_script(f.name); }))
                 mod.code_kind = CodeKind::Scripts;
             else if (mod.wasm) mod.code_kind = CodeKind::Wasm;
-            else if (!mod.assets.empty() || !mod.meta.icon.empty()) mod.code_kind = CodeKind::Assets;
+            // A mapping file only: other mods' hooks go where it says.
+            else if (!mod.assets.empty() || !mod.meta.icon.empty() || mod.own_mappings) mod.code_kind = CodeKind::Assets;
             mod.has_code = mod.valid && mod.code_kind != CodeKind::None;
             if (mod.has_code) mod.code_hash = code_hash(mod);
             if (mod.has_code && !mod.code_hash.empty()) check_signature(mod, cached.sha256);
@@ -425,12 +557,14 @@ std::vector<ModManager::Installed> ModManager::discover() const {
             }
         }
     }
+    check_mod_requires(mods);
     // Forget folders that are gone.
     std::set<std::string> folders;
     for (const Installed& mod : mods) folders.insert(mod.folder);
     auto gone = [&](const auto& entry) { return !folders.count(entry.first); };
     std::erase_if(meta_cache_, gone);
     std::erase_if(settings_cache_, gone);
+    std::erase_if(mappings_cache_, gone);
     std::erase_if(package_cache_, gone);
     std::erase_if(signature_cache_, gone);
     return mods;
@@ -1104,15 +1238,37 @@ bool ModManager::poll_changed() {
     return changed;
 }
 
-std::string ModManager::sync_hash(const Installed& mod) {
+std::string ModManager::sync_hash(const Installed& mod, const std::vector<Installed>& installed) {
     const std::wstring meta_path = mod.dir + L"\\tome.mod.json";
     FileStamp meta_stamp;
     file_stamp(meta_path, meta_stamp);
+    // The mapping files of the mods it names ("depends", "<id>/<name>" in
+    // "requires"): its hooks on their names go where those files say, even
+    // if those mods aren't compared themselves ("sync": "client").
+    std::set<std::string> named;
+    for (const Dependency& dep : mod.meta.depends) named.insert(dep.id);
+    for (const std::string& name : mod.meta.requires_) {
+        std::string_view id, local;
+        if (mappings::split_mod_symbol(name, id, local)) named.insert(std::string(id));
+    }
+    named.erase(mod.meta.id);
+    std::vector<const Installed*> libraries;  // by id (named is sorted)
+    for (const std::string& id : named) {
+        for (const Installed& other : installed) {
+            if (other.valid && other.meta.id == id && !other.mappings_file.empty()) libraries.push_back(&other);
+        }
+    }
     Fnv1a64 key;
     key.mix(&meta_stamp, sizeof(meta_stamp));
     key.mix(mod.dll.data(), mod.dll.size() * sizeof(wchar_t));
     key.mix(&mod.dll_stamp, sizeof(mod.dll_stamp));
     key.mix(&mod.assets_fingerprint, sizeof(mod.assets_fingerprint));
+    key.mix(mod.mappings_file.data(), mod.mappings_file.size() * sizeof(wchar_t));
+    key.mix(&mod.mappings_stamp, sizeof(mod.mappings_stamp));
+    for (const Installed* lib : libraries) {
+        key.mix(lib->mappings_file.data(), lib->mappings_file.size() * sizeof(wchar_t));
+        key.mix(&lib->mappings_stamp, sizeof(lib->mappings_stamp));
+    }
     auto cached = sync_hashes_.find(mod.folder);
     if (cached != sync_hashes_.end() && cached->second.first == key.value) return cached->second.second;
 
@@ -1127,6 +1283,15 @@ std::string ModManager::sync_hash(const Installed& mod) {
     if (!mod.dll.empty()) {
         mix_name("dll");
         readable = hash_file(mod.dll, hash, buffer) && readable;
+    }
+    // What it patches: the same DLL with another mapping file hooks other code.
+    if (!mod.mappings_file.empty()) {
+        mix_name("mappings");
+        readable = hash_file(mod.mappings_file, hash, buffer) && readable;
+    }
+    for (const Installed* lib : libraries) {
+        mix_name("mappings of " + lib->meta.id);
+        readable = hash_file(lib->mappings_file, hash, buffer) && readable;
     }
     std::vector<const overlay::AssetFile*> files;
     for (const overlay::AssetFile& f : mod.assets) files.push_back(&f);
@@ -1393,6 +1558,7 @@ void ModManager::refresh_locked(std::vector<Installed> installed, assets::Moment
         }
     }
     if (!state_invalid && (state_old || !(state_before == state))) write_state(state);
+    publish_mappings(state, installed);
 
     std::vector<ResolveInput> inputs;
     std::vector<const Installed*> input_mods;
@@ -1823,7 +1989,7 @@ void ModManager::refresh_locked(std::vector<Installed> installed, assets::Moment
             }
         }
         // Only running mods take part in the handshake; hashing reads every file.
-        if (s.running && required && s.sync_hash.empty()) s.sync_hash = sync_hash(mod);
+        if (s.running && required && s.sync_hash.empty()) s.sync_hash = sync_hash(mod, installed);
         s.locked = game_lock::note(locked, held_off, s.user_enabled, changed);
         s.state = s.running ? "active" : held_off ? "waiting" : (r.state == ModState::DisabledByUser ? "disabled" : "error");
         // A held mod may be "disabled" to the resolver (what waits is left out of resolve()).

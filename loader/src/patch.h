@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <string>
 
 namespace tome {
@@ -27,5 +28,14 @@ bool patch_pointer(uintptr_t address, uintptr_t expected, const void* new_value,
 // the page writable around the write and flushes the instruction cache.
 bool patch_bytes(uintptr_t address, const uint8_t* expected, const uint8_t* replacement, size_t n,
                  std::string& error);
+
+// Remembers the `n` bytes at `address` as they are, before Tome writes over
+// them (the patch_* functions above and the hook manager call it; the first
+// call for a byte wins). Mods' mapping files are checked against the game's
+// own code, not Tome's patches (mod_mappings::verify).
+void note_original(uintptr_t address, size_t n);
+
+// Every byte note_original kept, by address.
+std::map<uintptr_t, uint8_t> original_bytes();
 
 } // namespace tome

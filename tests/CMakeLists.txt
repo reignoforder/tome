@@ -77,6 +77,7 @@ add_executable(tome_hook_runtime_tests
     ../loader/src/guard.cpp
     ../loader/src/hooks.cpp
     ../loader/src/log.cpp
+    ../loader/src/mod_mappings.cpp
     ../loader/src/patch.cpp
     ../loader/src/paths.cpp
     ../loader/src/unwind.cpp

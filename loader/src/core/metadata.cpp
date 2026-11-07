@@ -16,7 +16,7 @@ const char* const kReservedFields[] = {"links", "$schema"};
 const char* const kKnownFields[] = {
     "schema", "id", "version", "name", "description", "authors", "license", "icon",
     "game", "edition", "tome", "depends", "recommends", "conflicts", "breaks", "entry", "wasm", "assets",
-    "requires", "natives", "provides", "sync", "reload", "load", "config", "keybinds",
+    "requires", "natives", "provides", "sync", "reload", "load", "config", "keybinds", "mappings",
 };
 
 class Reader {
@@ -246,6 +246,9 @@ MetadataResult parse_metadata(const json::Value& root, ModMetadata& out) {
 
     if (r.string("assets", m.assets, false) && !is_safe_relative_path(m.assets)) {
         r.error("\"assets\" must be a path inside the mod folder");
+    }
+    if (r.string("mappings", m.mappings, false) && !is_safe_relative_path(m.mappings)) {
+        r.error("\"mappings\" must be a path inside the mod folder");
     }
     r.string_list("requires", m.requires_);
     r.string_list("natives", m.natives);

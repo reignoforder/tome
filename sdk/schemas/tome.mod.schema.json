@@ -51,9 +51,10 @@
       "description": "A WebAssembly module run sandboxed, relative to the mod folder; instead of \"entry\". Experimental."
     },
     "assets": { "$ref": "#/definitions/path", "description": "Folder merged into the game's files; \"assets\" by default." },
+    "mappings": { "$ref": "#/definitions/path", "description": "Folder of the mod's own mapping files, one per build (<build>.json, e.g. 1.27b.json); its symbols go by \"<mod id>/<name>\". \"mappings\" by default." },
     "requires": {
       "type": "array", "items": { "type": "string" },
-      "description": "What the mod can't work without: mapped names (\"CTextFrame::SetText\") and game object properties (\"property:mana\"). Tome won't load it on builds that lack one."
+      "description": "What the mod can't work without: mapped names (\"CTextFrame::SetText\"), names from a mod's own mapping file (\"mymod/CUnit::Foo\") and game object properties (\"property:mana\"). Tome won't load it on builds that lack one."
     },
     "natives": {
       "type": "array",

@@ -206,7 +206,11 @@ logs each error with the symbol's name.
   table slot: `conv`, `sig`, and `target` = `"module!function"`, e.g.
   `"kernel32.dll!GetTickCount"`). Functions, data, calls and imports have
   an `rva` inside the image; offsets and constants have a `value`. Numbers
-  are JSON integers or `"0x…"` strings. `doc` is an optional note.
+  are JSON integers or `"0x…"` strings. `doc` is an optional note. A
+  function may have a `size` (its length in bytes from its RVA, jump tables
+  in it included; at least as long as `bytes`): the functions built-in
+  patches reserve have one, so a mod's name for a place inside one is
+  reserved too (`hooks::is_reserved`).
 - `bytes` is the function's first 5–64 bytes as lowercase hex, `??` for
   bytes the Windows loader relocates (ASLR). `tools/re/signatures.py`
   generates them: at least 16 bytes, extended until the pattern is unique in
@@ -238,6 +242,67 @@ logs each error with the symbol's name.
   signature, run `tools/re/signatures.py … --write` to fill in `bytes`, then
   document it in `reverse-engineering.md`. If Tome itself
   uses it, add a field to `BuildMappings` and a line to `bind_build`.
+
+### Mods' own mappings
+
+A mod can map functions (and any other symbol) Tome doesn't, without
+waiting for a Tome release: `tome.mod.json` `"mappings"` names a folder
+(default `mappings`, used if it exists) with one file per build,
+`<folder>/<build>.json` (`sdk/docs/tome-mod-json.md`, "Mappings").
+
+- **Format:** `mappings::parse_mod_build` (core): the same `symbols` as
+  Tome's files, checked by the same `Parser`; the build header is optional,
+  and a field that's there must equal the running build's (`mod_header`),
+  so a file under the wrong name is refused. RVAs are checked against the
+  running build's `size_of_image`. Fuzzed in `fuzz_json`.
+- **Names:** `"<mod id>/<name>"` (`split_mod_symbol`; Tome's names never
+  have a `/`). The file itself uses the bare names.
+- **Discovery** (`ModManager::read_mappings`, cached by the file's stamp):
+  an error in the file makes the mod invalid, with the error on its Details
+  page. That includes its code: `mod_mappings::verify` runs `verify_code`
+  on the file (every function's `bytes`, every call's target, every
+  import's slot) against game.dll as it was before Tome patched it (the
+  patch functions and the hook manager keep each byte they overwrite,
+  `note_original`), so what `resolve` hands out was checked, as Tome's own
+  file was at startup. DllMain's scan for the startup assets runs before
+  `mod_mappings::init`: it reads the files but checks them on the next
+  scan, and a file that wasn't checked isn't published. `"requires"` entries with a `/` are checked once every mod is read
+  (`check_mod_requires`), against the mod they name (itself or another,
+  e.g. a library), so the order mods are read in doesn't matter; again
+  until none fails, since a mod that fails takes its mappings along; and
+  once more after `declare_natives`, which can fail a mod too.
+- **Publishing:** each refresh hands the tables of the valid mods that are
+  on and allowed to `mod_mappings` (`publish_mappings`, after state.json is
+  read); the others' are withdrawn, with the reason, which a hook by one of
+  their names reports ("not mapped now: the mod lib isn't allowed yet"). A
+  locked mod (multiplayer game lock) keeps the table it runs with. A table is never freed, because
+  `resolve`'s `tome_symbol*` and the hook manager's lookups point into it;
+  only a changed file makes a new one (a table published before, as when
+  a mod was invalid for a while, is reused). `hooks::find_or_install` and
+  `api_resolve` look a name up in Tome's mapping, then here; a mod's name
+  hooked before whose file now maps another address hooks the new one (the
+  old patch keeps its handlers, and `unhook` by the name still reaches
+  them: `hooks::targets_of` lists every place a name hooked); one whose file
+  was withdrawn hooks nothing more. Hooks a mod already has don't move: a
+  changed mapping file doesn't reload the mods that use it. The fake game replaces the check (`mod_mappings::set_verifier`): it
+  writes the file's function bytes and calls' `E8 rel32` into its image
+  (where nothing was written yet, or a mod's file wrote before, never under
+  one of Tome's patches), so
+  `tome-check` and `tome_test` can hook them, then checks all but the
+  imports (its image has no import table).
+- **Checks at hook time:** the function's `bytes` against the code again,
+  as for Tome's names. Built-in patches' reservations hold by address too
+  (`hooks::is_reserved`): a mod's name for a reserved function, or for a
+  place inside one (the function's `size`), is refused.
+- **Approval:** the files are among those `code_hash` covers, and a mapping
+  file alone makes a mod one with code (`CodeKind::Assets`): a library
+  without a DLL waits for approval too, and a replaced package's changed
+  file asks again, since it moves other mods' hooks.
+- **Multiplayer:** `sync_hash` mixes in the mod's own file for this build
+  and those of the mods it names in `"depends"` or in `"requires"`
+  (`"<id>/<name>"`), so players whose library files differ are told even
+  when the library is `"sync": "client"`. A mod that hooks a library's
+  names should name the library in one of them.
 
 ## Mods
 
@@ -1239,7 +1304,8 @@ client's with `nsenter -n`. What it took:
 API version 4 (`hook`, `unhook`, `hook_call_next` in `tome.h`).
 
 - **Targets are mapped names.** `hook(mod, "CTextFrame::SetText", phase,
-  priority, fn, user)` looks the name up in the mapping database; it must be
+  priority, fn, user)` looks the name up in the mapping database, then in
+  mods' own files (`"<mod id>/<name>"`, "Mods' own mappings" above); it must be
   a `function`, or since API version 9 an `import`. Its `conv` and `sig` give the argument layout
   (`hooks::layout_for`): thiscall puts `this` in ecx, fastcall the first two
   32-bit non-float arguments in ecx/edx, everything else is on the stack.
@@ -1275,6 +1341,18 @@ API version 4 (`hook`, `unhook`, `hook_call_next` in `tome.h`).
   3. a 10-byte stub (`push <Target*>; jmp tome_hook_entry`) is written;
   4. the first 5 bytes become `jmp stub`, written as one 8-byte interlocked
      store when they fit in an aligned qword (usual for function starts).
+- **One function, several names** (Tome's and a mod's, or two mods'): the
+  target is kept by address as well as by name. A second name for a hooked
+  address shares its patch and chain (`add_alias`) if `hooks::same_layout`
+  says both pass the arguments the same way (registers, stack slots,
+  cleanup, kind of result; a float argument may be an int), and its `bytes`
+  match the code, the first 5 compared with what the jmp replaced
+  (`Target::original`). Otherwise it fails and logs both mappings. Each
+  handler keeps the name it hooked by (`Handler::name`), which is what its
+  `tome_hook_call.name` says, and `unhook` by one name leaves the handlers
+  hooked by another. A patch whose moved bytes would overlap another
+  target's, or that starts inside them, is refused (`overlapping`): it
+  would copy the other's jmp, or be bypassed through its trampoline.
 - **Imports** (API version 9, `hooks::install_import`): the same stub, but
   nothing is moved: the "trampoline" is what the import slot held (the
   imported function, or another tool's replacement), and the slot gets the
@@ -1343,7 +1421,10 @@ API version 4 (`hook`, `unhook`, `hook_call_next` in `tome.h`).
   and checks arguments, results and stack balance; others return float and
   double, take 64-bit and variadic arguments, start with short jumps or
   loops, or return within 4 bytes; a thread blocked inside a handler keeps
-  `idle` false until it returns. The e2e fixtures hook-a
+  `idle` false until it returns; two names share a patch, and overlapping
+  patches are refused. Host tests hook a mod's own function on the fake
+  game and an alias of `RCString::GetText`, and check that an alias of a
+  reserved function is refused. The e2e fixtures hook-a
   and hook-b both hook `RCString::GetText`; hook-b calls it on a fake string
   each time it's enabled, and the test checks the order of both mods'
   handlers, hook-a's changed argument reaching the original through

@@ -146,6 +146,19 @@ int running_on_this_thread(const Gate& gate) {
     return static_cast<int>(std::count(t_running.begin(), t_running.end(), &gate));
 }
 
+bool same_layout(const Layout& a, const Layout& b) {
+    if (a.params.size() != b.params.size() || a.arg_words != b.arg_words || a.stack_slots != b.stack_slots ||
+        a.pop_bytes != b.pop_bytes || a.result != b.result || a.wide_result != b.wide_result ||
+        a.variadic != b.variadic) {
+        return false;
+    }
+    for (size_t i = 0; i < a.params.size(); ++i) {
+        const Param &p = a.params[i], &q = b.params[i];
+        if (p.where != q.where || p.slot != q.slot || p.index != q.index || p.words != q.words) return false;
+    }
+    return true;
+}
+
 bool layout_for(mappings::Convention convention, const std::string& signature, Layout& out, std::string& error) {
     out = Layout();
     if (convention == mappings::Convention::None) {
@@ -232,12 +245,12 @@ void insert(std::vector<Handler>& chain, const Handler& h) {
     chain.insert(std::upper_bound(chain.begin(), chain.end(), h, run_order), h);
 }
 
+bool matches(const Handler& h, tome_mod* mod, int32_t phase, tome_hook_fn fn, void* user) {
+    return h.mod == mod && h.phase == phase && h.fn == fn && h.user == user;
+}
+
 size_t remove(std::vector<Handler>& chain, tome_mod* mod, int32_t phase, tome_hook_fn fn, void* user) {
-    const size_t before = chain.size();
-    std::erase_if(chain, [&](const Handler& h) {
-        return h.mod == mod && h.phase == phase && h.fn == fn && h.user == user;
-    });
-    return before - chain.size();
+    return std::erase_if(chain, [&](const Handler& h) { return matches(h, mod, phase, fn, user); });
 }
 
 size_t remove_all(std::vector<Handler>& chain, tome_mod* mod) {

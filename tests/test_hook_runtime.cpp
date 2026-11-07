@@ -5,6 +5,7 @@
 
 #include "guard.h"
 #include "hooks.h"
+#include "mod_mappings.h"
 #include "test.h"
 
 #include <windows.h>
@@ -33,6 +34,11 @@ void rt_tiny();          // int cdecl(void): 1; returns within 4 bytes, then pad
 void rt_gated();         // void cdecl(void), for the gate tests
 void rt_counted();       // int cdecl(int x): x + 1, counting its calls in g_rt_counted_calls
 void rt_inner();         // void cdecl(void), called from a handler of rt_counted in the crash tests
+void rt_aliased();       // int cdecl(int x): x + 5, hooked under two names
+void rt_padded();        // int cdecl(int x): three nops, then rt_padded_inner
+void rt_padded_inner();  // int cdecl(int x): x + 1
+void rt_mod_fn();        // int cdecl(int x): x + 3, a mod's own mapping
+void rt_mod_fn_moved();  // int cdecl(int x): x + 7, where that mapping says it is once the file changes
 int g_rt_counted_calls;
 // Calls an MSVC fastcall int(int64_t a, int b, int c) the way MSVC does: a on
 // the stack, b in ecx, c in edx. (GCC's fastcall passes 64-bit arguments
@@ -368,6 +374,47 @@ _rt_eax_after:
     pop esi
     pop ebp
     ret
+
+    .globl _rt_aliased
+_rt_aliased:
+    push ebp
+    mov ebp, esp
+    mov eax, [ebp + 8]
+    add eax, 5
+    pop ebp
+    ret
+
+    .globl _rt_padded
+_rt_padded:
+    nop
+    nop
+    nop
+    .globl _rt_padded_inner
+_rt_padded_inner:
+    push ebp
+    mov ebp, esp
+    mov eax, [ebp + 8]
+    add eax, 1
+    pop ebp
+    ret
+
+    .globl _rt_mod_fn
+_rt_mod_fn:
+    push ebp
+    mov ebp, esp
+    mov eax, [ebp + 8]
+    add eax, 3
+    pop ebp
+    ret
+
+    .globl _rt_mod_fn_moved
+_rt_mod_fn_moved:
+    push ebp
+    mov ebp, esp
+    mov eax, [ebp + 8]
+    add eax, 7
+    pop ebp
+    ret
     .att_syntax prefix
 )");
 
@@ -622,11 +669,12 @@ TEST(hook_runtime_refuses_bad_bytes) {
     CHECK_EQ(reinterpret_cast<const uint8_t*>(rt_unhooked)[0], uint8_t(0x55));  // not touched
     CHECK_EQ(reinterpret_cast<const uint8_t*>(rt_cdecl_add3)[0], uint8_t(0xE9));  // hooked earlier
 
+    // Another name for a hooked function: checked against the bytes the patch replaced.
     const auto* code = reinterpret_cast<const uint8_t*>(rt_unhooked);
     std::vector<int16_t> bytes(code, code + 8);
     CHECK(!hooks::install("rt_again", reinterpret_cast<uintptr_t>(rt_cdecl_add3), mappings::Convention::Cdecl,
                           "int(int a, int b, int c)", bytes, error));
-    CHECK(error.find("already hooked under the name \"rt_cdecl_add3\"") != std::string::npos);
+    CHECK(error.find("byte 3 is 0x8b, expected 0x90") != std::string::npos);
     error.clear();
     CHECK(!hooks::find_or_install("Anything", error));
     CHECK(error.find("not mapped") != std::string::npos);
@@ -950,9 +998,224 @@ TEST(hook_runtime_import_slot) {
     hooks::remove(t, nullptr, TOME_HOOK_BEFORE, add_100_to_last_arg, nullptr);
     CHECK_EQ(call(), 42);
 
-    // Hooked once: the same name gives the same target, another name for the slot fails.
+    // Hooked once: the same name gives the same target; another name for the
+    // slot shares it if it passes its arguments the same way.
     CHECK(hooks::install_import("rt_import", 0, mappings::Convention::Stdcall, "int(int a)", error) == t);
     CHECK(hooks::install_import("rt_import_again", reinterpret_cast<uintptr_t>(&g_rt_import_slot),
-                                mappings::Convention::Stdcall, "int(int a)", error) == nullptr);
-    CHECK(error.find("already hooked") != std::string::npos);
+                                mappings::Convention::Stdcall, "int(int value)", error) == t);
+    CHECK(hooks::install_import("rt_import_cdecl", reinterpret_cast<uintptr_t>(&g_rt_import_slot),
+                                mappings::Convention::Cdecl, "int(int a)", error) == nullptr);
+    CHECK(error.find("takes its arguments another way") != std::string::npos);
+    CHECK(!hooks::install("rt_import_code", reinterpret_cast<uintptr_t>(&g_rt_import_slot),
+                          mappings::Convention::Stdcall, "int(int a)", std::vector<int16_t>(8, -1), error));
+    CHECK(error.find("an import slot hooked as \"rt_import\"") != std::string::npos);
+}
+
+namespace {
+
+const char* g_name_seen[2];
+
+void TOME_CALL record_name(tome_mod*, tome_hook_call* call, void* user) {
+    g_name_seen[user ? 1 : 0] = call->name;
+}
+
+// A REPLACE that records its name and hands on to the next one.
+void TOME_CALL record_name_and_next(tome_mod* mod, tome_hook_call* call, void* user) {
+    record_name(mod, call, user);
+    hooks::call_next(call);
+}
+
+std::vector<int16_t> bytes_of(void (*fn)(), size_t n) {
+    const auto* code = reinterpret_cast<const uint8_t*>(fn);
+    return std::vector<int16_t>(code, code + n);
+}
+
+} // namespace
+
+// A function mapped twice (Tome's name and a mod's own, say) gets one patch:
+// the second name shares it when it passes its arguments the same way and
+// its bytes match what the patch replaced. Each handler sees the name it
+// hooked by.
+TEST(hook_runtime_two_names_share_a_patch) {
+    const std::vector<int16_t> bytes = bytes_of(rt_aliased, 10);
+    const auto address = reinterpret_cast<uintptr_t>(rt_aliased);
+    hooks::Target* t = hook("rt_aliased", rt_aliased, mappings::Convention::Cdecl, "int(int x)");
+    if (!t) return;
+    std::string error;
+    CHECK(hooks::install("mod/rt_aliased", address, mappings::Convention::Cdecl, "int(int value)", bytes, error) == t);
+    CHECK(hooks::find("mod/rt_aliased") == t);
+    CHECK(hooks::handler_name(t, "rt_aliased") == hooks::name(t));
+    const char* alias = hooks::handler_name(t, "mod/rt_aliased");
+    CHECK(alias && std::string(alias) == "mod/rt_aliased");
+    CHECK(hooks::handler_name(t, "not/hooked") == nullptr);
+
+    hooks::Handler own = handler(TOME_HOOK_BEFORE, record_name);
+    hooks::Handler other = handler(TOME_HOOK_BEFORE, record_name, 0, &g_name_seen);
+    other.name = alias;
+    tome_mod mod;  // guarded handlers (mods') are the ones named
+    own.mod = &mod;
+    other.mod = &mod;
+    hooks::add(t, own);
+    hooks::add(t, other);
+    CHECK_EQ(as<CdeclOne>(rt_aliased)(1), 6);
+    CHECK(g_name_seen[0] && std::string(g_name_seen[0]) == "rt_aliased");
+    CHECK(g_name_seen[1] && std::string(g_name_seen[1]) == "mod/rt_aliased");
+    hooks::remove(t, &mod, TOME_HOOK_BEFORE, record_name, nullptr);
+    hooks::remove(t, &mod, TOME_HOOK_BEFORE, record_name, &g_name_seen);
+
+    // Inside a REPLACE hooked by the other name (call_next), a handler still
+    // sees its own.
+    hooks::Handler outer = handler(TOME_HOOK_REPLACE, record_name_and_next, 1, &g_name_seen);
+    hooks::Handler inner = handler(TOME_HOOK_REPLACE, record_name_and_next);
+    outer.name = alias;
+    outer.mod = &mod;
+    inner.mod = &mod;
+    hooks::add(t, outer);
+    hooks::add(t, inner);
+    g_name_seen[0] = g_name_seen[1] = nullptr;
+    CHECK_EQ(as<CdeclOne>(rt_aliased)(1), 6);
+    CHECK(g_name_seen[1] && std::string(g_name_seen[1]) == "mod/rt_aliased");
+    CHECK(g_name_seen[0] && std::string(g_name_seen[0]) == "rt_aliased");
+    // Removing by a name removes only what was hooked by it; not a name of t: nothing.
+    const std::string own_name = "rt_aliased", alias_name = "mod/rt_aliased", other_name = "not/hooked";
+    CHECK_EQ(hooks::remove(t, &mod, TOME_HOOK_REPLACE, record_name_and_next, &g_name_seen, nullptr, &other_name),
+             size_t(0));
+    CHECK_EQ(hooks::remove(t, &mod, TOME_HOOK_REPLACE, record_name_and_next, &g_name_seen, nullptr, &own_name),
+             size_t(0));
+    CHECK_EQ(hooks::remove(t, &mod, TOME_HOOK_REPLACE, record_name_and_next, &g_name_seen, nullptr, &alias_name),
+             size_t(1));
+    CHECK_EQ(hooks::remove(t, &mod, TOME_HOOK_REPLACE, record_name_and_next, nullptr, nullptr, &own_name), size_t(1));
+
+    // Another layout, or other bytes past the jmp: refused, and the name stays unhooked.
+    CHECK(!hooks::install("mod/stdcall", address, mappings::Convention::Stdcall, "int(int x)", bytes, error));
+    CHECK(error.find("the same function as \"rt_aliased\" (cdecl \"int(int x)\")") != std::string::npos);
+    std::vector<int16_t> wrong = bytes;
+    wrong[8] = 0x07;
+    CHECK(!hooks::install("mod/wrong", address, mappings::Convention::Cdecl, "int(int x)", wrong, error));
+    CHECK(error.find("byte 8 is 0x05, expected 0x07") != std::string::npos);
+    CHECK(hooks::find("mod/wrong") == nullptr);
+}
+
+// Patches can't overlap: one starting inside the bytes another one moved,
+// or one whose moved bytes would take in another's start.
+TEST(hook_runtime_refuses_overlapping_patches) {
+    const std::vector<int16_t> outer = bytes_of(rt_padded, 12);
+    hooks::Target* inner = hook("rt_padded_inner", rt_padded_inner, mappings::Convention::Cdecl, "int(int x)");
+    if (!inner) return;
+    std::string error;
+    const auto inner_address = reinterpret_cast<uintptr_t>(rt_padded_inner);
+    CHECK(!hooks::install("rt_inside", inner_address + 1, mappings::Convention::Cdecl, "int(int x)",
+                          std::vector<int16_t>(8, -1), error));
+    CHECK(error.find("inside the bytes the hook on \"rt_padded_inner\" moved") != std::string::npos);
+    // The nops, then the jmp the patch wrote: the start of rt_padded_inner would move.
+    std::vector<int16_t> any = outer;
+    for (size_t i = 3; i < any.size(); ++i) any[i] = -1;
+    any.resize(8);
+    CHECK(!hooks::install("rt_padded", reinterpret_cast<uintptr_t>(rt_padded), mappings::Convention::Cdecl,
+                          "int(int x)", any, error));
+    CHECK(error.find("would move the start of \"rt_padded_inner\"") != std::string::npos);
+    CHECK_EQ(as<CdeclOne>(rt_padded)(1), 2);  // untouched, through the hooked inner
+}
+
+// Names from a mod's own mapping file ("<id>/<name>", mod_mappings.h):
+// found and hooked like Tome's, and another name for a function a built-in
+// patch reserved is reserved too.
+TEST(hook_runtime_mod_symbols) {
+    mappings::Build tome_build;
+    mappings::Symbol reserved;
+    reserved.name = "rt_reserved_fn";
+    reserved.kind = mappings::Kind::Function;
+    reserved.value = 0x1000;
+    reserved.size = 0x40;
+    tome_build.symbols.push_back(reserved);
+    hooks::init(0, &tome_build);  // base 0: an "RVA" is the address itself (no other test here inits)
+
+    auto mod_build = std::make_shared<mappings::Build>();
+    mappings::Symbol fn;
+    fn.name = "Counted";
+    fn.kind = mappings::Kind::Function;
+    fn.value = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(rt_mod_fn));
+    fn.convention = mappings::Convention::Cdecl;
+    fn.signature = "int(int x)";
+    fn.bytes = bytes_of(rt_mod_fn, 9);
+    mod_build->symbols.push_back(fn);
+    mappings::Symbol same = fn;
+    same.name = "Reserved";
+    same.value = 0x1000;
+    mod_build->symbols.push_back(same);
+    mappings::Symbol inside = same;  // past its first bytes, but in its body
+    inside.name = "Inside";
+    inside.value = 0x1010;
+    mod_build->symbols.push_back(inside);
+    mappings::Symbol after = same;  // the next function
+    after.name = "After";
+    after.value = 0x1040;
+    mod_build->symbols.push_back(after);
+    mod_mappings::publish("mod", mod_build);
+
+    CHECK(!hooks::is_reserved("mod/Reserved"));
+    hooks::reserve("rt_reserved_fn");
+    CHECK(hooks::is_reserved("mod/Reserved"));
+    CHECK(hooks::is_reserved("mod/Inside"));
+    CHECK(!hooks::is_reserved("mod/After"));
+    CHECK(!hooks::is_reserved("mod/Counted"));
+
+    std::string error;
+    hooks::Target* t = hooks::find_or_install("mod/Counted", error);
+    CHECK(t != nullptr);
+    if (t) {
+        CHECK_EQ(std::string(hooks::name(t)), std::string("mod/Counted"));
+        hooks::add(t, handler(TOME_HOOK_BEFORE, add_100_to_last_arg));
+        CHECK_EQ(as<CdeclOne>(rt_mod_fn)(1), 104);
+        hooks::remove(t, nullptr, TOME_HOOK_BEFORE, add_100_to_last_arg, nullptr);
+    }
+    CHECK(!hooks::find_or_install("mod/Nothing", error));
+    CHECK(error.find("not in that mod's mapping file") != std::string::npos);
+
+    // The mod's file changed: the name hooks what it maps now, and the old
+    // patch keeps its handlers.
+    if (t) hooks::add(t, handler(TOME_HOOK_BEFORE, add_100_to_last_arg));
+    auto moved_build = std::make_shared<mappings::Build>(*mod_build);
+    moved_build->symbols[0].value = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(rt_mod_fn_moved));
+    moved_build->symbols[0].bytes = bytes_of(rt_mod_fn_moved, 9);
+    mod_mappings::publish("mod", moved_build);
+    hooks::Target* moved = hooks::find_or_install("mod/Counted", error);
+    CHECK(moved != nullptr && moved != t);
+    CHECK(hooks::find("mod/Counted") == moved);
+    if (moved) {
+        hooks::add(moved, handler(TOME_HOOK_BEFORE, add_100_to_last_arg));
+        CHECK_EQ(as<CdeclOne>(rt_mod_fn_moved)(1), 108);
+        hooks::remove(moved, nullptr, TOME_HOOK_BEFORE, add_100_to_last_arg, nullptr);
+    }
+    CHECK(hooks::find_or_install("mod/Counted", error) == moved);
+    // The handler left at the old place: the name still reaches it.
+    const std::string counted = "mod/Counted";
+    const std::vector<hooks::Target*> all = hooks::targets_of(counted);
+    CHECK(all.size() == 2 && all[0] == moved && all[1] == t);
+    if (t) {
+        CHECK_EQ(as<CdeclOne>(rt_mod_fn)(1), 104);
+        CHECK_EQ(hooks::remove(t, nullptr, TOME_HOOK_BEFORE, add_100_to_last_arg, nullptr, nullptr, &counted),
+                 size_t(1));
+        CHECK_EQ(as<CdeclOne>(rt_mod_fn)(1), 4);
+    }
+    // Where nothing can be hooked: the name stays where it was.
+    auto broken_build = std::make_shared<mappings::Build>(*moved_build);
+    broken_build->symbols[0].value = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(rt_mod_fn) + 1);
+    mod_mappings::publish("mod", broken_build);
+    CHECK(!hooks::find_or_install("mod/Counted", error));
+    CHECK(hooks::find("mod/Counted") == moved);
+
+    // A file that's held back says why.
+    mod_mappings::publish("mod", nullptr, "the mod mod is off");
+    CHECK(!hooks::find_or_install("mod/Counted", error));
+    CHECK(error.find("the mod mod is off") != std::string::npos);
+    mod_mappings::publish("mod", nullptr);
+    CHECK(!hooks::find_or_install("mod/Counted", error));
+    CHECK(error.find("not in that mod's mapping file") != std::string::npos);
+    CHECK(!hooks::find_or_install("other/Counted", error));
+
+    // As before this test (the patches stay: they're never undone).
+    hooks::unreserve("rt_reserved_fn");
+    CHECK(!hooks::is_reserved("rt_reserved_fn"));
+    hooks::init(0, nullptr);
 }

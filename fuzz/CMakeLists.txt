@@ -29,6 +29,7 @@ add_library(fuzz_core STATIC
     ${CORE}/json.cpp
     ${CORE}/keys.cpp
     ${CORE}/log_view.cpp
+    ${CORE}/mappings.cpp
     ${CORE}/metadata.cpp
     ${CORE}/package.cpp
     ${CORE}/path_guard.cpp

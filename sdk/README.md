@@ -54,7 +54,8 @@ helpers check for you.
 - **UI** [3, 5]: frames from the mod's own FDF files on every menu screen and
   in games, button clicks, popups [10].
 - **Hooks** [4, 9]: run code before, after or instead of a mapped game
-  function or an import of game.dll.
+  function or an import of game.dll, Tome's or one the mod maps itself
+  (`mappings/<build>.json`, `docs/tome-mod-json.md`).
 - **Settings and keybinds** [7]: pages in the Mods menu, generated from the
   mod's files.
 - **Chat commands** [5]: `/name ...` in games.

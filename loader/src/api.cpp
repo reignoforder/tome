@@ -8,6 +8,7 @@
 #include "keybinds.h"
 #include "log.h"
 #include "mod_manager.h"
+#include "mod_mappings.h"
 #include "natives.h"
 #include "objects.h"
 #include "popups.h"
@@ -86,7 +87,7 @@ const tome_symbol* TOME_CALL api_resolve(const char* name) {
     for (const tome_symbol& sym : g_symbols) {
         if (std::strcmp(sym.name, name) == 0) return &sym;
     }
-    return nullptr;
+    return mod_mappings::resolve(name);  // "<mod id>/<name>": a mod's own mapping file
 }
 
 size_t TOME_CALL api_read_game_file(const char* name, void* buffer, size_t size) {
@@ -119,6 +120,7 @@ tome_result TOME_CALL api_hook(tome_mod* mod, const char* name, int32_t phase, i
     handler.priority = priority;
     handler.fn = fn;
     handler.user = user;
+    handler.name = hooks::handler_name(target, name);
     handler.gate = std::make_shared<hooks::Gate>();
     // The mod's DLL is freed only once no handler of it runs (ModManager::unload).
     // Under the mod's lock: hook() may run on any thread, alongside disable.
@@ -135,27 +137,20 @@ tome_result TOME_CALL api_hook(tome_mod* mod, const char* name, int32_t phase, i
 tome_result TOME_CALL api_unhook(tome_mod* mod, const char* name, int32_t phase, tome_hook_fn fn, void* user) {
     if (!mod || !name || !fn || !valid_phase(phase)) return TOME_ERR_INVALID_ARGUMENT;
     if (hooks::is_reserved(name)) return TOME_ERR_NOT_OWNER;  // a built-in patch owns it; nothing of the mod's to remove
-    hooks::Target* target = hooks::find(name);
+    // Where the name hooks now, and where it did before a mod's file moved it.
     std::vector<const void*> removed;
-    if (!target || hooks::remove(target, mod, phase, fn, user, &removed) == 0) return TOME_ERR_INVALID_ARGUMENT;
+    const std::string by_name = name;
+    size_t count = 0;
+    for (hooks::Target* target : hooks::targets_of(by_name)) {
+        count += hooks::remove(target, mod, phase, fn, user, &removed, &by_name);
+    }
+    if (count == 0) return TOME_ERR_INVALID_ARGUMENT;
     mod->drop_revokers(removed);
     return TOME_OK;
 }
 
 void TOME_CALL api_hook_call_next(tome_hook_call* call) {
     hooks::call_next(call);
-}
-
-tome_symbol_kind to_api_kind(mappings::Kind kind) {
-    switch (kind) {
-    case mappings::Kind::Function: return TOME_SYMBOL_FUNCTION;
-    case mappings::Kind::Data:     return TOME_SYMBOL_DATA;
-    case mappings::Kind::Call:     return TOME_SYMBOL_CALL;
-    case mappings::Kind::Offset:   return TOME_SYMBOL_OFFSET;
-    case mappings::Kind::Constant: return TOME_SYMBOL_CONSTANT;
-    case mappings::Kind::Import:   return TOME_SYMBOL_IMPORT;
-    }
-    return TOME_SYMBOL_CONSTANT;
 }
 
 } // namespace
@@ -178,15 +173,7 @@ void init_api(const GameBuild& build) {
     g_symbols.clear();
     if (build.known) {
         for (const mappings::Symbol& sym : build.known->data->symbols) {
-            tome_symbol out = {};
-            out.size = sizeof(out);
-            out.name = sym.name.c_str();
-            out.kind = to_api_kind(sym.kind);
-            out.rva = mappings::has_rva(sym.kind) ? sym.value : 0;
-            out.value = mappings::has_rva(sym.kind) ? build.base + sym.value : sym.value;
-            out.convention = mappings::to_string(sym.convention);
-            out.signature = sym.signature.c_str();
-            g_symbols.push_back(out);
+            g_symbols.push_back(mod_mappings::to_api_symbol(sym, sym.name.c_str(), build.base));
         }
     }
 
@@ -205,6 +192,7 @@ void init_api(const GameBuild& build) {
     g_api.read_game_file = api_read_game_file;
     frames::fill_api(g_api);
     hooks::init(build.base, build.known ? build.known->data : nullptr);
+    mod_mappings::init(build.base);
     g_api.hook = api_hook;
     g_api.unhook = api_unhook;
     g_api.hook_call_next = api_hook_call_next;

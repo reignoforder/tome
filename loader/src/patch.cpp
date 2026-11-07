@@ -3,10 +3,28 @@
 
 #include <windows.h>
 
+#include "unwind.h"
+
 #include <cstdio>
 #include <cstring>
 
 namespace tome {
+
+namespace {
+SRWLOCK g_originals_lock = SRWLOCK_INIT;
+std::map<uintptr_t, uint8_t> g_originals;
+} // namespace
+
+void note_original(uintptr_t address, size_t n) {
+    ExclusiveLock hold(g_originals_lock);
+    auto at = reinterpret_cast<const uint8_t*>(address);
+    for (size_t i = 0; i < n; ++i) g_originals.try_emplace(address + i, at[i]);
+}
+
+std::map<uintptr_t, uint8_t> original_bytes() {
+    SharedLock hold(g_originals_lock);
+    return g_originals;
+}
 
 bool readable(uintptr_t address, size_t size) {
     MEMORY_BASIC_INFORMATION mbi;
@@ -38,6 +56,7 @@ bool write(uintptr_t address, const void* src, size_t n, DWORD protect, std::str
         error = "VirtualProtect failed";
         return false;
     }
+    note_original(address, n);
     std::memcpy(at, src, n);
     VirtualProtect(at, n, old_protect, &old_protect);
     FlushInstructionCache(GetCurrentProcess(), at, n);

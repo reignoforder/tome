@@ -33,12 +33,14 @@
     "JassScanner::nextToken": {
       "kind": "function", "rva": "0x0045ff30", "conv": "thiscall",
       "sig": "int(void* this)",
-      "bytes": "83 ec 08 53 55 56 8b f1 8b 8e 98 00 00 00 8a 56"
+      "bytes": "83 ec 08 53 55 56 8b f1 8b 8e 98 00 00 00 8a 56",
+      "size": "0x5f4"
     },
     "Jass::compile": {
       "kind": "function", "rva": "0x00458900", "conv": "fastcall",
       "sig": "void*(void* context, void* callback, void* a0, int a1)",
-      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 81 ec ec 00 00 00 56"
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 81 ec ec 00 00 00 56",
+      "size": "0x10a"
     },
     "JassVarDesc::ctor": {
       "kind": "function", "rva": "0x004641f0", "conv": "thiscall",
@@ -176,6 +178,15 @@
       "kind": "function", "rva": "0x00558990", "conv": "thiscall",
       "sig": "void(COptionsMenu* this, int open)",
       "bytes": "83 ec 14 83 7c 24 18 00 56 6a 00 6a 00 8b f1 b9 01"
+    },
+    "COptionsMenu::SetPanel": {
+      "kind": "function", "rva": "0x0055f950", "conv": "thiscall",
+      "sig": "void(COptionsMenu* this, int panel)",
+      "bytes": "8b 44 24 04 56 8b f1 39 86 6c 01 00 00 0f 84 c4"
+    },
+    "COptionsMenu::Save": {
+      "kind": "function", "rva": "0x0055f4e0", "conv": "thiscall", "sig": "void(COptionsMenu* this)",
+      "bytes": "83 ec 0c 53 56 57 8b f9 e8 33 62 aa ff d9 7c 24"
     },
     "COptionsMenu.panel": { "kind": "offset", "value": "0x16c" },
     "COptionsMenu.panel_frame": { "kind": "offset", "value": "0x1e4" },
@@ -779,6 +790,7 @@
       "bytes": "53 56 57 8b f1 e8 16 04 fd ff 8b 8e 7c 01 00 00"
     },
     "CLayoutFrame.width": { "kind": "offset", "value": "0x58" },
+    "CLayoutFrame.height": { "kind": "offset", "value": "0x5c" },
     "CLayoutFrame::SetWidth": {
       "kind": "function", "rva": "0x00605d90", "conv": "thiscall",
       "sig": "void(CLayoutFrame* this, float width)",
@@ -827,6 +839,8 @@
     },
     "CameraField.target_distance": { "kind": "constant", "value": "0x0" },
     "CameraField.farz": { "kind": "constant", "value": "0x1" },
+    "CameraField.angle_of_attack": { "kind": "constant", "value": "0x2" },
+    "CameraField.field_of_view": { "kind": "constant", "value": "0x3" },
     "CGameUI.world_frame": { "kind": "offset", "value": "0x3bc" },
     "CGameUI.console": { "kind": "offset", "value": "0x428" },
     "CGameUI.console_upper": { "kind": "offset", "value": "0x420" },
@@ -853,6 +867,21 @@
       "bytes": "56 6a 00 8b f1 e8 26 ff ff ff 8b 4e 18 6a 01 e8"
     },
     "CEscMenu.main_panel": { "kind": "offset", "value": "0x18" },
+    "CEscMenu.options_panel": { "kind": "offset", "value": "0x1c" },
+    "CEscMenuOptionsPanel::SetPanel": {
+      "kind": "function", "rva": "0x00344d60", "conv": "thiscall", "sig": "void(CEscMenuOptionsPanel* this, int panel)",
+      "bytes": "56 57 8b 7c 24 0c 8b f1 39 be 68 01 00 00 0f 84"
+    },
+    "CEscMenuOptionsPanel.panel": { "kind": "offset", "value": "0x168" },
+    "EscOptionsPanel.list": { "kind": "constant", "value": 1 },
+    "CEscMenuOptionsPanel::OnOK": {
+      "kind": "function", "rva": "0x0036d600", "conv": "thiscall", "sig": "int(CEscMenuOptionsPanel* this)",
+      "bytes": "56 8b f1 8b 86 68 01 00 00 83 c0 fe 83 f8 03 77 33"
+    },
+    "CEscMenuOptionsPanel::OnCancel": {
+      "kind": "function", "rva": "0x0036d660", "conv": "thiscall", "sig": "int(CEscMenuOptionsPanel* this)",
+      "bytes": "56 8b f1 8b 86 68 01 00 00 83 c0 fe 83 f8 03 77 26"
+    },
     "EscMenuPanel.help": { "kind": "constant", "value": 4 },
     "GlueScreen.game_chatroom": { "kind": "constant", "value": 11 },
     "CGameChatroom::OnChatReceived": {
@@ -1022,6 +1051,11 @@
       "bytes": "b8 08 10 00 00 e8 d6 b5 7d 00 a1 ?? ?? ?? ?? 33"
     },
     "Option.maxfps": { "kind": "constant", "value": "0x16" },
+    "Scheduler::SetPeriod": {
+      "kind": "function", "rva": "0x0062b040", "conv": "fastcall",
+      "sig": "void(int period_ms, void* context)",
+      "bytes": "51 8b c2 85 c0 56 8b f1 75 07 33 c9 e8 7f 84 e9"
+    },
     "Options::GetInt": {
       "kind": "function", "rva": "0x000059c0", "conv": "thiscall",
       "sig": "bool(Options* this, int option, int* value)",
@@ -1051,6 +1085,20 @@
     "Option.allyFilter": { "kind": "constant", "value": "0x38" },
     "Option.customkeys": { "kind": "constant", "value": "0x3d" },
     "Option.herobar": { "kind": "constant", "value": "0x2e" },
+    "Option.healthbars": { "kind": "constant", "value": "0x2b" },
+    "CGameUI.healthbars": { "kind": "offset", "value": "0x1d8" },
+    "HealthBars::Update": {
+      "kind": "function", "rva": "0x0039b2d0", "conv": "thiscall", "sig": "void(void* this)",
+      "bytes": "83 ec 6c 53 56 8b f1 8b 8e 6c 01 00 00 e8 5e 4a"
+    },
+    "HealthBars::Consider": {
+      "kind": "function", "rva": "0x0037d0d0", "conv": "fastcall", "sig": "void(CUnit* unit, int friendly, int enemy)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 08 53 55 56 57 a1 ?? ?? ?? ?? 33 c4 50 8d 44 24 1c 64 a3 00 00 00 00 89 54"
+    },
+    "CUnit::SetHealthBarShown": {
+      "kind": "function", "rva": "0x002c7460", "conv": "thiscall", "sig": "void(CUnit* this, int shown, int hovered)",
+      "bytes": "83 7c 24 04 00 56 8b f1 74 24 83 7e 50 00 75 08"
+    },
     "Option.multiboardon": { "kind": "constant", "value": "0x3c" },
     "CGxDeviceD3d::BuildPresentParams": {
       "kind": "function", "rva": "0x0052cae0", "conv": "thiscall",
@@ -1135,7 +1183,8 @@
     "CBLPFile::Open": {
       "kind": "function", "rva": "0x0078a800", "conv": "thiscall",
       "sig": "int(void* this, const char* name, void* context)",
-      "bytes": "53 55 56 57 8b d9 e8 35 ff ff ff 8b 6c 24 14 8b"
+      "bytes": "53 55 56 57 8b d9 e8 35 ff ff ff 8b 6c 24 14 8b",
+      "size": "0x9e"
     },
     "CBLPFile.buffer": { "kind": "offset", "value": "0x4a4" },
     "CBLPFile.size": { "kind": "offset", "value": "0x4a8" },
