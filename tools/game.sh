@@ -62,6 +62,14 @@ start)
     fi
     stop
     env_prefix
+    # Headless, the game fills an Xvfb screen made for TEST_WIDTH x
+    # TEST_HEIGHT; on screen, the resolution you last picked stays unless
+    # they're given. Wine is stopped after: the wineserver `reg add` started
+    # keeps the screen size of this display, not the game's.
+    if [[ "$HEADLESS" == 1 || "$TEST_SIZE_GIVEN" == 1 ]]; then
+        env_resolution
+        env_stop
+    fi
     env_game "$GAME" "$BUILD/loader/tome.mix"
     if [[ "$HEADLESS" == 1 ]]; then
         env_display_start

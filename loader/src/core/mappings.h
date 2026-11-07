@@ -300,9 +300,40 @@ struct BuildMappings {
     // CSpriteFrame::SetupCamera, its kSymbols): a build that doesn't map it
     // runs without the patch. The hooked functions are found by name, not
     // stored here.
+    // The rest are its 2D part's (install_wide_ui, with ui.layout_set_point,
+    // ui.layout_set_width, ui.layout_offset and game.glue_get): it's
+    // installed only where every one is mapped.
     struct {
-        uint32_t world_frame_offset;  // CGameUI.world_frame
+        uint32_t world_frame_offset;       // CGameUI.world_frame
+        uint32_t screen_get_current;       // CScreenFrame::GetCurrent
+        uint32_t create_simple_frame;      // CreateSimpleFrame
+        uint32_t ddc_width;                // DDCWidth
+        uint32_t layout_set_height;        // CLayoutFrame::SetHeight
+        uint32_t layout_clear_points;      // CLayoutFrame::ClearAllPoints
+        uint32_t layout_update_slot;       // CLayoutFrame.vtable.UpdateScreenRect
+        uint32_t layout_points_offset;     // CLayoutFrame.points
+        uint32_t relative_point_vtable;    // CLayoutFrame.relative_point_vtable
+        uint32_t layout_dependents_offset; // CLayoutFrame.dependents
+        uint32_t layout_width_offset;      // CLayoutFrame.width
+        uint32_t console_offset;           // CGameUI.console
+        uint32_t info_panel_offset;        // CGameUI.info_panel
+        uint32_t clock_offset;             // CGameUI.time_of_day
+        uint32_t console_upper_offset;     // CGameUI.console_upper
+        uint32_t portrait_layer_offset;    // CGameUI.portrait_layer
+        uint32_t minimap_layer_offset;     // CGameUI.minimap_layer
+        uint32_t resource_bar_offset;      // CGameUI.resource_bar
+        uint32_t inventory_cover_offset;   // CInfoPanel.inventory_cover
+        uint32_t simple_shown_offset;      // CSimpleFrame.shown
+        uint32_t simple_show_flag_offset;  // CSimpleFrame.show_flag
+        uint32_t simple_hide_slot;         // CSimpleFrame.vtable.Hide
+        uint32_t simple_show_slot;         // CSimpleFrame.vtable.Show
     } widescreen;
+
+    // Optional: global-string-guard's (patches/global_string_guard.cpp).
+    struct {
+        uint32_t create_string;       // CGameWar3::CreateString
+        uint32_t create_string_call;  // CreateJassString.call.create_string
+    } strings;
 
     // Optional: movie-display-reset's (patches/movie_display_reset.cpp).
     struct {

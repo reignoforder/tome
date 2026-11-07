@@ -30,6 +30,12 @@
       "sig": "uint32_t(const char* text)",
       "bytes": "8b c1 85 c0 8b 0d ?? ?? ?? ?? 75 01 c3 50 e8 bd"
     },
+    "CGameWar3::CreateString": {
+      "kind": "function", "rva": "0x0039f5f0", "conv": "thiscall",
+      "sig": "uint32_t(CGameWar3* this, const char* text)",
+      "bytes": "8b 54 24 04 8b 49 08 e8 e4 c0 0a 00 c2 04 00 cc"
+    },
+    "CreateJassString.call.create_string": { "kind": "call", "rva": "0x003baa2e", "target": "CGameWar3::CreateString" },
     "JassScanner::nextToken": {
       "kind": "function", "rva": "0x0045ff30", "conv": "thiscall",
       "sig": "int(void* this)",
@@ -113,6 +119,55 @@
     "CFrame.vtable.Hide": { "kind": "offset", "value": "0xd0" },
     "CFrame.vtable.Show": { "kind": "offset", "value": "0xd4" },
     "CLayoutFrame.points": { "kind": "offset", "value": "0x8" },
+    "CLayoutFrame.relative_point_vtable": { "kind": "data", "rva": "0x0097076c" },
+    "DDCWidth": { "kind": "data", "rva": "0x008768b0" },
+    "DDCToNDCRect": {
+      "kind": "function", "rva": "0x004c6510", "conv": "fastcall",
+      "sig": "void(const float* ddc, float* ndc)",
+      "bytes": "d9 01 dd 05 ?? ?? ?? ?? dc f9 d9 c9 d9 1a d8 79"
+    },
+    "NDCToDDCRect": {
+      "kind": "function", "rva": "0x004c64b0", "conv": "fastcall",
+      "sig": "void(const float* ndc, float* ddc)",
+      "bytes": "d9 01 dd 05 ?? ?? ?? ?? dc c9 d9 c9 d9 1a d8 49"
+    },
+    "DDCToNDC": {
+      "kind": "function", "rva": "0x004c64e0", "conv": "fastcall",
+      "sig": "void(float* x_out, float* y_out, float x, float y)",
+      "bytes": "85 c9 74 0c d9 44 24 04 dc 35 ?? ?? ?? ?? d9 19"
+    },
+    "NDCToDDC": {
+      "kind": "function", "rva": "0x004c6480", "conv": "fastcall",
+      "sig": "void(float* x_out, float* y_out, float x, float y)",
+      "bytes": "85 c9 74 0c d9 44 24 04 dc 0d ?? ?? ?? ?? d9 19"
+    },
+    "DDCToNDCWidth": {
+      "kind": "function", "rva": "0x004c6540", "conv": "stdcall",
+      "sig": "float(float width)",
+      "bytes": "d9 44 24 04 dc 35 ?? ?? ?? ?? d9 5c 24 04 d9 44 24 04 c2 04 00 cc cc cc cc cc cc cc cc cc cc cc d9 44 24 04 dc 35"
+    },
+    "NDCToDDCWidth": {
+      "kind": "function", "rva": "0x004c6580", "conv": "stdcall",
+      "sig": "float(float width)",
+      "bytes": "d9 44 24 04 dc 0d ?? ?? ?? ?? d9 5c 24 04 d9 44 24 04 c2 04 00 cc cc cc cc cc cc cc cc cc cc cc d9"
+    },
+    "C44Matrix::Ortho": {
+      "kind": "function", "rva": "0x007b6250", "conv": "thiscall",
+      "sig": "void(float* this, float left, float right, float bottom, float top, float near, float far)",
+      "bytes": "d9 44 24 08 d9 c0 d9 44 24 04 d9 c0 de ea dd 05"
+    },
+    "CScreenFrame::GetCurrent": {
+      "kind": "function", "rva": "0x0060a030", "conv": "cdecl",
+      "sig": "void*(void)",
+      "bytes": "a1 ?? ?? ?? ?? c3 cc cc cc cc cc cc cc cc cc cc 8b 01 c3"
+    },
+    "CScreenFrame::UpdateScreenRect": {
+      "kind": "function", "rva": "0x0060a140", "conv": "thiscall",
+      "sig": "void(void* this)",
+      "bytes": "83 ec 30 d9 ee 56 d9 54 24 04 8b f1 d9 5c 24 08"
+    },
+    "CLayoutFrame.vtable.UpdateScreenRect": { "kind": "offset", "value": "0x4" },
+    "CInfoPanel.inventory_cover": { "kind": "offset", "value": "0x14c" },
     "CLayoutFrame.dependents": { "kind": "offset", "value": "0x40" },
     "CLayoutFrame.scale": { "kind": "offset", "value": "0x60" },
     "CLayoutFrame.vtable.SetScale": { "kind": "offset", "value": "0x14" },

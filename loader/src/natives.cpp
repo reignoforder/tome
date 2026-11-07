@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "natives.h"
 
+#include "core/handshake.h"
 #include "core/jass.h"
+#include "core/log_guard.h"
 #include "frames.h"
 #include "guard.h"
 #include "hooks.h"
@@ -202,12 +204,42 @@ uint8_t* make_thunk(Slot* slot, bool guarded) {
     return code;
 }
 
+// A map can call TomeLogInteger/TomeLogString in a loop, with any text: each
+// map load gets kMapLogLines lines, then one saying the rest aren't logged
+// (docs/known-bugs.md, "Tome's own surface"), and a string is cut to
+// kMapLogChars bytes with its control characters replaced, so it can't forge
+// lines. Main thread only (natives and InitNatives).
+constexpr int kMapLogLines = 1000;
+constexpr size_t kMapLogChars = 1000;
+handshake::LogBudget g_map_log(kMapLogLines);
+unsigned long g_map_log_dropped = 0;
+
+bool map_may_log() {
+    switch (g_map_log.take(0)) {
+    case handshake::LogBudget::Verdict::Log: return true;
+    case handshake::LogBudget::Verdict::Exhausted:
+        TOME_WARN("[map] logged %d lines: the rest of this map's TomeLogInteger/TomeLogString lines aren't logged",
+                  kMapLogLines);
+        [[fallthrough]];
+    case handshake::LogBudget::Verdict::Quiet: ++g_map_log_dropped; return false;
+    }
+    return false;
+}
+
+// At each map load: say how many lines the last map lost, and start over.
+void reset_map_log() {
+    if (g_map_log_dropped) TOME_INFO("[map] %lu lines of the last map weren't logged", g_map_log_dropped);
+    g_map_log_dropped = 0;
+    g_map_log.reset();
+}
+
 // Called by the engine (main thread) in place of InitNatives.
 uint32_t hooked_init_natives() {
     uint32_t result = g_init_natives();
     ++g_map_loads;
     g_codes_seen.clear();
     g_action_triggers.clear();  // the game destroys the old script's handles itself
+    reset_map_log();
 
     mods_ready::wait("binding natives");
 
@@ -236,14 +268,19 @@ int32_t native_tome_is_loaded() {
 
 // native TomeLogInteger takes integer value returns nothing
 int32_t native_tome_log_integer(int32_t value) {
-    TOME_INFO("[map] TomeLogInteger(%ld)", static_cast<long>(value));
+    if (map_may_log()) TOME_INFO("[map] TomeLogInteger(%ld)", static_cast<long>(value));
     return 0;
 }
 
 // native TomeLogString takes string value returns nothing
 int32_t native_tome_log_string(const void* value) {
+    if (!map_may_log()) return 0;
     const char* text = string_text(value);
-    TOME_INFO("[map] TomeLogString(%s%s%s)", text ? "\"" : "", text ? text : "null", text ? "\"" : "");
+    if (!text) {
+        TOME_INFO("[map] TomeLogString(null)");
+        return 0;
+    }
+    TOME_INFO("[map] TomeLogString(\"%s\")", log::printable(text, kMapLogChars).c_str());
     return 0;
 }
 

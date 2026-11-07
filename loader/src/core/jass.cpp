@@ -139,6 +139,24 @@ bool scan_shadow_exploit(std::string_view script, std::vector<ShadowFinding>& fi
     return !findings.empty();
 }
 
+void functions_taking_parameters(std::string_view script, std::unordered_set<std::string>& out) {
+    std::vector<std::string_view> w;
+    size_t pos = 0;
+    while (pos < script.size()) {
+        // Any line ending ("\r" alone too): a declaration missed would let
+        // its ExecuteFunc through.
+        size_t nl = script.find_first_of("\r\n", pos);
+        if (nl == std::string_view::npos) nl = script.size();
+        leading_words(script.substr(pos, nl - pos), w);
+        pos = nl + 1;
+        size_t t = 0;
+        if (t < w.size() && w[t] == "constant") ++t;
+        // function <name> takes <first parameter's type or nothing>
+        if (w.size() < t + 4 || w[t] != "function" || w[t + 2] != "takes") continue;
+        if (w[t + 3] != "nothing" && is_valid_identifier(w[t + 1])) out.emplace(w[t + 1]);
+    }
+}
+
 bool is_valid_identifier(std::string_view name) {
     if (name.empty()) return false;
     auto alpha = [](char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); };

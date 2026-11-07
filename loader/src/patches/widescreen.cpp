@@ -1,65 +1,515 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 /*
- * Widescreen 3D view (docs/known-bugs.md, "Stretched picture on widescreen";
- * docs/reverse-engineering.md, "Camera projection").
+ * Widescreen (docs/known-bugs.md, "Stretched picture on widescreen";
+ * docs/reverse-engineering.md, "Camera projection" and "The 2D UI's
+ * coordinates").
  *
- * 1.27b builds every camera's projection from its viewport in the 0.8 x 0.6
- * UI space, so the world camera always gets aspect 4/3 whatever the window.
- * In a 16:9 window the 4:3 picture is stretched sideways: units and
- * buildings a third too wide, and no more of the map than at 4:3.
+ * 1.27b lays everything out for a 4:3 screen and stretches it to the window.
+ * In a 16:9 window units and buildings are a third too wide, no more of the
+ * map shows than at 4:3, and the UI is stretched the same way.
  *
- * Mechanism: an AFTER handler on C44Matrix::Perspective (the one projection
- * builder) scales the matrix's x term (m[0]) by (4/3) / (width/height) of
- * the game window's client area, so the height of the view stays and more
- * shows at the sides, as in 1.29. A window narrower than 4:3 gets its y term
- * (m[5]) scaled instead. The math is in core/widescreen.*. Picking the
- * ground goes through the same matrix (checked in game: a move order at 90%
- * of the width lands under the cursor), so it follows.
+ * The 2D UI (where mapped). The game turns UI units (0.8 x 0.6) into the
+ * screen's 0..1 and back through six small functions (DDCToNDC, NDCToDDC,
+ * their Rect and Width forms) that divide or multiply x by 0.8. Their
+ * operands are pointed at the UI's real width instead (widescreen::ui_width:
+ * 0.6 x the window's aspect), so a UI unit is as wide as it's tall: every
+ * frame and text keeps its shape, and since the UI's root is the whole
+ * screen in those units, frames anchored to its edges go to the window's
+ * edges, as in 1.29. The mouse goes through the same conversions.
  *
- * Only the world camera: Perspective also builds the projections of 3D
- * models inside UI frames (portraits, the clock) and of the main menu's 3D
- * background, which sit in stretched 2D art and must stay stretched with it.
- * The world camera is the one set up by WorldView::SetupCamera, so BEFORE and
- * AFTER handlers there mark the calls in between. Unit picking builds its own
- * projection, through the world frame's CSpriteFrame::SetupCamera (the
- * generic one of UI models): left at 4:3, a unit's click area sat further
- * from the middle of the screen than the unit, and off screen near the
- * sides. BEFORE and AFTER handlers there mark the world frame's calls too
- * (CGameUI.world_frame). Everything here runs on the main thread (rendering
- * and input).
+ * In a game, what the game laid out from the left edge for a 4:3 screen is
+ * then laid out again, every frame (follow_ui; the game builds and moves
+ * parts of its UI as it goes): the console's bottom art becomes pieces
+ * (widescreen::console_layout: the minimap's end at the left edge, the
+ * portrait's arch, info panel and inventory in the middle, the command card
+ * at the right edge, wall between, and slots in the top bar each side of the
+ * clock; simple frames from Tome's FDF, widescreen::console_fdf, children of
+ * the console), the game's own bottom tiles go off the screen, and what sat
+ * in the middle of a 4:3 screen (portrait, info panel, life and mana text,
+ * clock, inventory cover) moves to the middle of this one.
  *
- * The player can turn it off (Tome > Settings > Widescreen, tome_settings.h);
- * it applies from the next frame. The 2D UI (console, top bar, command card)
- * stays stretched either way: that needs the frame layout itself changed
- * (docs/research.md §11.4).
+ * The menus keep the game's look: their screens are full-screen models (the
+ * panels, the background) with frames on them. A full-screen model's flat
+ * camera gets the game's 0.8 across (on_ortho), so it's stretched across the
+ * window as the game draws it and the frames sit on it as they always did,
+ * now in proportion. The loading screen is the same.
+ *
+ * The 3D view. With the 2D part the world frame is the window's shape, so
+ * its camera is too. Without it (not mapped, or a window narrower than 4:3)
+ * an AFTER handler on C44Matrix::Perspective scales the world camera's
+ * matrix (only the calls made from WorldView::SetupCamera, or the world
+ * frame's CSpriteFrame::SetupCamera, which unit picking uses) by (4/3) /
+ * the window's aspect, so the view keeps its height and shows more at the
+ * sides; 3D models inside UI frames (portraits) are left alone.
+ *
+ * The player can turn it off (Tome > Settings > Widescreen,
+ * tome_settings.h). The 2D part follows from the next screen (the next menu
+ * screen, or the next game: text is laid out as it's made and kept); the 3D
+ * view alone (no 2D part) from the next frame. Everything here runs on the
+ * main thread.
  */
 #include "patches.h"
 
 #include "core/widescreen.h"
 #include "game_build.h"
 #include "hooks.h"
+#include "log.h"
 #include "main_thread.h"
+#include "patch.h"
+#include "natives.h"
 #include "tome/tome.h"
 #include "tome_settings.h"
 
 #include <cstdint>
+#include <cstring>
 #include <string>
+#include <unordered_map>
+#include <utility>
 #include <vector>
+
+// GCC warns that __thiscall is meant for class methods, but it does apply it
+// to these function pointer types.
+#pragma GCC diagnostic ignored "-Wattributes"
 
 namespace tome::patches {
 namespace {
 
 int g_in_world_camera = 0;  // world camera setups running (main thread)
-// Per CSpriteFrame::SetupCamera running, innermost last: whether it's the
-// world frame's, as its BEFORE handler found (main thread).
-std::vector<bool> g_sprite_cameras;
+// Per CSpriteFrame::SetupCamera running, innermost last: what its BEFORE
+// handler found it to be (main thread).
+enum class Sprite { Model, World, Screen };
+std::vector<Sprite> g_sprite_cameras;
 
 GameUiGetFn g_game_ui_get = nullptr;
 uint32_t g_world_frame_offset = 0;  // CGameUI.world_frame
+bool g_wide_ui = false;             // the 2D part is installed
+
+// --- the UI's width ----------------------------------------------------------------
+
+// The UI's width in UI units now: the window's, or the game's 0.8 with the
+// setting off or without the 2D part. The same in games and menus: keeping
+// 0.8 in the menus left part of the game's UI (built under the loading
+// screen) laid out for 0.8 in games, the top bar's text among it.
+// The setting as it was when the current screen was made (latched by
+// CGlueMgr::SetScreen: a menu screen, or the loading screen a game's UI is
+// built under). The UI lays its text out as it's made and keeps it, so the
+// width it was made for has to stay until the next screen.
+bool g_wide_setting = true;
+// The width for the last client area that wasn't empty (main thread). A
+// minimized window has none; laying the UI out for 0.8 meanwhile would
+// leave what's made then (chat lines in a game that goes on) at 0.8.
+float g_last_wide = widescreen::kBaseWidth;
+
+float ui_width() {
+    if (!g_wide_ui || !g_wide_setting) return widescreen::kBaseWidth;
+    int width = 0, height = 0;
+    main_thread::client_size(width, height);
+    if (width > 0 && height > 0) g_last_wide = widescreen::ui_width(width, height);
+    return g_last_wide;
+}
+
+// The width the six conversions read: their x operands point here instead
+// of at the game's 0.8 (DDCWidth, which other code reads too), so they run
+// as the game's code with no hook. A float on 1.27b, a double on 1.26a
+// (x87 code: fmul/fdiv QWORD). Set on the main thread whenever ui_width()
+// may change: a new screen (the setting), the window's size.
+float g_conversion_width = widescreen::kBaseWidth;
+double g_conversion_width_double = widescreen::kBaseWidth;
+
+void refresh_width() {
+    g_conversion_width = ui_width();
+    g_conversion_width_double = g_conversion_width;
+}
+
+// --- the game UI laid out again -------------------------------------------------------
+
+using SetPointFn = void(__thiscall*)(void* layout, int point, void* relative, int relative_point, float x, float y,
+                                     int update);
+using SetSizeFn = void(__thiscall*)(void* layout, float size);
+using CreateSimpleFrameFn = void*(__fastcall*)(const char* name, void* parent, int context);
+using VoidMethod = void(__thiscall*)(void* object);
+
+struct Ui {
+    SetPointFn set_point = nullptr;
+    SetSizeFn set_width = nullptr, set_height = nullptr;
+    VoidMethod clear_points = nullptr;
+    CreateSimpleFrameFn create_simple_frame = nullptr;
+    uint32_t frame_layout = 0;  // CFrame.layout
+    uint32_t points = 0;        // CLayoutFrame.points
+    uintptr_t relative_point = 0;  // CLayoutFrame.relative_point_vtable (absolute)
+    uint32_t dependents = 0;    // CLayoutFrame.dependents
+    uint32_t width = 0;         // CLayoutFrame.width (height after it)
+    uint32_t console = 0, info_panel = 0, clock = 0;  // CGameUI fields
+    uint32_t inventory_cover = 0;  // CInfoPanel.inventory_cover
+    uint32_t console_upper = 0, portrait_layer = 0, minimap_layer = 0, resource_bar = 0;  // CGameUI fields
+    uint32_t shown = 0, show_flag = 0;  // CSimpleFrame.shown, .show_flag
+    uint32_t hide_slot = 0, show_slot = 0;
+    uint32_t root_update_slot = 0;  // CLayoutFrame.vtable.UpdateScreenRect (on the layout)
+};
+Ui g_ui;
+
+constexpr int kTopLeft = 0, kBottomLeft = 6, kBottomRight = 8;
+
+template <class T>
+T field(const void* object, uint32_t offset) {
+    T value;
+    std::memcpy(&value, static_cast<const char*>(object) + offset, sizeof value);
+    return value;
+}
+
+void* point_of(void* layout, int point) {
+    return field<void*>(layout, g_ui.points + 4 * static_cast<uint32_t>(point));
+}
+
+// Whether a point is relative to a frame. One relative to the screen
+// (SetPointAbsolute: the inventory cover, tooltips kept on the screen) holds
+// x where the other holds the frame, and is smaller: it's never read as one.
+bool relative_to_frame(const void* point) {
+    return point && field<uintptr_t>(point, 0) == g_ui.relative_point;
+}
+
+// A point of a frame, as read back.
+struct Anchor {
+    void* relative = nullptr;
+    int relative_point = 0;
+    float x = 0, y = 0;
+};
+
+// False if it has no such point, or one relative to the screen.
+bool read_anchor(void* layout, int point, Anchor& out) {
+    void* p = layout ? point_of(layout, point) : nullptr;
+    if (!relative_to_frame(p)) return false;
+    out = {field<void*>(p, 4), field<int>(p, 8), field<float>(p, 0xC), field<float>(p, 0x10)};
+    return true;
+}
+
+// A point of the console's middle (portrait, info panel, clock, inventory
+// cover), moved right by middle_shift. The game may place it again (the UI
+// is built in steps); whatever x it has that isn't the one we set is the
+// game's, and the shift goes on top of that.
+struct Moved {
+    void* layout;
+    int point;
+    float base;     // the game's x
+    float applied;  // the x we set
+};
+
+// A tile of the console's bottom row (ConsoleUI.fdf), moved far off the
+// screen while the pieces replace it (neither a width of 0 nor clearing its
+// points stopped it drawing where it was). `anchor` is its point as the game
+// made it, put back at 4:3.
+constexpr float kAway = -10.0f;
+struct Tile {
+    void* layout;
+    int point;
+    Anchor anchor;
+};
+
+// One game UI's state. A game's UI may be made where the last one was, so
+// it's the same UI only within one map load (natives::map_load_count):
+// otherwise the old UI's console, tiles and pieces (freed with it) would
+// be used.
+struct Laid {
+    void* ui = nullptr;
+    unsigned map_loads = 0;
+    void* console = nullptr;
+    float wide = 0;       // the layout of the pieces applied (0: none yet)
+    float root_wide = 0;  // the width the root was last given (0: none yet)
+    std::vector<Tile> tiles;
+    std::vector<Moved> moved;
+    std::unordered_map<std::string, std::vector<void*>> pieces;  // made so far, by FDF name
+    int next_context = 0;
+    bool pieces_shown = false;
+    int tile_scans = 0;          // frames find_tiles found no tiles in
+    bool custom_console = false; // gave up: not the game's own console art
+};
+Laid g_laid;
+
+void call_slot(void* object, uint32_t slot) {
+    auto vtable = field<void**>(object, 0);
+    reinterpret_cast<VoidMethod>(vtable[slot / sizeof(void*)])(object);
+}
+
+void show_simple(void* frame, bool show) {
+    const int flag = show ? 1 : 0;
+    std::memcpy(static_cast<char*>(frame) + g_ui.show_flag, &flag, sizeof flag);
+    call_slot(frame, show ? g_ui.show_slot : g_ui.hide_slot);
+}
+
+bool about(float v, float want) {
+    return v > want - 0.0005f && v < want + 0.0005f;
+}
+
+// The console's bottom tiles, by their points and sizes as ConsoleUI.fdf
+// makes them: 0.256 or 0.032 wide, 0.176 or 0.15 high, at the bottom.
+void find_tiles() {
+    void* console = g_laid.console;  // a simple frame: its layout is the frame itself
+    std::vector<Tile> tiles;
+    for (char* node = field<char*>(console, g_ui.dependents); reinterpret_cast<intptr_t>(node) > 0;
+         node = field<char*>(node, 8)) {
+        void* layout = field<void*>(node, 0xC);
+        Anchor a;
+        const bool bottom = read_anchor(layout, kBottomLeft, a) || read_anchor(layout, kBottomRight, a);
+        if (!bottom || a.relative != console || a.y != 0.0f) continue;
+        const float width = field<float>(layout, g_ui.width), height = field<float>(layout, g_ui.width + 4);
+        if ((about(width, 0.256f) || about(width, 0.032f)) && (about(height, 0.176f) || about(height, 0.15f))) {
+            tiles.push_back({layout, relative_to_frame(point_of(layout, kBottomLeft)) ? kBottomLeft : kBottomRight, a});
+        }
+    }
+    if (tiles.size() == 4) g_laid.tiles = std::move(tiles);
+}
+
+// Follows one point of the middle: shifted by `shift` from the game's x.
+void follow_point(void* layout, int point, float shift) {
+    Anchor a;
+    if (!read_anchor(layout, point, a)) return;
+    auto it = g_laid.moved.begin();
+    while (it != g_laid.moved.end() && (it->layout != layout || it->point != point)) ++it;
+    if (it == g_laid.moved.end()) it = g_laid.moved.insert(it, {layout, point, a.x, a.x});
+    if (!about(a.x, it->applied)) it->base = a.x;  // the game placed it again
+    const float want = it->base + shift;
+    if (about(a.x, want)) return;
+    g_ui.set_point(layout, point, a.relative, a.relative_point, want, a.y, 1);
+    it->applied = want;
+}
+
+// Which side of its relative frame a point is on: -1 left, 1 right, 0 the middle.
+int side(int point) {
+    switch (point) {
+    case 0: case 3: case 6: return -1;  // TOPLEFT, LEFT, BOTTOMLEFT
+    case 2: case 5: case 8: return 1;   // TOPRIGHT, RIGHT, BOTTOMRIGHT
+    default: return 0;
+    }
+}
+
+// Which bottom corner a point is: -1 BOTTOMLEFT, 1 BOTTOMRIGHT, 0 neither.
+int bottom_side(int point) {
+    return point == kBottomLeft ? -1 : point == kBottomRight ? 1 : 0;
+}
+
+bool is_ours(void* layout) {
+    for (const Tile& t : g_laid.tiles) {
+        if (t.layout == layout) return true;
+    }
+    for (auto& [name, made] : g_laid.pieces) {
+        for (void* frame : made) {
+            if (frame == layout) return true;
+        }
+    }
+    return false;
+}
+
+// The frames anchored to `container`'s bottom corners (it spans the whole
+// UI): what the game put in the middle of a 4:3 screen (x from 0.19 to 0.61
+// there) moves to the middle of this one, right by `shift` from the left
+// corner or left by it from the right one. Frames held by both corners
+// (they stretch, like the chat box) stay; so do the console's tiles and
+// pieces, and the top bar (its tiles hang from the top corners). Frames the game
+// makes later (the life and mana text, made with the first selection) are
+// caught on the frame after.
+constexpr float kMiddleFrom = 0.19f, kMiddleTo = 0.61f;
+void follow_children(void* container, float shift) {
+    if (!container) return;
+    for (char* node = field<char*>(container, g_ui.dependents); reinterpret_cast<intptr_t>(node) > 0;
+         node = field<char*>(node, 8)) {
+        void* layout = field<void*>(node, 0xC);
+        if (!layout || is_ours(layout)) continue;
+        // Its points on the container's bottom corners: all of them move, so
+        // a frame held by two points on one corner keeps its size.
+        int sides = 0, count = 0;
+        int on[9];
+        for (int point = 0; point < 9; ++point) {
+            Anchor a;
+            if (!read_anchor(layout, point, a) || a.relative != container) continue;
+            const int s = bottom_side(a.relative_point);
+            if (s == 0) continue;
+            sides |= s < 0 ? 1 : 2;
+            on[count++] = point;
+        }
+        if (sides != 1 && sides != 2) continue;  // held by both sides, or by neither
+        auto it = g_laid.moved.begin();
+        while (it != g_laid.moved.end() && (it->layout != layout || it->point != on[0])) ++it;
+        Anchor a;
+        read_anchor(layout, on[0], a);
+        const float base = it != g_laid.moved.end() && about(a.x, it->applied) ? it->base : a.x;
+        const float at = sides == 1 ? base : widescreen::kBaseWidth + base;  // on a 4:3 screen
+        if (at < kMiddleFrom || at > kMiddleTo) continue;
+        for (int i = 0; i < count; ++i) follow_point(layout, on[i], sides == 1 ? shift : -shift);
+    }
+}
+
+// The inventory's cover: the game puts its BOTTOMRIGHT at x 0.6 of the
+// screen (a point relative to the screen, which read_anchor doesn't read).
+// It goes on the console's bottom-left instead, the same place at 4:3.
+constexpr float kCoverRight = 0.6f;
+void follow_cover(void* cover, float shift) {
+    Anchor a;
+    const bool ours = read_anchor(cover, kBottomRight, a) && a.relative == g_laid.console;
+    const float want = kCoverRight + shift;
+    if (ours && about(a.x, want)) return;
+    g_ui.clear_points(cover);
+    g_ui.set_point(cover, kBottomRight, g_laid.console, kBottomLeft, want, 0.0f, 1);
+}
+
+// The n-th piece made from `name` for this UI, made if needed.
+void* piece(const std::string& name, size_t n) {
+    std::vector<void*>& made = g_laid.pieces[name];
+    while (made.size() <= n) {
+        void* frame = g_ui.create_simple_frame(name.c_str(), g_laid.console, 0x7E00 + g_laid.next_context++);
+        if (!frame) {
+            TOME_WARN("widescreen: couldn't make the console piece %s", name.c_str());
+            return nullptr;
+        }
+        made.push_back(frame);
+    }
+    return made[n];
+}
+
+// Lays the pieces out for a UI `wide` units across (none at 4:3).
+void lay_pieces(float wide) {
+    g_laid.wide = wide;
+    std::unordered_map<std::string, size_t> used;
+    if (wide > widescreen::kBaseWidth) {
+        for (const widescreen::Piece& p : widescreen::console_layout(wide)) {
+            void* frame = piece(p.name, used[p.name]++);
+            if (!frame) continue;
+            g_ui.set_width(frame, p.width);
+            g_ui.set_height(frame, p.height);
+            // A new simple frame fills its parent: only this point may hold it.
+            const int point = p.top ? kTopLeft : kBottomLeft;
+            g_ui.clear_points(frame);
+            g_ui.set_point(frame, point, g_laid.console, point, p.x, 0.0f, 1);
+        }
+    }
+    // Pieces left over from a wider window go off the screen, like the tiles
+    // (at 4:3 all of them are hidden with the rest, in follow_ui).
+    for (auto& [name, made] : g_laid.pieces) {
+        for (size_t i = used[name]; i < made.size(); ++i) {
+            g_ui.clear_points(made[i]);
+            g_ui.set_point(made[i], kBottomLeft, g_laid.console, kBottomLeft, kAway, 0.0f, 1);
+        }
+    }
+}
+
+// Once per frame in a game (from the world camera's setup): lays the game
+// UI out for the window's width, and keeps it so.
+void follow_ui() {
+    void* ui = g_game_ui_get(0, 0);
+    if (!ui) return;
+    const unsigned map_loads = natives::map_load_count();
+    if (ui != g_laid.ui || map_loads != g_laid.map_loads) {
+        g_laid = {};
+        g_laid.ui = ui;
+        g_laid.map_loads = map_loads;
+    }
+    if (!g_laid.console) g_laid.console = field<void*>(ui, g_ui.console);
+    if (!g_laid.console) return;
+    const float wide = ui_width();
+    const bool wider = wide > widescreen::kBaseWidth;
+    const float shift = widescreen::middle_shift(wide);
+    // The game UI's root takes the screen's width when it's made and when
+    // the window changes size; after the setting changes, it has to again.
+    if (g_laid.root_wide != wide) {
+        const bool first = g_laid.root_wide == 0;  // made at this width
+        g_laid.root_wide = wide;
+        if (!first) call_slot(static_cast<char*>(ui) + g_ui.frame_layout, g_ui.root_update_slot);
+    }
+
+    // The tiles first: the middle's frames are found apart from them, and
+    // the middle moves only with the art. A console whose tiles aren't the
+    // game's (a map's own ConsoleUI.fdf) stays as the map made it, its
+    // middle too, and isn't looked through again.
+    constexpr int kTileScans = 30;
+    if (g_laid.tiles.empty() && !g_laid.custom_console) {
+        find_tiles();
+        if (g_laid.tiles.empty() && ++g_laid.tile_scans >= kTileScans) {
+            g_laid.custom_console = true;
+            TOME_INFO("widescreen: the console's art isn't the game's own (a map's ConsoleUI.fdf?); "
+                      "it and the console's middle stay where the map put them");
+        }
+    }
+    if (g_laid.tiles.empty()) return;
+    // The middle of the console, the top bar and the portrait's and
+    // minimap's layers (full-screen CFrames: their layout at CFrame.layout).
+    char* portrait_layer = field<char*>(ui, g_ui.portrait_layer);
+    char* minimap_layer = field<char*>(ui, g_ui.minimap_layer);
+    follow_children(g_laid.console, shift);
+    follow_children(field<void*>(ui, g_ui.console_upper), shift);
+    if (portrait_layer) follow_children(portrait_layer + g_ui.frame_layout, shift);
+    if (minimap_layer) follow_children(minimap_layer + g_ui.frame_layout, shift);
+    // The clock's model is drawn from its frame's corner at 0, 0 (the model
+    // itself sits at the top middle): it moves like the middle.
+    if (char* clock = field<char*>(ui, g_ui.clock)) follow_point(clock + g_ui.frame_layout, kBottomLeft, shift);
+    // Two strings hang off the resource bar's right edge but sit left of it,
+    // under the clock (0.417 and 0.361 from the right, the bar 0.338 wide).
+    if (void* bar = field<void*>(ui, g_ui.resource_bar)) {
+        for (char* node = field<char*>(bar, g_ui.dependents); reinterpret_cast<intptr_t>(node) > 0;
+             node = field<char*>(node, 8)) {
+            void* layout = field<void*>(node, 0xC);
+            Anchor a;
+            if (!read_anchor(layout, kTopLeft, a) || a.relative != bar || side(a.relative_point) != 1) continue;
+            auto it = g_laid.moved.begin();
+            while (it != g_laid.moved.end() && (it->layout != layout || it->point != kTopLeft)) ++it;
+            const float base = it != g_laid.moved.end() && about(a.x, it->applied) ? it->base : a.x;
+            if (base < -0.35f) follow_point(layout, kTopLeft, -shift);
+        }
+    }
+    // The inventory's cover is placed on the screen, not on the info panel.
+    if (void* info = field<void*>(ui, g_ui.info_panel)) {
+        if (void* cover = field<void*>(info, g_ui.inventory_cover)) follow_cover(cover, shift);
+    }
+
+    for (Tile& t : g_laid.tiles) {
+        Anchor now;
+        if (!read_anchor(t.layout, t.point, now)) continue;
+        const bool away = about(now.x, t.anchor.x + kAway);
+        if (!away && !about(now.x, t.anchor.x)) t.anchor = now;  // the game placed it again
+        if (wider == away) continue;
+        g_ui.set_point(t.layout, t.point, t.anchor.relative, t.anchor.relative_point,
+                       t.anchor.x + (wider ? kAway : 0.0f), t.anchor.y, 1);
+    }
+    // Laid out again: every piece is shown or hidden again below, the new
+    // ones too.
+    const bool relaid = wide != g_laid.wide;
+    if (relaid) lay_pieces(wide);
+    // With the console: it's hidden in cinematics, and Hide doesn't reach a
+    // simple frame's children.
+    const bool show = wider && field<int>(g_laid.console, g_ui.shown) != 0;
+    if (show == g_laid.pieces_shown && !relaid) return;
+    g_laid.pieces_shown = show;
+    for (auto& [name, made] : g_laid.pieces) {
+        for (void* frame : made) show_simple(frame, show);
+    }
+}
+
+// --- the menus ------------------------------------------------------------------------
+
+using GlueGetFn = void*(*)();
+using GetCurrentFn = void*(*)();
+GlueGetFn g_glue_get = nullptr;
+GetCurrentFn g_current_screen = nullptr;
+
+void update_root(void* frame) {
+    if (frame) call_slot(static_cast<char*>(frame) + g_ui.frame_layout, g_ui.root_update_slot);
+}
+
+// BEFORE and AFTER CGlueMgr::SetScreen(screen, force): the setting is
+// latched for the new screen, and the menus' root and the screen frame the
+// new screen is laid out on (the loading screen's own) take the screen's
+// width again, in case it changed since they last did.
+void TOME_CALL on_set_screen(tome_mod*, tome_hook_call*, void*) {
+    g_wide_setting = tome_settings::widescreen();
+    refresh_width();
+    update_root(g_glue_get());
+    update_root(g_current_screen());
+}
+
+// --- the 3D view -------------------------------------------------------------------
 
 // BEFORE and AFTER WorldView::SetupCamera(this, delta, rect).
 void TOME_CALL on_world_camera_enter(tome_mod*, tome_hook_call*, void*) {
     ++g_in_world_camera;
+    if (g_wide_ui) follow_ui();
 }
 
 void TOME_CALL on_world_camera_leave(tome_mod*, tome_hook_call*, void*) {
@@ -76,22 +526,100 @@ bool is_world_frame(tome_hook_call* call) {
 
 // BEFORE and AFTER CSpriteFrame::SetupCamera(this): UI models' cameras and
 // the world frame's (unit picking).
+// Whether a sprite frame fills the screen: its TOPLEFT and BOTTOMRIGHT on
+// its parent's, both at 0, 0, and so up to a frame with no points (a screen
+// frame, its rect set directly). A menu screen's background is one, a model
+// made for the whole 0.8 x 0.6 screen; placed models (the logo, a button's
+// face, portraits) have their own extent. Only known once the 2D part is
+// installed.
+// A point relative to the screen holds an x where this reads the frame:
+// such a frame isn't taken to fill anything.
+uint32_t g_frame_layout = 0, g_points = 0;
+bool fills_screen(const char* layout, int depth) {
+    if (depth > 8) return false;
+    const char* corner[2];
+    std::memcpy(&corner[0], layout + g_points + 4 * 0, sizeof corner[0]);  // TOPLEFT
+    std::memcpy(&corner[1], layout + g_points + 4 * 8, sizeof corner[1]);  // BOTTOMRIGHT
+    if (!corner[0] && !corner[1]) {
+        for (int point = 1; point < 8; ++point) {
+            const char* p;
+            std::memcpy(&p, layout + g_points + 4 * point, sizeof p);
+            if (p) return false;
+        }
+        return true;  // no points: the root
+    }
+    if (!relative_to_frame(corner[0]) || !relative_to_frame(corner[1])) return false;
+    const char* relative[2];
+    for (int i = 0; i < 2; ++i) {
+        int relative_point;
+        float x, y;
+        std::memcpy(&relative[i], corner[i] + 4, sizeof relative[i]);
+        std::memcpy(&relative_point, corner[i] + 8, sizeof relative_point);
+        std::memcpy(&x, corner[i] + 0xC, sizeof x);
+        std::memcpy(&y, corner[i] + 0x10, sizeof y);
+        if (relative_point != (i == 0 ? 0 : 8) || x != 0.0f || y != 0.0f) return false;
+    }
+    return relative[0] && relative[0] == relative[1] && fills_screen(relative[0], depth + 1);
+}
+
+// A model made for the whole screen: a sprite frame that fills it, or whose
+// every point is on a frame that does, at x 0 (the loading screen's bar,
+// held by its bottom-left corner only).
+bool fills_parent(tome_hook_call* call) {
+    if (!g_points || call->arg_count < 1 || !call->args[0]) return false;
+    const char* layout = reinterpret_cast<const char*>(call->args[0]) + g_frame_layout;
+    if (fills_screen(layout, 0)) return true;
+    int points = 0;
+    for (int point = 0; point < 9; ++point) {
+        const char* p;
+        std::memcpy(&p, layout + g_points + 4 * point, sizeof p);
+        if (!p) continue;
+        if (!relative_to_frame(p)) return false;
+        const char* relative;
+        float x;
+        std::memcpy(&relative, p + 4, sizeof relative);
+        std::memcpy(&x, p + 0xC, sizeof x);
+        if (x != 0.0f || !relative || !fills_screen(relative, 1)) return false;
+        ++points;
+    }
+    return points > 0;
+}
+
 void TOME_CALL on_sprite_camera_enter(tome_mod*, tome_hook_call* call, void*) {
-    const bool world = is_world_frame(call);
-    g_sprite_cameras.push_back(world);
-    if (world) ++g_in_world_camera;
+    const Sprite kind = is_world_frame(call)        ? Sprite::World
+                        : fills_parent(call)          ? Sprite::Screen
+                                                      : Sprite::Model;
+    g_sprite_cameras.push_back(kind);
+    if (kind == Sprite::World) ++g_in_world_camera;
 }
 
 void TOME_CALL on_sprite_camera_leave(tome_mod*, tome_hook_call*, void*) {
     if (g_sprite_cameras.empty()) return;
-    const bool world = g_sprite_cameras.back();
+    const Sprite kind = g_sprite_cameras.back();
     g_sprite_cameras.pop_back();
-    if (world && g_in_world_camera > 0) --g_in_world_camera;
+    if (kind == Sprite::World && g_in_world_camera > 0) --g_in_world_camera;
+}
+
+// BEFORE C44Matrix::Ortho(this, left, right, bottom, top, near, far): a
+// full-screen model's flat camera looks from the middle of its view, which
+// is as wide as the window: -wide/2 to wide/2. Its model is made for 0 to
+// 0.8, so it would sit at the left, in proportion. It gets -wide/2 to
+// 0.8 - wide/2 instead: the model stretched across the window, as the game
+// draws it at 4:3 in any window, so the frames on it (a menu's buttons,
+// the loading screen's) sit on its art as they always did.
+void TOME_CALL on_ortho(tome_mod*, tome_hook_call* call, void*) {
+    if (g_sprite_cameras.empty() || g_sprite_cameras.back() != Sprite::Screen || call->arg_count < 3) return;
+    const float wide = ui_width();
+    const float left = tome_hook_arg_float(call, 1), right = tome_hook_arg_float(call, 2);
+    if (wide <= widescreen::kBaseWidth || !about(left, -wide / 2) || !about(right, wide / 2)) return;
+    tome_hook_set_arg_float(call, 2, widescreen::kBaseWidth - wide / 2);
 }
 
 // AFTER C44Matrix::Perspective(this, fov, aspect, near, far).
 void TOME_CALL on_perspective(tome_mod*, tome_hook_call* call, void*) {
     if (g_in_world_camera == 0 || call->arg_count < 1 || !tome_settings::widescreen()) return;
+    // A wide UI gives the world frame, and so its camera, the window's shape.
+    if (ui_width() > widescreen::kBaseWidth) return;
     float* m = reinterpret_cast<float*>(call->args[0]);
     if (!m) return;
     int width = 0, height = 0;
@@ -100,6 +628,8 @@ void TOME_CALL on_perspective(tome_mod*, tome_hook_call* call, void*) {
     m[0] *= s.x;
     m[5] *= s.y;
 }
+
+// --- install -------------------------------------------------------------------------
 
 hooks::Target* find_target(const char* name, std::string& report) {
     std::string error;
@@ -113,6 +643,122 @@ void add_handler(hooks::Target* target, int phase, tome_hook_fn fn) {
     handler.phase = phase;
     handler.fn = fn;
     hooks::add(target, handler);
+}
+
+// What the 2D part needs mapped, besides the patch's own symbols (bound in
+// BuildMappings: widescreen, ui and game; the hooked ones found by name).
+const char* const kUiSymbols[] = {
+    "CLayoutFrame.vtable.UpdateScreenRect", "CGlueMgr::SetScreen", "CGlueMgr::Get", "CScreenFrame::GetCurrent",
+    "C44Matrix::Ortho", "DDCWidth", "DDCToNDCRect", "NDCToDDCRect", "DDCToNDC", "NDCToDDC", "DDCToNDCWidth",
+    "NDCToDDCWidth",
+    "CreateSimpleFrame", "CLayoutFrame::SetPoint", "CLayoutFrame::SetWidth", "CLayoutFrame::SetHeight",
+    "CLayoutFrame::ClearAllPoints", "CFrame.layout", "CLayoutFrame.points", "CLayoutFrame.relative_point_vtable",
+    "CLayoutFrame.dependents",
+    "CLayoutFrame.width", "CGameUI.console", "CGameUI.info_panel", "CGameUI.time_of_day",
+    "CInfoPanel.inventory_cover", "CGameUI.console_upper", "CGameUI.portrait_layer", "CGameUI.minimap_layer",
+    "CGameUI.resource_bar", "CSimpleFrame.shown", "CSimpleFrame.show_flag", "CSimpleFrame.vtable.Hide",
+    "CSimpleFrame.vtable.Show",
+};
+
+// The six conversions' x operands (each reads DDCWidth once or twice),
+// pointed at g_conversion_width, or its double for a double DDCWidth.
+// Checks them all before changing any; false with the reason in `error`. A
+// mod's hook on one still works: the operands are "??" in their mapped
+// bytes, and a trampoline made later copies them as they are now.
+bool point_conversions(uintptr_t base, const BuildMappings& build, std::string& error) {
+    const uintptr_t constant = base + build.widescreen.ddc_width;
+    // 0.8f as a float or widened to a double, compared as bits (no x87
+    // excess precision).
+    constexpr uint32_t kFloatBits = 0x3F4CCCCD;
+    constexpr uint64_t kDoubleBits = 0x3FE99999A0000000ull;  // (double)0.8f, as 1.26a stores it
+    const void* ours = nullptr;
+    if (readable(constant, sizeof(uint64_t)) && field<uint64_t>(reinterpret_cast<const void*>(constant), 0) == kDoubleBits) {
+        ours = &g_conversion_width_double;
+    } else if (readable(constant, sizeof(uint32_t)) &&
+               field<uint32_t>(reinterpret_cast<const void*>(constant), 0) == kFloatBits) {
+        ours = &g_conversion_width;
+    } else {
+        error = "DDCWidth isn't 0.8 (a float or a double)";
+        return false;
+    }
+    constexpr size_t kMaxBody = 0x60;  // the longest, 1.27b's Rect forms, are 0x47 bytes
+    const char* const conversions[] = {"DDCToNDCRect", "NDCToDDCRect",  "DDCToNDC",
+                                       "NDCToDDC",     "DDCToNDCWidth", "NDCToDDCWidth"};
+    std::vector<uintptr_t> sites;
+    for (const char* name : conversions) {
+        const mappings::Symbol* sym = build.data->find(name);
+        const uintptr_t code = base + sym->value;
+        std::vector<size_t> at;
+        if (!readable(code, kMaxBody) ||
+            !widescreen::constant_operands(reinterpret_cast<const uint8_t*>(code), kMaxBody,
+                                           static_cast<uint32_t>(constant), at) ||
+            at.empty() || at.size() > 2) {
+            error = std::string(name) + ": not the code it maps (" + std::to_string(at.size()) +
+                    " operands read DDCWidth, expected 1 or 2)";
+            return false;
+        }
+        for (size_t offset : at) sites.push_back(code + offset);
+    }
+    for (uintptr_t site : sites) {
+        if (!patch_pointer(site, constant, ours, error)) return false;
+    }
+    return true;
+}
+
+void on_size() {
+    refresh_width();
+}
+
+// The 2D part; false (with the reason in `missing`) if a symbol isn't mapped.
+bool install_wide_ui(uintptr_t base, const BuildMappings& build, std::string& missing) {
+    for (const char* name : kUiSymbols) {
+        if (!build.data->find(name)) {
+            missing = name;
+            return false;
+        }
+    }
+    const auto& w = build.widescreen;
+    g_ui.set_point = reinterpret_cast<SetPointFn>(base + build.ui.layout_set_point);
+    g_ui.set_width = reinterpret_cast<SetSizeFn>(base + build.ui.layout_set_width);
+    g_ui.set_height = reinterpret_cast<SetSizeFn>(base + w.layout_set_height);
+    g_ui.clear_points = reinterpret_cast<VoidMethod>(base + w.layout_clear_points);
+    g_ui.create_simple_frame = reinterpret_cast<CreateSimpleFrameFn>(base + w.create_simple_frame);
+    g_ui.frame_layout = build.ui.layout_offset;
+    g_ui.points = w.layout_points_offset;
+    g_ui.relative_point = base + w.relative_point_vtable;
+    g_ui.dependents = w.layout_dependents_offset;
+    g_ui.width = w.layout_width_offset;
+    g_ui.console = w.console_offset;
+    g_ui.info_panel = w.info_panel_offset;
+    g_ui.clock = w.clock_offset;
+    g_ui.inventory_cover = w.inventory_cover_offset;
+    g_ui.root_update_slot = w.layout_update_slot;
+    g_ui.console_upper = w.console_upper_offset;
+    g_ui.portrait_layer = w.portrait_layer_offset;
+    g_ui.minimap_layer = w.minimap_layer_offset;
+    g_ui.resource_bar = w.resource_bar_offset;
+    g_ui.shown = w.simple_shown_offset;
+    g_ui.show_flag = w.simple_show_flag_offset;
+    g_ui.hide_slot = w.simple_hide_slot;
+    g_ui.show_slot = w.simple_show_slot;
+
+    hooks::Target* set_screen = find_target("CGlueMgr::SetScreen", missing);
+    if (!set_screen) return false;
+    hooks::Target* ortho = find_target("C44Matrix::Ortho", missing);
+    if (!ortho) return false;
+    if (!point_conversions(base, build, missing)) return false;
+    add_handler(ortho, TOME_HOOK_BEFORE, on_ortho);
+    g_frame_layout = g_ui.frame_layout;
+    g_points = g_ui.points;
+    add_handler(set_screen, TOME_HOOK_BEFORE, on_set_screen);
+    add_handler(set_screen, TOME_HOOK_AFTER, on_set_screen);
+    g_current_screen = reinterpret_cast<GetCurrentFn>(base + w.screen_get_current);
+    g_glue_get = reinterpret_cast<GlueGetFn>(base + build.game.glue_get);
+    g_wide_setting = tome_settings::widescreen();
+    g_wide_ui = true;
+    refresh_width();
+    main_thread::set_size_hook(on_size);
+    return true;
 }
 
 bool install_widescreen(uintptr_t base, const BuildMappings& build, const Variant&, std::string& report) {
@@ -130,7 +776,12 @@ bool install_widescreen(uintptr_t base, const BuildMappings& build, const Varian
     add_handler(sprite_camera, TOME_HOOK_BEFORE, on_sprite_camera_enter);
     add_handler(sprite_camera, TOME_HOOK_AFTER, on_sprite_camera_leave);
     add_handler(perspective, TOME_HOOK_AFTER, on_perspective);
-    report = "keeps the world view's proportions in any window shape";
+    std::string missing;
+    if (install_wide_ui(base, build, missing)) {
+        report = "keeps the 3D view's and the UI's proportions in any window shape";
+    } else {
+        report = "keeps the 3D view's proportions in any window shape (the UI stays stretched: " + missing + ")";
+    }
     return true;
 }
 
@@ -141,10 +792,10 @@ const char* const kSymbols[] = {"WorldView::SetupCamera", "CSpriteFrame::SetupCa
 
 extern const Patch kWidescreen = {
     "widescreen",
-    "shows more of the map instead of stretching the 3D view in a window that isn't 4:3 (Tome > Settings)",
-    {},  // the same on every build
+    "keeps the picture's proportions in a window that isn't 4:3, showing more at the sides (Tome > Settings)",
+    {},  // the same on every build; the UI part where its symbols are mapped
     kSymbols,
-    nullptr,  // nothing to protect: a mod may adjust the projection after it
+    nullptr,  // nothing to protect: a mod may adjust the projection or the UI after it
     nullptr,  // always installed; the setting is checked every frame
     install_widescreen,
 };

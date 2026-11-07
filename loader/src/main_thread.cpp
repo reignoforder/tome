@@ -19,6 +19,7 @@ UINT g_message = 0;
 KeyHook g_key_hook = nullptr;
 ActivateHook g_activate_hook = nullptr;
 DestroyHook g_destroy_hook = nullptr;
+SizeHook g_size_hook = nullptr;
 std::atomic<uint32_t> g_client_size{0};  // width in the low half, height in the high half
 
 void store_client_size(uint32_t width, uint32_t height) {
@@ -49,7 +50,10 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) 
     if ((msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) && g_key_hook && g_key_hook(msg, wparam, lparam)) return 0;
     if (msg == WM_ACTIVATEAPP && g_activate_hook) g_activate_hook(wparam != 0);
     if (msg == WM_DESTROY && g_destroy_hook) g_destroy_hook();
-    if (msg == WM_SIZE) store_client_size(LOWORD(lparam), HIWORD(lparam));
+    if (msg == WM_SIZE) {
+        store_client_size(LOWORD(lparam), HIWORD(lparam));
+        if (g_size_hook) g_size_hook();
+    }
     return g_unicode ? CallWindowProcW(g_original_proc, hwnd, msg, wparam, lparam)
                      : CallWindowProcA(g_original_proc, hwnd, msg, wparam, lparam);
 }
@@ -107,6 +111,10 @@ void set_activate_hook(ActivateHook hook) {
 
 void set_destroy_hook(DestroyHook hook) {
     g_destroy_hook = hook;
+}
+
+void set_size_hook(SizeHook hook) {
+    g_size_hook = hook;
 }
 
 void post(std::function<void()> fn) {

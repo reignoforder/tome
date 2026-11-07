@@ -80,7 +80,20 @@ Everything below is about 1.27b; RVAs in this document are 1.27b's.
   COptionsMenu::Save (`0x55F4E0`, the third call of the OK handler
   `0x55FAA0`, as in 1.27b's) and Scheduler::SetPeriod (`0x62B040`, called
   only by Options::ApplyValue's maxfps case).
-- **Not mapped (no use in Tome):** CBattleNetGateways::LoadRegistry,
+- **The 2D UI's coordinates** (widescreen): the six conversions are at
+  `0x4C6480` (NDCToDDC), `0x4C64B0` (NDCToDDCRect), `0x4C64E0` (DDCToNDC),
+  `0x4C6510` (DDCToNDCRect), `0x4C6540` (DDCToNDCWidth) and `0x4C6580`
+  (NDCToDDCWidth), the heights' twins after each Width one. x87: they
+  `fmul`/`fdiv QWORD` by doubles, `DDCWidth` `0x8768B0` (0.8f widened,
+  `0x3FE99999A0000000`) and 0.6 at `0x93C218`; the Rect forms load the 0.8
+  once (`fld QWORD`, then `fmul st(1),st`). Found from
+  `CScreenFrame::UpdateScreenRect` (`0x60A140`, the layout vtable's slot
+  `+0x4` as in 1.27b), which calls NDCToDDCRect. `C44Matrix::Ortho` is
+  `0x7B6250` (`ret 0x18`, called by the sprite camera's setup `0x4E7010`),
+  `CScreenFrame::GetCurrent` `0x60A030` (`.data 0xACE754`, set once by
+  `0x60A210`), `CInfoPanel.inventory_cover` `+0x14C` (stored before the
+  `SetPointAbsolute` call at `0x371615`).
+- **Not mapped (no use in Tome):** CSpriteFrame.view, CBattleNetGateways::LoadRegistry,
   CSlider::SetValue, CameraPresets (not a table in 1.26a), CrashHandler::*,
   CGxDeviceD3d::WndProc.
 
@@ -1364,6 +1377,86 @@ WorldView::SetupCamera runs, or CSpriteFrame::SetupCamera for the world
 frame (part of the `0x0F64E0` count above). That one uses the world
 frame's rect, not WorldView's, but the same (4/3) / window aspect applies:
 the UI space is stretched the same way whatever the rect.
+
+### The 2D UI's coordinates (for the widescreen patch)
+
+UI units ("DDC": 0.8 x 0.6) become the screen's 0..1 ("NDC") through eight
+small functions that divide or multiply by the constants at `.rdata
+0xAA9328` (0.8) and `0xAA9324` (0.6): `DDCToNDCRect` `0x8B37A0` and
+`NDCToDDCRect` `0x8B3850` (fastcall `(in, out)`, rects `{left, bottom,
+right, top}`, plain ret), `DDCToNDC` `0x8B37F0` and `NDCToDDC` `0x8B38A0`
+(fastcall `(x_out, y_out, x, y)`, either out may be null, `ret 8`),
+`DDCToNDCWidth` `0x8B3840` and `NDCToDDCWidth` `0x8B38F0` (stdcall, st0,
+`ret 4`), and the heights' twins `0x8B3830`, `0x8B38E0`. Giving the x ones
+the window's width in UI units (0.6 x aspect) makes the UI square and the
+root the whole window; text and the mouse follow. The x ones read 0.8 through
+one `[disp32]` operand each (two in the Rect forms; `DDCWidth` in the
+mapping), which the widescreen patch points at its own float. About a dozen places read
+0.8 inline (`0x2B5873`, `0x363AB6`, `0x374DA2`, `0x3D9536`, ...); the ones
+checked clamp tooltips to the screen or pick a color, nothing that lays out.
+
+- **Roots.** `CScreenFrame::UpdateScreenRect` (`0x11DFF0`) sets a screen
+  frame's rect to `NDCToDDCRect({0, 0, 1, 1})` (`.rdata 0xA8DD90`) through
+  the layout's vtable `+0xC`. It's slot `+0x4` of the *layout's* vtable
+  (`this` = frame + `CFrame.layout`; `CScreenFrame` `0xA8DD24`, also
+  `CGlueMgr` and `CGameUI`), which is `+0xEC` of the frame's primary vtable
+  read past its end: calling it there passes the wrong `this`.
+  `CScreenFrame::GetCurrent` (`0x11DD60`) returns the current screen frame
+  (`.data 0xD47BB4`, set by `0x11E060`; the game UI sets itself at
+  `0x36FFA9`).
+- **Orthographic projections.** `C44Matrix::Ortho` (`0x126D50`, thiscall
+  `(m, left, right, bottom, top, near, far)`, `ret 0x18`). The UI's own 2D
+  pass builds `(0, 0.8, 0, 0.6, 0, 500)` at `0x193532` once per frame;
+  `0x12A3F0` builds pixel-space ones (`0, width, 0, height`). A sprite
+  frame's flat camera (`0x1ADDFC`, in CCamera::SetupProjection) is centered
+  on its view: `CSpriteFrame.view` (`+0x12C`, `{x0, y0, height, width}`, the
+  whole screen for menu models) gives `(-width/2, width/2, -0.3, 0.3)`, and
+  the eye sits at the view's middle, so a model made for 0..0.8 lands at
+  0..0.8 of a wider screen (the loading screen squeezed to the left).
+  `(-width/2, 0.8 - width/2)` stretches it across as the game draws it.
+- **Points.** A point is an object with a vtable: one relative to a frame
+  (made by `0x11E3C0`) holds the relative `CLayoutFrame*` at `+4`, the
+  relative point at `+8`, x and y at `+0xC`, `+0x10`; one relative to the
+  screen (`0x11E380`, from `CLayoutFrame::SetPointAbsolute` `0x111590`,
+  `thiscall(point, x, y, update)`) holds x at `+4`, so it can't be read as
+  the other kind. The in-game callers of `0x111590`: the inventory cover
+  (`0x39E94A`) and tooltips clamped to the screen (`0x392707`, `0x395AC2`,
+  `0x395B23`, `0x3C948C`). The two kinds' vtables: `0xA8DDD0` relative to
+  a frame (`CLayoutFrame.relative_point_vtable`), `0xA8DDBC` relative to
+  the screen; 1.26a `0x97076C` (`0x629490`) and `0x970758` (`0x629460`).
+  Slot `+0xC` returns which kind (the pool it goes back to, `0x11E300`).
+- **The console** (`UI\FrameDef\UI\ConsoleUI.fdf`): nine `CSimpleTexture`
+  regions anchored to the console, the race's tiles `ConsoleTexture01..04`
+  (512 x 512, the fourth 64 wide, drawn 0.256 and 0.032 wide). Top: tile 1 at
+  TOPLEFT 0, tile 2's first 0.087 at 0.256, its last 0.053 at TOPRIGHT
+  -0.288, tile 3 at -0.032, tile 4 at 0. Bottom: tile 1 at BOTTOMLEFT 0, tile
+  2's lower part (from v 0.4140625, 0.15 high) at 0.256, tile 3 at BOTTOMRIGHT
+  -0.032, tile 4 at 0, all others from v 0.3125, 0.176 high. A texture's
+  coordinates are at `+0xC4`, eight floats (u, v of each corner). In the
+  art: tile 1 is the minimap's box and buttons, a pillar, and the portrait's
+  arch from u 0.82; tile 2 the arch's end and the info panel's opening; tile
+  3 the inventory's six slots (to u 0.31), wall and the command card's
+  frame. A width of 0, or clearing a region's points, doesn't stop it
+  drawing where it was; moving it does.
+- **Where the console's parts hang** (at 4:3): the command card at the
+  console's BOTTOMRIGHT -0.0074; the info panel (`CInfoBar`) at its
+  BOTTOMLEFT 0.3094, the inventory's buttons on the info panel's TOPRIGHT
+  +0.0188; the inventory's cover (`CInfoPanel.inventory_cover`, `+0x14C`,
+  0.128 x 0.175) with its BOTTOMRIGHT at x 0.6 of the screen; the life and
+  mana text (made at `0x3D9128` with the first selection, the font string at
+  `+0x240` of its owner) at the console's BOTTOMLEFT (0.2145, 0.0283); the
+  minimap's buttons at its BOTTOMLEFT 0.1544; the portrait (`CPortraitButton`)
+  at its layer's BOTTOMLEFT 0.2075; the clock (`CTimeOfDayIndicator`) at its
+  layer's BOTTOMLEFT (0, 0), its model drawn at the top middle from there; the
+  clock's cover at its layer's TOP; the chat box from BOTTOMLEFT 0.2 to
+  BOTTOMRIGHT -0.2; two strings at the resource bar's TOPRIGHT -0.417 and
+  -0.3613 (under the clock).
+- **Menus** are full-screen sprite models (`MainMenu.fdf`'s `MainMenuFrame`
+  fills the root; the panels, chains and background are models in frames
+  that fill it) with frames on them; the logo and the buttons' faces are
+  models with their own extent. On the loading screen (`Loading.fdf`) the
+  background and the bar (`LoadingBar`, held by its BOTTOMLEFT only) are
+  such models.
 
 ## Crash handler
 

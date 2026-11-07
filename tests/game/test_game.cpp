@@ -9,6 +9,7 @@
 #include "harness.h"
 #include "test.h"
 
+#include "core/widescreen.h"
 #include "events.h"
 #include "frames.h"
 #include "game_build.h"
@@ -25,6 +26,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 using host::Home;
 using host::Session;
@@ -102,7 +104,7 @@ TEST(game_startup_patches_apply) {
     if (name == "1.27b") CHECK(report.rfind(" applied, 0 skipped: ", std::string::npos) != std::string::npos);
     for (const char* patch : {"memhack-guard", "path-sanitizer", "blp-guard", "d3d-reset-lights", "gl-context-restore",
                               "background-mute", "widescreen", "ambient-sound", "movie-display-reset",
-                              "movie-frame-length"}) {
+                              "movie-frame-length", "execute-func-guard", "global-string-guard"}) {
         const std::string applied = std::string(patch) + " applied";
         const std::string unmapped = std::string(patch) + " skipped (" + name + " has no mapping for ";
         const std::string not_for = std::string(patch) + " skipped (not for " + name + ": ";  // its variant says why
@@ -112,6 +114,30 @@ TEST(game_startup_patches_apply) {
         }
     }
     CHECK(report.find("failed") == std::string::npos);
+    {
+        // The widescreen patch's 2D part (1.27b, 1.26a): the conversions read
+        // Tome's width, not the game's 0.8, which stays as it was (other code
+        // reads it); and CreateJassString calls the string guard.
+        if (report.find("the UI's proportions") == std::string::npos) test::fail(__FILE__, __LINE__, "widescreen: " + report);
+        const uintptr_t ddc_width = base + known.widescreen.ddc_width;
+        for (const char* conversion : {"DDCToNDCRect", "NDCToDDCRect", "DDCToNDC", "NDCToDDC", "DDCToNDCWidth",
+                                       "NDCToDDCWidth"}) {
+            std::vector<size_t> at;
+            CHECK(tome::widescreen::constant_operands(
+                reinterpret_cast<const uint8_t*>(base + known.data->find(conversion)->value), 0x60,
+                static_cast<uint32_t>(ddc_width), at));
+            if (!at.empty()) test::fail(__FILE__, __LINE__, std::string(conversion) + " still reads DDCWidth");
+        }
+        uint32_t low = 0, high = 0;
+        std::memcpy(&low, reinterpret_cast<const void*>(ddc_width), 4);
+        std::memcpy(&high, reinterpret_cast<const void*>(ddc_width + 4), 4);
+        CHECK(low == 0x3F4CCCCDu || (low == 0xA0000000u && high == 0x3FE99999u));  // 0.8f, or 0.8f as a double
+        const uintptr_t call = base + known.strings.create_string_call;
+        int32_t rel = 0;
+        std::memcpy(&rel, reinterpret_cast<const void*>(call + 1), 4);
+        CHECK(*reinterpret_cast<const uint8_t*>(call) == 0xE8);
+        CHECK(call + 5 + rel != base + known.strings.create_string);
+    }
     if (report.find("unclamped") != std::string::npos) test::fail(__FILE__, __LINE__, "BLP header copy: " + report);
     if (report.find("gamma ramp left") != std::string::npos || report.find("gamma restore left") != std::string::npos) {
         test::fail(__FILE__, __LINE__, "movie gamma: " + report);

@@ -32,6 +32,8 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
+#include <vector>
 
 namespace tome::events {
 
@@ -64,6 +66,13 @@ uint32_t control_clicks();
 void dispatch_for_test(tome_event_info info);
 // The fields a real event of that kind starts from (size set, players -1, strings "").
 tome_event_info default_info_for_test(int32_t event);
+
+// Called at each map load (the loading screen) with the scripts read for the
+// map script guard: war3map.j (null if it couldn't be read) and the prelude,
+// common.j and Blizzard.j (the map's own copies first; those that could be
+// read). Main thread. One hook (patches/execute_func_guard.cpp).
+using MapScriptHook = void (*)(const std::string* script, const std::vector<std::string_view>& prelude);
+void set_map_script_hook(MapScriptHook hook);
 
 // Shows a message in the game's message area. False outside a game.
 bool display_text(const std::string& text, float seconds);

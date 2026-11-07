@@ -137,6 +137,7 @@ add_library(tome_core STATIC
     src/core/jass.cpp
     src/core/json.cpp
     src/core/keys.cpp
+    src/core/log_guard.cpp
     src/core/log_view.cpp
     src/core/main_menu_fdf.cpp
     src/core/mappings.cpp
@@ -207,7 +208,9 @@ add_library(tome_runtime OBJECT
     src/patches/background_mute.cpp
     src/patches/blp_guard.cpp
     src/patches/d3d_reset_lights.cpp
+    src/patches/execute_func_guard.cpp
     src/patches/gl_context_restore.cpp
+    src/patches/global_string_guard.cpp
     src/patches/memhack_guard.cpp
     src/patches/movie_frame_length.cpp
     src/patches/movie_display_reset.cpp

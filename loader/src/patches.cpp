@@ -19,6 +19,8 @@ extern const Patch kWidescreen;
 extern const Patch kAmbientSound;
 extern const Patch kMovieDisplayReset;
 extern const Patch kMovieFrameLength;
+extern const Patch kExecuteFuncGuard;
+extern const Patch kGlobalStringGuard;
 
 const Patch* const kAll[] = {
     &kMemhackGuard,
@@ -31,6 +33,8 @@ const Patch* const kAll[] = {
     &kAmbientSound,
     &kMovieDisplayReset,
     &kMovieFrameLength,
+    &kExecuteFuncGuard,
+    &kGlobalStringGuard,
 };
 
 namespace {

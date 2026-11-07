@@ -640,7 +640,12 @@ calls: a mod's own threads, the game's code, Tome's own code.
   enabled or not**, from `tome.mod.json` `"natives"`.
 - After each InitNatives, Tome binds all of them with the game's BindNative.
 - Built-ins: `TomeIsLoaded`, `TomeLogInteger`, `TomeLogString`, and the
-  frame natives below.
+  frame natives below. A map's log lines are untrusted: each map load logs
+  at most 1000 of them (then one line saying the rest aren't, and at the next
+  map load how many weren't), and a string is cut to 1000 bytes with its
+  control characters replaced by `?`, so it can't forge a line
+  (`core/log_guard.*`). `tome.log` itself stops taking info and debug lines
+  at 32 MiB and everything at 33 MiB, with a notice the first time.
 
 ### Strings and code (API version 6)
 
@@ -1080,20 +1085,61 @@ reason to make a fix a patch rather than ship it as a mod.
   the slots; `RestoreState` enables them again. Skipped outside Wine
   (`needed`). Reserves nothing.
 - **widescreen** (`patches/widescreen.cpp`, `docs/known-bugs.md`,
-  "Stretched picture on widescreen"): the world view is built for 4:3 and
-  stretched to any other window shape. An AFTER handler on
-  `C44Matrix::Perspective` scales the projection's x term (or, narrower
-  than 4:3, its y term) by the client area's aspect against 4:3
-  (`core/widescreen.*`, unit-tested), so more of the map shows instead.
-  Only while `WorldView::SetupCamera` runs, or `CSpriteFrame::SetupCamera`
-  for the world frame (`CGameUI.world_frame`: unit picking builds its own
-  projection there) (BEFORE/AFTER handlers on both):
-  3D models in UI frames and the main menu's 3D background stay as they
-  are, matching their stretched 2D art. The window size comes from
-  `main_thread::client_size` (kept from `WM_SIZE`), not a call per frame.
-  The player can turn it off (Tome >
-  Settings > Widescreen, on by default); it's checked every frame. Only
-  the 3D view: the UI is still stretched. Reserves nothing.
+  "Stretched picture on widescreen"; addresses in `docs/reverse-engineering.md`,
+  "The 2D UI's coordinates"): 1.27b lays everything out for 4:3 and stretches
+  it to the window. Two parts.
+  - The 2D UI, where its symbols are mapped (1.27b and 1.26a; otherwise
+    skipped and reported). The six UI-to-screen conversions (`DDCToNDC`,
+    `NDCToDDC` and their `Rect` and `Width` forms, which divide or multiply x
+    by the 0.8 at `DDCWidth`) get the window's width in UI units instead
+    (`widescreen::ui_width`: 0.6 x the aspect): their `[disp32]` operands
+    (found by `widescreen::constant_operands`, one or two per function: eight
+    on 1.27b, six on 1.26a) point at a float of Tome's (1.27b), or a double
+    (1.26a's x87 code reads 0.8f widened to a double), set on each new screen and each `WM_SIZE`
+    (`main_thread::set_size_hook`), so they run as the game's code with no
+    hook; `DDCWidth` itself stays (other code reads it). UI units are square and the
+    root is the whole window: every frame and text keeps its shape, frames
+    anchored to the screen's edges go to the window's edges (1.29's layout),
+    and the mouse follows. In a game, `follow_ui` lays the rest out again on
+    every frame (from the world camera's setup): the console's bottom tiles go
+    off the screen (moved by -10; neither a width of 0 nor clearing their
+    points stopped them drawing) and Tome's pieces replace them
+    (`widescreen::console_layout`, `console_fdf`, unit-tested: SIMPLEFRAMEs
+    from `UI\FrameDef\UI\TomeWideConsole.fdf` in Tome's overlay, made with
+    `CreateSimpleFrame` as the console's children, shown and hidden with it);
+    whatever the game put in the middle of a 4:3 screen moves to the middle
+    (frames on the bottom corners of the console, the second console and the
+    portrait's and minimap's layers between x 0.19 and 0.61 at 4:3, the clock,
+    two strings off the resource bar, the inventory cover, which the game
+    places on the screen rather than on a frame and gets re-anchored); each
+    change is made from what the game last set, so nothing moves twice and
+    what the game builds later (the life and mana text) is caught. The
+    middle moves only once the console's four bottom tiles are found: a map
+    with its own `ConsoleUI.fdf` (no such tiles after 30 frames) keeps its
+    console and middle as it made them. Points are read only if they're
+    relative to a frame (`CLayoutFrame.relative_point_vtable`; one relative
+    to the screen holds x where the frame would be). In the
+    menus and the loading screen, full-screen models (a sprite frame whose
+    corners are its parent's, up to the root; `fills_parent`) get the game's
+    0.8 across their flat camera (BEFORE `C44Matrix::Ortho`), so they're
+    stretched as the game draws them and the frames on them line up. Roots
+    take the screen's width again before and after `CGlueMgr::SetScreen` and,
+    in a game, after the setting changes (`CLayoutFrame.vtable.UpdateScreenRect`).
+  - The 3D view. With the 2D part the world frame is the window's shape and
+    its camera follows. Otherwise (not mapped, or narrower than 4:3) an AFTER
+    handler on `C44Matrix::Perspective` scales the projection's x term (or,
+    narrower than 4:3, its y term) by the client area's aspect against 4:3
+    (`core/widescreen.*`), only while `WorldView::SetupCamera` runs or
+    `CSpriteFrame::SetupCamera` for the world frame (unit picking), so more of
+    the map shows instead.
+
+  The window size comes from `main_thread::client_size` (kept from
+  `WM_SIZE`). The player can turn it off (Tome > Settings > Widescreen, on by
+  default). The 2D part latches the setting at each `CGlueMgr::SetScreen`
+  and follows from the next screen (the next menu screen, or the next game):
+  text is laid out as it's made and keeps that layout, so changing the width
+  under it scrambled the top bar. The 3D-only fallback follows every frame.
+  At 4:3 nothing changes. Reserves nothing.
 - **gl-context-restore** (`patches/gl_context_restore.cpp`,
   `docs/known-bugs.md`, "Under Wine"): with the OpenGL renderer in
   fullscreen under Wine, coming back from Alt+Tab leaves most textures
@@ -1174,6 +1220,33 @@ reason to make a fix a patch rather than ship it as a mod.
   `INT32_MIN` or REPLACE handler still runs later). It reserves nothing — the threat is
   malicious maps, not mods, and a mod is native code that bypasses any API
   boundary anyway, so reserving `BindNative` would only cost mods a useful hook.
+- **execute-func-guard** (`patches/execute_func_guard.cpp`,
+  `docs/known-bugs.md`): `ExecuteFunc` runs a function with no arguments, so
+  naming one that takes parameters (the map's own or Blizzard.j's) crashes
+  the game in the JASS VM. The same `BindNative` substitution as the path
+  sanitizer binds a wrapper for `ExecuteFunc`. At each map's loading screen
+  it takes the scripts the map script guard reads there (`war3map.j` or
+  `scripts\war3map.j`, `Scripts\common.j`, `Scripts\Blizzard.j` through Storm;
+  `events::set_map_script_hook`), so a big map's scripts are parsed under the
+  loading screen rather than mid-game, and collects the functions that take
+  parameters (`jass::functions_taking_parameters`, unit-tested and fuzzed).
+  Without the events (not mapped) it reads them itself on its first call in
+  each map (`natives::map_load_count`). A call naming one is refused (nothing runs, as for
+  a missing name, which the game already ignores) and logged, the first 20
+  and then every 1000th. If the map's script can't be read, calls go through
+  unchecked. Reserves nothing.
+- **global-string-guard** (`patches/global_string_guard.cpp`,
+  `docs/known-bugs.md`): a native returning a string (`I2S`,
+  `GetLocalizedString`, ...) in a global's initial value crashes the map
+  load: `CreateJassString` adds the string to the VM's table, and while the
+  globals block runs `JassVM::Get(CGameWar3.vm_index)` is still null.
+  `CreateJassString`'s call to `CGameWar3::CreateString`
+  (`CreateJassString.call.create_string`, `patch_call`: no hook on a path
+  every string native takes) goes to a check that makes the same lookup
+  (`JassVM::Get`, `JassVM.strings`) and, with no game, VM or string table,
+  returns 0, the null string; otherwise it calls `CreateString`. The call's
+  byte is `??` in `CreateJassString`'s mapped bytes, so mods can still hook
+  it (their handlers run before the check). Reserves nothing.
 
 ## Multiplayer handshake
 

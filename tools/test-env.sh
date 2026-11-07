@@ -43,8 +43,14 @@ HEADLESS="${HEADLESS:-0}"
 SOUND="${SOUND:-$([[ "$HEADLESS" == 1 ]] && echo 0 || echo 1)}"
 export WINEPREFIX="$TEST_PREFIX" WINEDEBUG="${WINEDEBUG:--all}"
 # The game's resolution in the test prefix; Xvfb's screen is a bit bigger,
-# since there's no window manager to place the window.
-TEST_WIDTH=800 TEST_HEIGHT=600
+# since there's no window manager to place the window. The game fills that
+# screen, so TEST_WIDTH/TEST_HEIGHT also pick its shape for a headless game
+# (e.g. TEST_WIDTH=1056 TEST_HEIGHT=552: a 1280 x 720 screen, 16:9). They go
+# into the registry at each launch (env_resolution, env_registry_pristine),
+# not into the prefix: its fresh registry is always 800 x 600.
+TEST_SIZE_GIVEN=$([[ -n "${TEST_WIDTH:-}${TEST_HEIGHT:-}" ]] && echo 1 || echo 0)
+TEST_WIDTH="${TEST_WIDTH:-800}" TEST_HEIGHT="${TEST_HEIGHT:-600}"
+VIDEO_KEY='HKCU\Software\Blizzard Entertainment\Warcraft III\Video'
 
 env_die() { echo "test-env: $*" >&2; exit 2; }
 
@@ -79,7 +85,7 @@ env_prefix() {
         '[HKEY_CURRENT_USER\Software\Blizzard Entertainment\Warcraft III\String]' \
         '"userlocal"="Tome"' '' \
         '[HKEY_CURRENT_USER\Software\Blizzard Entertainment\Warcraft III\Video]' \
-        "\"reswidth\"=dword:$(printf %08x $TEST_WIDTH)" "\"resheight\"=dword:$(printf %08x $TEST_HEIGHT)" \
+        '"reswidth"=dword:00000320' '"resheight"=dword:00000258' \
         '"colordepth"=dword:00000020' '' \
         '[HKEY_CURRENT_USER\Software\Blizzard Entertainment\Warcraft III\Misc]' \
         '"seenintromovie"=dword:00000001' '' \
@@ -223,13 +229,24 @@ env_stop() {
 env_registry_save() { env_stop; cp "$TEST_PREFIX/user.reg" "$1"; }
 env_registry_load() { env_stop; cp "$1" "$TEST_PREFIX/user.reg"; }
 
+# env_resolution: the game's resolution in the prefix's registry, TEST_WIDTH
+# x TEST_HEIGHT. Stop Wine after it (env_stop) before starting the game on
+# another display.
+env_resolution() {
+    wine reg add "$VIDEO_KEY" /v reswidth /t REG_DWORD /d "$TEST_WIDTH" /f >/dev/null 2>&1 &&
+        wine reg add "$VIDEO_KEY" /v resheight /t REG_DWORD /d "$TEST_HEIGHT" /f >/dev/null 2>&1 ||
+        env_die "couldn't set the game's resolution"
+}
+
 # env_registry_pristine <file> [reg add args...]...: writes to <file> the
-# fresh registry with these values set (each a "key|name|type|data").
+# fresh registry with these values set (each a "key|name|type|data") and
+# the resolution (env_resolution).
 env_registry_pristine() {
     local out="$1" item key name type data
     shift
     [[ -f "$TEST_PREFIX/user.reg.pristine" ]] || env_die "the prefix has no registry snapshot; delete $TEST_PREFIX"
     env_registry_load "$TEST_PREFIX/user.reg.pristine"
+    env_resolution
     for item in "$@"; do
         IFS='|' read -r key name type data <<<"$item"
         wine reg add "$key" /v "$name" /t "$type" /d "$data" /f >/dev/null 2>&1 || env_die "couldn't set $key\\$name"

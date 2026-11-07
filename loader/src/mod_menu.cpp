@@ -4,6 +4,7 @@
 #include "core/frames.h"
 #include "core/hash.h"
 #include "core/main_menu_fdf.h"
+#include "core/widescreen.h"
 #include "core/mod_menu_model.h"
 #include "core/popup.h"
 #include "core/tome_settings.h"
@@ -601,8 +602,9 @@ void build_overlay() {
     g_overlay_ready = overlay::put_generated({
         {ui::kModMenuFdfPath, ui::mod_menu_fdf(chains_model())},
         {popup::kFdfPath, popup::popup_fdf()},
-        {"UI\\FrameDef\\Tome.toc",
-         std::string(ui::kModMenuFdfPath) + "\r\n" + popup::kFdfPath + "\r\n\r\n"},
+        {widescreen::kConsoleFdfPath, widescreen::console_fdf()},
+        {"UI\\FrameDef\\Tome.toc", std::string(ui::kModMenuFdfPath) + "\r\n" + popup::kFdfPath + "\r\n" +
+                                          widescreen::kConsoleFdfPath + "\r\n\r\n"},
     });
     if (!g_overlay_ready) TOME_ERROR("Mod menu: the overlay archive couldn't be mounted");
 }

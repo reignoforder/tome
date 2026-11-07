@@ -422,6 +422,9 @@ bool handle_chat(const char* text) {
 // --- hook handlers ---------------------------------------------------------------------
 // Tome's own handlers: no mod, no gate.
 
+MapScriptHook g_map_script_hook = nullptr;
+constexpr size_t kMaxMapScript = 64u << 20;
+
 // Built-in map-script guard (docs/known-bugs.md): warns when the loading map's
 // war3map.j declares a `local` that shadows a `global` of a different type --
 // the local/global name-shadowing typecast ("memhack"/ACE) pattern. The
@@ -431,19 +434,21 @@ bool handle_chat(const char* text) {
 void check_map_script() {
     g_script_shadows.clear();
     std::string script;
+    std::vector<std::string_view> prelude;
     // Storm is otherwise only bound once a mod mounts assets; init is idempotent.
-    if (!tome::storm::init()) return;
     // The game also accepts the script under scripts\ (protected maps use it).
-    if ((!tome::storm::read_file("war3map.j", script) || script.empty()) &&
-        (!tome::storm::read_file("scripts\\war3map.j", script) || script.empty())) {
+    if (!tome::storm::init() ||
+        ((!tome::storm::read_file("war3map.j", script, kMaxMapScript) || script.empty()) &&
+         (!tome::storm::read_file("scripts\\war3map.j", script, kMaxMapScript) || script.empty()))) {
+        if (g_map_script_hook) g_map_script_hook(nullptr, prelude);
         return;
     }
     // The map's script is compiled after these, so it can shadow their
     // globals too. Read through Storm, a map's own copies come first.
     std::string common, blizzard;
-    std::vector<std::string_view> prelude;
-    if (tome::storm::read_file("Scripts\\common.j", common)) prelude.push_back(common);
-    if (tome::storm::read_file("Scripts\\Blizzard.j", blizzard)) prelude.push_back(blizzard);
+    if (tome::storm::read_file("Scripts\\common.j", common, kMaxMapScript)) prelude.push_back(common);
+    if (tome::storm::read_file("Scripts\\Blizzard.j", blizzard, kMaxMapScript)) prelude.push_back(blizzard);
+    if (g_map_script_hook) g_map_script_hook(&script, prelude);
     TOME_DEBUG("Map script guard: scanning war3map.j (%zu bytes, %zu prelude script(s))", script.size(),
                prelude.size());
     std::vector<tome::jass::ShadowFinding>& findings = g_script_shadows;
@@ -1402,6 +1407,10 @@ void dispatch_for_test(tome_event_info info) {
 
 tome_event_info default_info_for_test(int32_t event) {
     return make_info(event, 0);
+}
+
+void set_map_script_hook(MapScriptHook hook) {
+    g_map_script_hook = hook;
 }
 
 bool display_text(const std::string& text, float seconds) {

@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // A map script (war3map.j, from a downloaded map) through the shadow
-// scanner, and native declarations (from tome.mod.json) through parse_native.
+// scanner and functions_taking_parameters, and native declarations (from tome.mod.json) through parse_native.
 #include "core/jass.h"
 
 #include <cstddef>
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 
 using namespace tome::jass;
 
@@ -18,6 +19,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     std::vector<std::string_view> prelude;
     if (nl != std::string_view::npos) prelude.push_back(script.substr(0, nl));
     scan_shadow_exploit(script, findings, prelude);
+    std::unordered_set<std::string> taking;
+    functions_taking_parameters(script, taking);
 
     NativeDecl decl;
     std::string error;

@@ -93,6 +93,39 @@ TEST(host_natives_bound_and_called) {
     CHECK(session.game.native("TomeIsLoaded") != nullptr);
 }
 
+// A map's TomeLogString can't forge tome.log lines or fill it: control
+// characters become '?', a long string is cut, and each map load logs at most
+// 1000 of its lines (docs/known-bugs.md, "Tome's own surface").
+TEST(host_map_log_natives_are_cleaned_and_capped) {
+    Home home;
+    Session session;
+    CHECK(session.start(home));
+    session.game.load_map();
+    using StringNative = int32_t (*)(uint32_t);
+    auto log_string = reinterpret_cast<StringNative>(session.game.native("TomeLogString"));
+    auto log_integer = reinterpret_cast<Native1>(session.game.native("TomeLogInteger"));
+    CHECK(log_string && log_integer);
+    if (!log_string || !log_integer) return;
+
+    log_string(host::FakeGame::string_arg("a\r\n[00:00:00.000] [    1] [ERROR] forged"));
+    CHECK_LOG("[map] TomeLogString(\"a??[00:00:00.000] [    1] [ERROR] forged\")");
+    log_string(host::FakeGame::string_arg(std::string(3000, 'x').c_str()));
+    CHECK_LOG("[map] TomeLogString(\"" + std::string(1000, 'x') + "...\")");
+    CHECK_NO_LOG(std::string(1001, 'x'));
+
+    // Two lines so far: 998 more, then one saying the rest aren't logged.
+    for (int i = 0; i < 1100; ++i) log_integer(i);
+    CHECK_LOG("[map] TomeLogInteger(997)");
+    CHECK_NO_LOG("[map] TomeLogInteger(998)");
+    CHECK_LOG("[map] logged 1000 lines: the rest of this map's");
+
+    // The next map starts over, and hears how many the last one lost.
+    session.game.load_map();
+    CHECK_LOG("[map] 102 lines of the last map weren't logged");
+    log_integer(-5);
+    CHECK_LOG("[map] TomeLogInteger(-5)");
+}
+
 // Once a map loads the fake has a game instance; what Tome reads of its
 // players (the selection API, names) is "none", not a jump into the zeroed
 // rest of CGameWar3::GetPlayer.

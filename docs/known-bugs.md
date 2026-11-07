@@ -319,16 +319,54 @@ older versions ([BNETDocs](https://bnetdocs.org/news/105/warcraft-iii-1-27a-patc
 ## JASS natives that crash or misbehave
 
 *Forum*, from the [natives list](https://www.hiveworkshop.com/threads/producer-update-natives-list.301405/)
-and crash threads. Which patch each was observed on isn't confirmed.
+and crash threads. **Checked on 1.27b in game (Nov 2026)**, one small map
+per report (a melee map whose script runs the case a second into the game):
 
-- Assigning `GetLocalizedString` to a `constant` variable crashes.
-- Destroying a trigger whose threads are still waiting can corrupt the
-  handle stack and often crashes.
-- `MultiboardSetRowCount` is only safe when changing the count by one
-  at a time.
-- `CreateQuest` during map initialization can crash.
-- `SetItemPosition` crashes in some situations (`CreateItem` plus
-  `RemoveItem` is the reported workaround).
+| Report | On 1.27b | Fix |
+| --- | --- | --- |
+| `ExecuteFunc` naming a function that takes parameters | **Crashes**: access violation reading `0x21` at game.dll+`0x91B5EA` (the VM reads arguments nobody pushed). Blizzard.j functions too (`ClearTextMessagesBJ`) | **execute-func-guard** refuses the call |
+| `ExecuteFunc` with a missing name, a native's name, or a function that returns a value | Fine: the first two are ignored, the last runs | — |
+| `GetLocalizedString` in a `constant` global | **Crashes** while the map loads (reading `0x2858` at game.dll+`0x91AF8B`). Not `constant` nor `GetLocalizedString` in particular: any native returning a string in any global's initial value (`I2S` too). Integer natives there are fine | **global-string-guard**: the string is null instead |
+| Destroying a trigger whose threads are waiting | Fine: the waiting threads resume and finish | — |
+| `MultiboardSetRowCount` changed by more than one | Fine: 1 → 12 → 1, 0 rows and columns, 30 × 9, an item kept from a removed row | — |
+| `CreateQuest` during map initialization | Fine (in `main`, before `InitBlizzard`) | — |
+| `SetItemPosition` | Fine on a held item, a removed one, off the map and a dead owner's | — |
+
+The two crashes: `ExecuteFunc` (`0x1FE090`) looks the name up
+(`0x1DD520` → `0x915F60`) and runs it in a new thread with no arguments.
+Every native that returns a string goes through `CreateJassString`
+(`0x1F7F60` → `0x1DD4B0` → `0x90C760`), which adds the text to the table of
+`JassVM::Get(CGameWar3.vm_index)`; while the globals block runs, that VM is
+still null, and `0x91AF80` reads `[vm + JassVM.strings]`. Both patches:
+`architecture.md`, "Patches".
+
+## Command card button positions
+
+1.28's note ("Fixed command cards to be hidden again with special coordinates
+(0, -11) and (-2147483648, -2147483648) within CommandFunc.txt; invalid
+coordinates will now be ignored") and a Blizzard post from Dec 2016 ("We
+intended to fix all the negative coordinates that cause maps to crash")
+describe two bugs, and only one is in 1.27b. **Checked in game (Nov 2026)**,
+with `Buttonpos` values in `CustomKeys.txt` of (-1, 0), (-5, -5), (9, 0),
+(0, 7), (-100, 2) and (100000, 100000): no crash.
+
+- **1.27b:** every setter of a button's position stores x only if it's at
+  most 3 and y only if it's at most 2, as unsigned numbers, so negatives are
+  dropped too (`0x3CA1A0`, which `CommandFunc.txt`'s `Buttonpos` reaches
+  through `0x377220`; `0x36B470`; `0x373A90`, `0x373AB0`, `0x373AD0`). A bad
+  value leaves the default: (-100, 2) put the Peasant at (0, 2). The same
+  check drops (0, -11) and (INT_MIN, INT_MIN), the two positions maps used to
+  hide a button, so such a button shows up instead of hiding. 1.28 brought
+  them back.
+- **1.26a:** the setters store any value (`0x2F19E0`, `0x2F1A00`,
+  `0x2F4710`), and the card places a button by indexing its grid with it
+  unchecked (on 1.27b `0x3AA430`: the row array at `[card+0x154]`, 16 bytes
+  a row, the cells at `+8`, 4 bytes each), so a bad position reads outside
+  the grid: the crash Blizzard fixed in 1.27a.
+
+Not fixed in Tome yet. A fix would bring back hiding on 1.27b (let the two
+pairs through the setters and skip placing such a button) and, on 1.26a,
+ignore other bad positions.
 
 ## Stretched picture on widescreen
 
@@ -357,10 +395,40 @@ click area sat further from the middle of the screen than the unit (at
 16:10, a peasant at 75% of the width answered a click about 100 px further
 out, and near the sides off screen, so a building's larger area got the
 click). Checked at 1600 × 1000 on Booty Bay: a click on empty ground there
-selects nothing, and a peasant at 98% of the width selects. **Still open:** the 2D UI
-(console, top bar, command card, minimap) stays stretched, and the
-minimap's camera box keeps its 4:3 size. Like 1.29, a wider window sees more
-of the map in multiplayer.
+selects nothing, and a peasant at 98% of the width selects.
+
+**The 2D UI: fixed in Tome too (Nov 2026, same patch and setting).** The
+game converts UI units to the screen as if it were always 0.8 wide; the
+patch gives those conversions the window's width, so the UI's units are
+square and its root spans the window. Everything 2D keeps its shape (round
+minimap icons, square command buttons, unstretched text), and what the game
+anchors to the screen's edges goes to the window's edges, as in 1.29: the
+minimap and the menu buttons at the left, the resource bar and the command
+card at the right. The console's art is laid out again in pieces (the
+minimap's end at the left edge, the portrait's arch, info panel and inventory
+centered, the command card at the right edge, wall between, and slots in the
+top bar each side of the clock), and the portrait, info panel, life and mana
+text, clock and inventory cover move to the middle. The world view then fills
+the window at its own shape. Clicks land where things are drawn (checked: a
+peasant selected by clicking it, a command card button at 97% of the width).
+The menus and the loading screen keep the game's look: their full-screen
+models (panels, backgrounds) are stretched across the window as the game
+draws them, and the buttons and text on them are in proportion. Checked at
+1280 x 720 on the main menu, Single Player, Options, Custom Game, the loading
+screen and in a game. **Still open:**
+
+- On the loading screen the minimap preview's border (part of the stretched
+  background) is wider than the preview, which keeps its shape; other menu
+  screens may have the same kind of mismatch where a frame sits on art drawn
+  for it.
+- Not mapped for 1.26a yet: there only the 3D view is fixed.
+- Untested with the enhanced-options mod's HUD scale below 100% (both move
+  the console's frames).
+- A minimap camera box that keeps its 4:3 size (unchanged).
+- Changing the setting applies to the 2D UI from the next screen (the next
+  menu screen or game), not at once: text keeps the layout it was made with.
+
+Like 1.29, a wider window sees more of the map in multiplayer.
 
 ## Multiplayer cheating
 
@@ -526,9 +594,11 @@ MIDI device).
    closes the exploit for players who download maps from others.
 2. **Measure the memhack on this build** with a test map, to settle
    whether 1.27b still lets scripts write memory.
-3. **Port the cheap 1.28 crash fixes:** ignore invalid command card
-   coordinates. (Path traversal in `PreloadGenEnd` and every other native that
-   takes a file path is already handled by the path-sanitizer patch, above.)
+3. **Port the 1.28 command card fix:** not a crash on 1.27b, but hiding
+   buttons at (0, -11) and (INT_MIN, INT_MIN) is broken; 1.26a still crashes
+   on bad positions (see "Command card button positions"). (Path traversal
+   in `PreloadGenEnd` and every other native that takes a file path is
+   already handled by the path-sanitizer patch, above.)
 4. **Raise the hashtable and game cache limits** as 1.29.1 did, if a
    mod needs them (it changes game behaviour, so every player needs
    the same mod).
@@ -593,12 +663,13 @@ path, BLP) plus the path-length limits are what exists today.
 
 ### JASS runtime crashes (forum-reported, unverified on 1.27b)
 
-8. `ExecuteFunc` with a missing/parameterized function; destroying a trigger
-   with waiting threads; `MultiboardSetRowCount` jumps; `CreateQuest` during
-   init; `SetItemPosition`; the JASS scanner's long string literal overrun
-   noted above; and the 1.28 command-card coordinate fix (item 3 in the list above).
-   The path sanitizer's `BindNative`-wrapper method covers the native ones
-   cheaply — one table line each.
+8. ~~JASS runtime crashes~~ Checked on 1.27b (Nov 2026): `ExecuteFunc` on
+   a function with parameters and a string native in a global's initial
+   value crash, and are fixed (execute-func-guard, global-string-guard); the
+   other reports don't crash on 1.27b ("JASS natives that crash or
+   misbehave"). Still open: the JASS scanner's long string literal overrun
+   (above) and the command card positions (not a crash on 1.27b; "Command
+   card button positions").
 9. **Other typecasts.** Confirm the memhack guard is the only JASS→memory
    gateway left: check the hashtable `Save*Handle`/`Load*Handle` + `Convert*`
    tricks to see whether loading into a mismatched handle type is refused on
@@ -606,12 +677,13 @@ path, BLP) plus the path-length limits are what exists today.
 
 ### Tome's own surface
 
-10. **`TomeLogString`/`TomeLogInteger` flooding and log forgery.** A map can
-    call these in a loop with no cap, and the map's text is logged raw, so it
-    can fill the disk and forge `[ERROR]` lines (`tome.log` has no size cap in
-    `log.cpp`). Give the map-facing natives a `LogBudget` like the handshake's,
-    replace control characters, and cap `tome.log`. Grow `fuzz_jass` (or a new
-    target) to cover Tome-native arguments (`BlzFrame*`, huge strings, bad ids).
+10. ~~**`TomeLogString`/`TomeLogInteger` flooding and log forgery.**~~ Done
+    (Nov 2026): each map load logs at most 1000 of the map's lines, its
+    strings are cut to 1000 bytes with control characters replaced, and
+    `tome.log` keeps only warnings and errors past 32 MiB, nothing past
+    33 MiB (`core/log_guard.*`, unit and host tests; `architecture.md`,
+    "Natives"). Still open: a fuzz target over Tome-native arguments
+    (`BlzFrame*`, huge strings, bad ids).
 
 ### Process-level mitigations (weigh against the stability-first rule)
 

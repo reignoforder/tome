@@ -655,6 +655,28 @@ bool bind_build(const mappings::Build& build, BuildMappings& out, std::vector<st
 
     auto& widescreen = out.widescreen;  // widescreen's symbols (patches/widescreen.cpp)
     bind_optional("CGameUI.world_frame", Kind::Offset, widescreen.world_frame_offset);
+    bind_optional("CScreenFrame::GetCurrent", Kind::Function, widescreen.screen_get_current);
+    bind_optional("CreateSimpleFrame", Kind::Function, widescreen.create_simple_frame);
+    bind_optional("DDCWidth", Kind::Data, widescreen.ddc_width);
+    bind_optional("CLayoutFrame::SetHeight", Kind::Function, widescreen.layout_set_height);
+    bind_optional("CLayoutFrame::ClearAllPoints", Kind::Function, widescreen.layout_clear_points);
+    bind_optional("CLayoutFrame.vtable.UpdateScreenRect", Kind::Offset, widescreen.layout_update_slot);
+    bind_optional("CLayoutFrame.points", Kind::Offset, widescreen.layout_points_offset);
+    bind_optional("CLayoutFrame.relative_point_vtable", Kind::Data, widescreen.relative_point_vtable);
+    bind_optional("CLayoutFrame.dependents", Kind::Offset, widescreen.layout_dependents_offset);
+    bind_optional("CLayoutFrame.width", Kind::Offset, widescreen.layout_width_offset);
+    bind_optional("CGameUI.console", Kind::Offset, widescreen.console_offset);
+    bind_optional("CGameUI.info_panel", Kind::Offset, widescreen.info_panel_offset);
+    bind_optional("CGameUI.time_of_day", Kind::Offset, widescreen.clock_offset);
+    bind_optional("CGameUI.console_upper", Kind::Offset, widescreen.console_upper_offset);
+    bind_optional("CGameUI.portrait_layer", Kind::Offset, widescreen.portrait_layer_offset);
+    bind_optional("CGameUI.minimap_layer", Kind::Offset, widescreen.minimap_layer_offset);
+    bind_optional("CGameUI.resource_bar", Kind::Offset, widescreen.resource_bar_offset);
+    bind_optional("CInfoPanel.inventory_cover", Kind::Offset, widescreen.inventory_cover_offset);
+    bind_optional("CSimpleFrame.shown", Kind::Offset, widescreen.simple_shown_offset);
+    bind_optional("CSimpleFrame.show_flag", Kind::Offset, widescreen.simple_show_flag_offset);
+    bind_optional("CSimpleFrame.vtable.Hide", Kind::Offset, widescreen.simple_hide_slot);
+    bind_optional("CSimpleFrame.vtable.Show", Kind::Offset, widescreen.simple_show_slot);
     auto& movie = out.movie;  // movie-display-reset's symbols (patches/movie_display_reset.cpp)
     bind_optional("Movie.cinematic_mode", Kind::Data, movie.cinematic_mode);
     bind_optional("Movie.gamma_call", Kind::Data, movie.gamma_call);
@@ -681,6 +703,8 @@ bool bind_build(const mappings::Build& build, BuildMappings& out, std::vector<st
     bind_optional("CItem.charges", Kind::Offset, objects.item_charges_offset);
     bind_optional("CPlayerWar3::SetState", Kind::Function, objects.player_set_state);
     bind_optional("JassVM::Get", Kind::Function, objects.jass_vm_get);
+    bind_optional("CGameWar3::CreateString", Kind::Function, out.strings.create_string);
+    bind_optional("CreateJassString.call.create_string", Kind::Call, out.strings.create_string_call);
     bind_optional("CGameWar3.vm_index", Kind::Offset, objects.vm_index_offset);
     bind_optional("JassVM.strings", Kind::Offset, objects.vm_strings_offset);
     bind_optional("JassStringTable.count", Kind::Offset, objects.string_count_offset);

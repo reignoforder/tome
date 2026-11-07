@@ -52,6 +52,7 @@ GLOBALS = """\
     trigger tome_e2e_menu_trigger = null
     trigger tome_e2e_movie_trigger = null
     unit tome_e2e_shadow = null
+    string tome_e2e_init_string = I2S(9700)
 """
 
 CALLS = """\
@@ -167,6 +168,7 @@ CALLS = """\
     call TomeE2EShadowSet()
     call TomeE2EShadowAfter()
     call TomeE2EPaths()
+    call TomeE2EGuards()
     call TomeLogInteger(9000 + CrashNative(1))
     call TomeLogInteger(9100 + CrashNative(2))
     call TomeLogInteger(8999)
@@ -280,6 +282,24 @@ function TomeE2EPaths takes nothing returns nothing
     call PreloadGenClear()
     call PreloadRefresh()
     call TomeLogInteger(9609)
+endfunction
+
+// execute-func-guard and global-string-guard: ExecuteFunc on a function that
+// takes parameters (the map's and Blizzard.j's) is refused instead of
+// crashing (9790 never shows), and a string native in a global's initial
+// value (tome_e2e_init_string) gave null instead of crashing the map load
+// (9701). 9702 shows the function ran to its end.
+function TomeE2ETakesArg takes integer i returns nothing
+    call TomeLogInteger(9790 + i)
+endfunction
+
+function TomeE2EGuards takes nothing returns nothing
+    if tome_e2e_init_string == null then
+        call TomeLogInteger(9701)
+    endif
+    call ExecuteFunc("TomeE2ETakesArg")
+    call ExecuteFunc("ClearTextMessagesBJ")
+    call TomeLogInteger(9702)
 endfunction
 
 // Called by the hello mod through code arguments.

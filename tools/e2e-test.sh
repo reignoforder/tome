@@ -475,6 +475,13 @@ if ((${#MAP_ARG[@]})); then
         check "\[map\] TomeLogInteger\($n\)" "refused call $n returned false or null"
     done
     check "\[map\] TomeLogInteger\(9609\)" "the script carried on after the refused calls"
+    check "global-string-guard: a native returned a string before the map script's string table exists" \
+        "a string native in a global's initial value is caught"
+    check "\[map\] TomeLogInteger\(9701\)" "it gave the global null instead of crashing the map load"
+    check "execute-func-guard: refused ExecuteFunc\(\"TomeE2ETakesArg\"\)" "ExecuteFunc on a map function with parameters refused"
+    check "execute-func-guard: refused ExecuteFunc\(\"ClearTextMessagesBJ\"\)" "and on a Blizzard.j one"
+    check_absent "\[map\] TomeLogInteger\(979[0-9]\)" "the refused function didn't run"
+    check "\[map\] TomeLogInteger\(9702\)" "the script carried on after the refused ExecuteFunc calls"
     if compgen -G "$GAME/../TomeE2E-escape*" >/dev/null; then
         fail "a file was written outside the game folder"
     else

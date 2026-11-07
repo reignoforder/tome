@@ -149,3 +149,43 @@ TEST(jass_scan_shadow_exploit) {
     CHECK_EQ(f4[0].global_type, std::string("unit"));
     CHECK_EQ(f4[0].line, 5);
 }
+
+TEST(jass_functions_taking_parameters) {
+    const char* script =
+        "globals\n"
+        "    integer function_count = 0\n"
+        "endglobals\n"
+        "function NoArgs takes nothing returns nothing\n"
+        "endfunction\n"
+        "function OneArg takes integer i returns nothing\n"
+        "endfunction\n"
+        "constant function ConstArgs takes unit u, real r returns real\r\n"
+        "    return r\r\n"
+        "endfunction\r\n"
+        "  function   Indented   takes   player p   returns nothing\n"
+        "endfunction\n"
+        "// function Commented takes integer i returns nothing\n"
+        "native NativeArgs takes integer i returns nothing\n"
+        "function Broken takes\n"
+        "function ReturnsOnly takes nothing returns unit\n"
+        "    call ExecuteFunc(\"OneArg\")\n"
+        "endfunction\n";
+    std::unordered_set<std::string> out;
+    tome::jass::functions_taking_parameters(script, out);
+    CHECK_EQ(out.size(), (size_t)3);
+    CHECK(out.count("OneArg") == 1);
+    CHECK(out.count("ConstArgs") == 1);
+    CHECK(out.count("Indented") == 1);
+    // Added to what's there: the prelude's go in first.
+    tome::jass::functions_taking_parameters("function BJ takes integer i returns nothing\n", out);
+    CHECK_EQ(out.size(), (size_t)4);
+    tome::jass::functions_taking_parameters("", out);
+    tome::jass::functions_taking_parameters("function", out);
+    CHECK_EQ(out.size(), (size_t)4);
+    // Lines that end in "\r" alone.
+    tome::jass::functions_taking_parameters("function A takes nothing returns nothing\rendfunction\r"
+                                            "function CrArg takes integer i returns nothing\rendfunction\r",
+                                            out);
+    CHECK_EQ(out.size(), (size_t)5);
+    CHECK(out.count("CrArg") == 1);
+}
