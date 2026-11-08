@@ -3,6 +3,7 @@
 // checks of Tome's own behavior, against the real loader and the real
 // fixture mods, with a fake game image instead of the game.
 #include "harness.h"
+#include "signing.h"
 #include "test.h"
 
 #include "core/json.h"
@@ -17,8 +18,11 @@
 #include <cstdio>
 #include <cstring>
 
+using host::allowed_with_key;
+using host::crash_hash;
 using host::Home;
 using host::Session;
+using host::sign_crash;
 using tome::mod_manager;
 
 namespace {
@@ -322,12 +326,6 @@ TEST(host_schema_2_state_asks_again) {
 
 namespace {
 
-// The crash fixture's code hash: its DLL is its only code file.
-std::string crash_hash(const Home& home) {
-    std::wstring dll = home.paths().mods_dir + L"\\crash\\crash.dll";
-    return tome::sha256_bytes(tome::mod_state::manifest({{"crash.dll", tome::sha256_file(dll)}}));
-}
-
 // tome/cache/file-hashes.json with one entry for the crash fixture's DLL:
 // its real stamp (or one byte larger), and `sha`.
 bool plant_dll_hash(Home& home, const std::string& sha, uint64_t extra_size = 0) {
@@ -422,36 +420,6 @@ TEST(host_approval_of_other_code_asks_again) {
     CHECK_EQ(approval_of("crash"), std::string("changed"));
     CHECK_NO_LOG("[crash] mode");
 }
-
-namespace {
-
-// Signs the installed crash fixture as sdk/support/tome_sign.py would, with
-// the key made from `seed`; returns the public key (base64).
-std::string sign_crash(Home& home, uint8_t seed_byte) {
-    uint8_t seed[32], secret[64];
-    tome::signature::Key key;
-    std::memset(seed, seed_byte, sizeof(seed));
-    crypto_ed25519_key_pair(secret, key.data(), seed);
-    const std::wstring dir = home.paths().mods_dir + L"\\crash";
-    const std::string code = tome::sha256_bytes(tome::mod_state::manifest({{"crash.dll", tome::sha256_file(dir + L"\\crash.dll")}}));
-    const std::string text = tome::signature::message("crash", code, tome::sha256_file(dir + L"\\tome.mod.json"));
-    tome::signature::Signature sig;
-    sig.key = key;
-    crypto_ed25519_sign(sig.signature.data(), secret, reinterpret_cast<const uint8_t*>(text.data()), text.size());
-    const std::string public_key = tome::signature::encode_key(key);
-    home.write(L"tome\\mods\\crash\\tome.sig",
-               "{\"schema\": 1, \"key\": \"" + public_key + "\", \"signature\": \"" +
-                   tome::signature::base64_encode(sig.signature.data(), sig.signature.size()) + "\"}");
-    return public_key;
-}
-
-// state.json allowing other code for crash, from another folder, signed by `key`.
-std::string allowed_with_key(const std::string& key) {
-    return R"({"schema":3,"mods":{"crash":{"enabled":true,"approved":")" + std::string(64, 'a') +
-           R"(","approved_from":"elsewhere","approved_key":")" + key + R"("}}})";
-}
-
-} // namespace
 
 TEST(host_signed_update_by_the_same_key_runs) {
     Home home;

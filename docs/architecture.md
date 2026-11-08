@@ -1708,9 +1708,31 @@ manager and patch functions use them instead of patching code:
   is an instruction's operand, compiled in, so widescreen's UI part (which
   repoints operands of the coordinate conversions) reports that it's off
   ("the UI stays stretched"); its 3D part, hooks only, works.
-- Mods' DLLs don't load: Shade runs only code recompiled with the game. A
-  mod with a DLL (and no Wasm module) gets an error saying so and never
-  asks for approval; Wasm mods run (WAMR's interpreter).
+- Mods' DLLs load from version 4 of Shade's natives (`shade::can_load_dlls`):
+  Shade runs only recompiled code, so a DLL's code is built apart from the
+  game's (`shade-recomp build-mod`, Shade's design.md "Mods' DLLs") and
+  found by the DLL's SHA-256 when `LoadLibrary` gets the shadow copy. A DLL
+  without it fails to load like a missing file (126); Tome's error then says
+  it must be built, and Shade's log says how. One whose built code Shade
+  can't use fails with 1114, and the error says why it may be
+  (`shade::load_error_hint`).
+- What runs is that library, not the DLL, and it sits outside the mod
+  folder (`$SHADE_MOD_LIBS`, `<data>/mods`), so approval covers it too:
+  `ShadeModCodeHash` gives its SHA-256 (`shade::mod_code_hash`), and the
+  mod's code hash becomes the SHA-256 of
+  `mod_state::built_code_manifest(<files' hash>, <library's hash>)`. Another
+  library for the same DLL is asked about again ("changed"); one that isn't
+  built yet leaves the files' hash, so building it asks again too. A
+  signature covers the mod's files only, so under Shade it allows no
+  update (the mod counts as unsigned). As on Windows, a mod allowed in its
+  own folder (not a package) runs whatever its files are; that includes the
+  library. Shade hashes the library when asked and opens it at the load
+  after, so a library swapped in between runs unasked: whoever can write
+  there can also write the mods folder. Version 3 loaded DLLs without
+  `ShadeModCodeHash`: Tome treats it as a Shade that doesn't. A Shade before
+  version 4 runs no DLLs: such a mod (without a Wasm module) gets an error
+  saying so and never asks for approval. Wasm mods run in either (WAMR's
+  interpreter).
 
 On Windows and Wine nothing changes: `shade::active()` is false.
 
@@ -1718,8 +1740,12 @@ Tests: `tests/shade/fake_shade.cpp` is a fake `shade.dll` (Shade's natives
 on Windows; each can fail on request, and a hook can catch a call on another
 thread while it goes on). `tome_hook_runtime_shade_tests` loads it and runs
 the whole hook runtime suite plus `tests/test_shade.cpp`; the host test
-`host_shade_natives` calls natives through the Shade stubs and
-`host_shade_refuses_mod_dlls` checks a DLL mod is refused.
+`host_shade_natives` calls natives through the Shade stubs,
+`host_shade_refuses_mod_dlls` checks a DLL mod is refused by a version 3
+Shade, `host_shade_loads_mod_dlls` that one runs under version 4 (the
+fake's `FakeShadeSetVersion`), and `host_shade_*built_code*` and
+`host_shade_signature_does_not_allow_built_code` that the built code's hash
+(`FakeShadeSetModCode`) is part of the approval.
 
 ## Mod menu
 

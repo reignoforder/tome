@@ -13,6 +13,7 @@
 #include <windows.h>
 
 #include <cstring>
+#include <string>
 
 using namespace tome;
 
@@ -133,6 +134,12 @@ void call_race() {
 TEST(shade_is_active_with_its_dll) {
     CHECK(g_shade != nullptr);
     CHECK(shade::active());
+}
+
+TEST(shade_explains_failed_mod_dll_loads) {
+    CHECK(std::strstr(shade::load_error_hint(ERROR_MOD_NOT_FOUND), "must be built first") != nullptr);
+    CHECK(std::strstr(shade::load_error_hint(ERROR_DLL_INIT_FAILED), "another Shade") != nullptr);
+    CHECK_EQ(std::string(shade::load_error_hint(ERROR_ACCESS_DENIED)), std::string());
 }
 
 // Shade's hook is on before ShadeHookPushJump returns: a call on another

@@ -521,11 +521,12 @@ std::vector<ModManager::Installed> ModManager::discover() const {
                     mod.valid = false;
                 }
             }
-            // Shade runs only the code it recompiled with the game: a mod's
-            // DLL can't load there (its Wasm module, if it has one, can).
-            if (mod.valid && !mod.dll.empty() && !mod.wasm && shade::active()) {
-                mod.errors.push_back("its DLL can't run under Shade, which runs only code recompiled with the game "
-                                     "(Wasm mods run there)");
+            // Shade runs only recompiled code: a mod's DLL loads there from
+            // version 3 of its natives, once its code is built (shade-recomp
+            // build-mod); before that, not at all (a Wasm module does).
+            if (mod.valid && !mod.dll.empty() && !mod.wasm && shade::active() && !shade::can_load_dlls()) {
+                mod.errors.push_back("its DLL can't run under this Shade, which runs only code recompiled with the "
+                                     "game (Wasm mods run there; a newer Shade runs DLLs too)");
                 mod.valid = false;
             }
             if (!mod.meta.config.empty()) read_settings_schema(mod);
@@ -549,6 +550,16 @@ std::vector<ModManager::Installed> ModManager::discover() const {
             mod.has_code = mod.valid && mod.code_kind != CodeKind::None;
             if (mod.has_code) mod.code_hash = code_hash(mod);
             if (mod.has_code && !mod.code_hash.empty()) check_signature(mod, cached.sha256);
+            // Under Shade what runs isn't the DLL but the library built from
+            // it (shade-recomp build-mod), found apart from the mod: its hash
+            // goes into what's allowed, so another library is asked about
+            // again. A signature covers the mod's files only, so it allows
+            // no update there (mod.signer cleared).
+            if (mod.code_kind == CodeKind::Native && !mod.code_hash.empty() && shade::can_load_dlls()) {
+                mod.signer.clear();
+                const std::string built = shade::mod_code_hash(mod.dll);
+                if (!built.empty()) mod.code_hash = sha256_bytes(mod_state::built_code_manifest(mod.code_hash, built));
+            }
         }
         mods.push_back(std::move(mod));
     } while (FindNextFileW(find, &fd));
@@ -701,7 +712,8 @@ bool ModManager::load(Runtime& rt, const Installed& mod, std::string& error) {
 
     HMODULE module = load_with_mod_dir(rt.shadow_dll, mod.dir);
     if (!module) {
-        error = "LoadLibrary failed: " + last_error_text(GetLastError());
+        const DWORD code = GetLastError();
+        error = "LoadLibrary failed: " + last_error_text(code) + shade::load_error_hint(code);
         DeleteFileW(rt.shadow_dll.c_str());
         return false;
     }

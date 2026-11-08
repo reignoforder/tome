@@ -47,6 +47,12 @@ private:
     tome::testing::Home home_;
 };
 
+// The crash fixture's code hash: its DLL is its only code file.
+std::string crash_hash(const Home& home);
+// state.json allowing `hash` (64 'a's: other code) for crash, from another
+// folder (so the hash is checked), signed by `key` ("": none).
+std::string allowed_with_key(const std::string& key, const std::string& hash = std::string(64, 'a'));
+
 // Opens tome.log in the home and keeps every line in memory.
 void open_log(const Home& home);
 // Whether any line logged so far contains `text`.

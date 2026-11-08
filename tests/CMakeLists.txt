@@ -138,6 +138,7 @@ add_test(NAME tome_hook_runtime_shade_tests COMMAND tome_hook_runtime_shade_test
 add_executable(tome_host_tests
     host/host_main.cpp
     host/harness.cpp
+    host/signing.cpp
     host/test_api.cpp
     host/test_chat.cpp
     host/test_crash.cpp

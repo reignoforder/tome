@@ -90,6 +90,12 @@ struct CodeFile {
 // in every game. `path` is '/' or '\' separated; ASCII case is ignored.
 bool is_script(std::string_view path);
 
+// What the code hash of a mod whose DLL runs as `built` (the SHA-256 of
+// the library Shade built from it) is the SHA-256 of: "<code_hash>  files\n"
+// then "<built>  shade\n", so it matches neither the files' hash nor
+// another library's.
+std::string built_code_manifest(const std::string& code_hash, const std::string& built);
+
 // Whether a file in a mod folder is hashed for its approval: everything but
 // the top tome.mod.json and tome.sig (a DLL can load any file as code, and
 // the game reads the assets with parsers that trust them; tome.sig signs

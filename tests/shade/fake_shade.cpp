@@ -7,7 +7,8 @@
 // request, and a hook can be made to catch a call on another thread while
 // it's going on (FakeShadeDuringHook), as Shade's hook is on before its
 // native returns. Each function has one trampoline (ShadeOriginal), the
-// same before, during and after its hook.
+// same before, during and after its hook. ShadeModCodeHash names the
+// same built code (FakeShadeSetModCode) for every DLL.
 
 #include "core/x86.h"
 
@@ -58,6 +59,11 @@ uint8_t* push_jump(uint32_t dest, uint32_t value) {
     put_jmp(s + 5, dest);
     return s;
 }
+
+// What ShadeVersion says: 2 (hooks, no mods' DLLs) unless a test sets it.
+uint32_t g_version = 2;
+// What ShadeModCodeHash says for every DLL: "" (no code built) unless a test sets it.
+std::string g_mod_code;
 
 bool fails(const char* native) {
     if (g_fail != native) return false;
@@ -126,7 +132,15 @@ void catch_a_call(uint32_t target, uint32_t dest, uint32_t value, void (*during)
 
 extern "C" {
 
-__declspec(dllexport) uint32_t __stdcall ShadeVersion() { return 2; }
+__declspec(dllexport) uint32_t __stdcall ShadeVersion() { return g_version; }
+
+__declspec(dllexport) uint32_t __stdcall ShadeModCodeHash(const char* dll, char* out) {
+    AcquireSRWLockExclusive(&g_lock);
+    const bool found = dll && out && !fails("ShadeModCodeHash") && g_mod_code.size() == 64;
+    if (found) std::memcpy(out, g_mod_code.c_str(), 65);
+    ReleaseSRWLockExclusive(&g_lock);
+    return found;
+}
 
 __declspec(dllexport) uint32_t __stdcall ShadeOriginal(uint32_t target) {
     AcquireSRWLockExclusive(&g_lock);
@@ -186,6 +200,15 @@ __declspec(dllexport) uint32_t __stdcall ShadeUnhook(uint32_t target) {
 }
 
 // For the tests (tests/shade/fake_shade.h).
+
+__declspec(dllexport) void FakeShadeSetVersion(uint32_t version) { g_version = version; }
+
+// The hash ShadeModCodeHash gives every DLL (64 hex digits), null for none.
+__declspec(dllexport) void FakeShadeSetModCode(const char* sha256) {
+    AcquireSRWLockExclusive(&g_lock);
+    g_mod_code = sha256 ? sha256 : "";
+    ReleaseSRWLockExclusive(&g_lock);
+}
 
 __declspec(dllexport) void FakeShadeFail(const char* native) {
     AcquireSRWLockExclusive(&g_lock);

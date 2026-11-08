@@ -207,6 +207,11 @@ TEST(mod_state_manifest_sorted_like_sha256sum) {
     CHECK_EQ(manifest({}), std::string());
 }
 
+TEST(mod_state_built_code_manifest_names_both) {
+    CHECK_EQ(built_code_manifest(kHashA, kHashB), kHashA + "  files\n" + kHashB + "  shade\n");
+    CHECK(built_code_manifest(kHashA, kHashB) != built_code_manifest(kHashB, kHashA));
+}
+
 TEST(mod_state_debug_approves) {
     CHECK(debug_approves("*", "hello"));
     CHECK(debug_approves("hello", "hello"));
