@@ -88,4 +88,7 @@ constexpr size_t kMaxModuleSize = 16u << 20;
     X(jass_call, "(iiiiiii)i") \
     X(host_player, "()i") \
     X(net_send, "(ii)i") \
-    X(on_net_message, "(i)i")
+    X(on_net_message, "(i)i") \
+    X(timer_start, "(iFFii)i") \
+    X(timer_stop, "(i)i") \
+    X(on_checksum, "(i)i")

@@ -127,7 +127,9 @@ add_library(tome_core STATIC
     src/core/context_restore.cpp
     src/core/crash_report.cpp
     src/core/debug_script.cpp
+    src/core/desync.cpp
     src/core/frames.cpp
+    src/core/game_clock.cpp
     src/core/game_lock.cpp
     src/core/handshake.cpp
     src/core/netmsg.cpp
@@ -152,10 +154,12 @@ add_library(tome_core STATIC
     src/core/path_guard.cpp
     src/core/pe.cpp
     src/core/popup.cpp
+    src/core/profile.cpp
     src/core/resolver.cpp
     src/core/rtti.cpp
     src/core/settings.cpp
     src/core/signature.cpp
+    src/core/timers.cpp
     src/core/tome_settings.cpp
     src/core/units.cpp
     src/core/update_check.cpp
@@ -185,6 +189,7 @@ add_library(tome_runtime OBJECT
     src/crash_handler.cpp
     src/crash_loop.cpp
     src/debug_input.cpp
+    src/desync.cpp
     src/events.cpp
     src/frames.cpp
     src/game_build.cpp
@@ -226,6 +231,7 @@ add_library(tome_runtime OBJECT
     src/settings_api.cpp
     src/sha256.cpp
     src/storm.cpp
+    src/timers.cpp
     src/tome_settings.cpp
     src/units.cpp
     src/update_check.cpp

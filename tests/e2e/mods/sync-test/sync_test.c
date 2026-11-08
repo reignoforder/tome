@@ -4,12 +4,16 @@
  * game needs. Its code tries messages between players: "/synctest <text>"
  * sends the text, "/synctest big" 1000 bytes with NULs in them; every
  * message that arrives is logged with its sender, size and a checksum.
+ * Its state for desync checks (on_checksum) is what it received, the same
+ * on every computer, until "/synctest skew" changes this computer's alone.
  */
 #include <tome/tome.h>
 
 #include <string.h>
 
 static const tome_api* api;
+static uint64_t g_state = TOME_HASH_INIT;  /* every message received, in order */
+static uint32_t g_skew = 0;                /* "/synctest skew": this computer only */
 
 static uint32_t fnv1a(const unsigned char* data, uint32_t size) {
     uint32_t h = 2166136261u;
@@ -23,6 +27,7 @@ static void TOME_CALL on_message(tome_mod* mod, const tome_net_message* m, void*
     uint32_t n = m->data_size < 40 ? m->data_size : 40;
     uint32_t i;
     (void)user;
+    g_state = tome_hash_u32(tome_hash_bytes(g_state, m->data, m->data_size), (uint32_t)m->player);
     for (i = 0; i < n; ++i) {
         const char c = ((const char*)m->data)[i];
         text[i] = c >= 32 && c < 127 ? c : '.';
@@ -35,6 +40,11 @@ static void TOME_CALL on_message(tome_mod* mod, const tome_net_message* m, void*
 static void TOME_CALL on_command(tome_mod* mod, const char* args, void* user) {
     tome_result r;
     (void)user;
+    if (strcmp(args, "skew") == 0) {
+        ++g_skew;
+        tome_logf(api, mod, TOME_LOG_INFO, "skewed this computer's state");
+        return;
+    }
     if (strcmp(args, "big") == 0) {
         unsigned char big[1000];
         int i;
@@ -47,15 +57,22 @@ static void TOME_CALL on_command(tome_mod* mod, const char* args, void* user) {
     }
 }
 
+static uint64_t TOME_CALL checksum(tome_mod* mod, void* user) {
+    (void)mod;
+    (void)user;
+    return tome_hash_u32(g_state, g_skew);
+}
+
 TOME_EXPORT int TOME_CALL tome_mod_load(const tome_api* tome, tome_mod* mod) {
     (void)mod;
     api = tome;
-    return tome_has_net_messages(api) ? 0 : 1;
+    return tome_has_net_messages(api) && tome_has_timers(api) ? 0 : 1;
 }
 
 TOME_EXPORT void TOME_CALL tome_mod_enable(tome_mod* mod) {
     api->register_command(mod, "synctest", on_command, NULL);
     api->on_net_message(mod, on_message, NULL);
+    api->on_checksum(mod, checksum, NULL);
 }
 
 TOME_EXPORT void TOME_CALL tome_mod_disable(tome_mod* mod) {

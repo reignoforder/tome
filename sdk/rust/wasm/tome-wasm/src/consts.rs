@@ -5,7 +5,7 @@
 
 #![allow(missing_docs)]
 
-pub const TOME_API_VERSION: u32 = 18;
+pub const TOME_API_VERSION: u32 = 19;
 pub const TOME_POPUP_CLOSED: i32 = -1;
 pub const TOME_NET_MAX_MESSAGE: u32 = 1024;
 
@@ -153,6 +153,10 @@ pub const TOME_CHAT_ALL: i32 = 0;
 pub const TOME_CHAT_ALLIES: i32 = 1;
 pub const TOME_CHAT_OBSERVERS: i32 = 2;
 pub const TOME_CHAT_PRIVATE: i32 = 3;
+
+// tome_clock
+pub const TOME_CLOCK_REAL: i32 = 0;
+pub const TOME_CLOCK_GAME: i32 = 1;
 
 // tome_object_type
 pub const TOME_OBJECT_NONE: i32 = 0;

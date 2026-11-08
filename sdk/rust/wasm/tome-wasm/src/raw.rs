@@ -86,5 +86,8 @@ imports! {
     fn host_player() -> i32;
     fn net_send(data: *const u8, size: u32) -> i32;
     fn on_net_message(callback: u32) -> i32;
+    fn timer_start(clock: i32, delay: f64, interval: f64, callback: u32, timer: *mut u32) -> i32;
+    fn timer_stop(timer: u32) -> i32;
+    fn on_checksum(callback: u32) -> i32;
     fn jass_call(name: *const u8, len: u32, args: *const u32, count: i32, result: *mut u32, text: *mut u8, capacity: u32) -> i32;
 }

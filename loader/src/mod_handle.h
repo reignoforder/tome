@@ -5,6 +5,7 @@
 // manager so the guard and the hook engine can use it on their own.
 
 #include "core/hooks.h"
+#include "core/profile.h"
 #include "unwind.h"
 
 #include <windows.h>
@@ -58,6 +59,28 @@ struct tome_mod {
     // thread, and a crash may happen on any thread.
     SRWLOCK lock = SRWLOCK_INIT;
 
+    // The time its code takes (guard.cpp times every call into it;
+    // core/profile.h), under its own lock: calls come from any thread.
+    tome::profile::Window profile;
+    SRWLOCK profile_lock = SRWLOCK_INIT;
+
+    // Adds one call's own time; true the first time the mod turns out slow.
+    bool add_profile(uint32_t frame, double seconds, const char* what, const char* detail) {
+        tome::ExclusiveLock hold(profile_lock);
+        return profile.add(frame, seconds, what, detail);
+    }
+
+    // A lifecycle call's (tome_mod_load, enable, ...): not a frame's.
+    void add_lifecycle_profile(double seconds) {
+        tome::ExclusiveLock hold(profile_lock);
+        profile.add_lifecycle(seconds);
+    }
+
+    tome::profile::Stats profile_stats(uint32_t now) {
+        tome::SharedLock hold(profile_lock);
+        return profile.stats(now);
+    }
+
     void add_revoker(std::function<void()> fn, const void* tag = nullptr) {
         tome::ExclusiveLock hold(lock);
         revokers.push_back({std::move(fn), tag});
@@ -107,11 +130,15 @@ struct tome_mod {
         return fault_calls;
     }
 
-    // A new DLL starts with a clean record.
+    // A new DLL starts with a clean record, and its times afresh.
     void clear_fault() {
-        tome::ExclusiveLock hold(lock);
-        faulted = false;
-        fault.clear();
-        fault_calls.clear();
+        {
+            tome::ExclusiveLock hold(lock);
+            faulted = false;
+            fault.clear();
+            fault_calls.clear();
+        }
+        tome::ExclusiveLock hold(profile_lock);
+        profile.reset();
     }
 };

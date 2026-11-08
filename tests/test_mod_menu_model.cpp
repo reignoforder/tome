@@ -89,6 +89,30 @@ TEST(menu_list_pages) {
     CHECK(e.footer[0].empty());  // one page: no Previous/Next
 }
 
+TEST(menu_details_show_the_mods_time) {
+    Data d = data_with(1);
+    ModStatus& m = d.mods[0];
+    m.running = true;
+    State s;
+    click_row(s, d, 4, 0, true);  // Details
+    CHECK(!contains(build(s, d, 4).body, "Time: "));  // no code ran yet
+    m.profile.calls = 3;
+    m.profile.frames = 128;
+    m.profile.average_ms = 0.25;
+    m.profile.peak_ms = 1.5;
+    m.profile.slowest = "event handler (tick)";
+    m.profile.slowest_ms = 1.25;
+    std::string body = build(s, d, 4).body;
+    CHECK(contains(body, "0.25 ms a frame on average, 1.50 ms at most (the last 128 frames)"));
+    CHECK(contains(body, "slowest call: event handler (tick), 1.25 ms"));
+    // Slow: in yellow.
+    m.profile.average_ms = 9;
+    CHECK(contains(build(s, d, 4).body, "|cffffcc009.00 ms a frame"));
+    // Not running: nothing.
+    m.running = false;
+    CHECK(!contains(build(s, d, 4).body, "Time: "));
+}
+
 TEST(menu_details_show_problems) {
     Data d = data_with(1);
     ModStatus& m = d.mods[0];

@@ -107,6 +107,11 @@ struct Dispatch {
     // Runs the game's function with call.args, setting call.result(_high)
     // or call.result_float.
     void (*original)(void* context, tome_hook_call& call) = nullptr;
+    // Runs it instead when a mod's REPLACE handler handed on towards it
+    // (call_next; through Tome's own handlers too), so the game's own time
+    // isn't charged to that mod's profile (guard.cpp). Null: `original`.
+    void (*original_handed_on)(void* context, tome_hook_call& call) = nullptr;
+    bool mod_handed_on = false;  // inside a mod's REPLACE handler's call_next
     void* context = nullptr;
     // Calls one handler; false if it didn't finish (it crashed, or its mod
     // had crashed before). Null: handlers are called directly.

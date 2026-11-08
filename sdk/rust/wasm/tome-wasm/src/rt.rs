@@ -30,6 +30,8 @@ pub(crate) enum Callback {
     Message(MessageFn),
     Net(Rc<dyn Fn(i32, &[u8], bool)>),
     Native(Rc<dyn Fn(&Args) -> Ret>),
+    Timer(Rc<dyn Fn(u32)>),
+    Checksum(Rc<dyn Fn() -> u64>),
 }
 
 // A block from tome_buffer: 8-aligned (events hold doubles), with a byte
@@ -54,6 +56,13 @@ struct State {
     // A native's string result, until the next native returns (Tome
     // copies it as the native returns).
     result: Option<CString>,
+    // Running timers' callback ids, by timer id (timer_stop forgets one).
+    timers: HashMap<u32, u32>,
+    // A checksum's block, with the answer in it: Tome reads it after the
+    // callback returns, so it lives until the next callback.
+    answer: Option<Buffer>,
+    // The checksum Tome calls (one at a time: registering again replaces it).
+    checksum: Option<u32>,
 }
 
 thread_local! {
@@ -96,6 +105,27 @@ pub(crate) fn register(callback: Callback, register: impl FnOnce(u32) -> i32) ->
 
 pub(crate) fn forget(id: u32) {
     STATE.with(|s| s.borrow_mut().callbacks.remove(&id));
+}
+
+/// The checksum is now callback `id` (None: removed): the one before goes.
+pub(crate) fn replace_checksum(id: Option<u32>) {
+    let old = STATE.with(|s| core::mem::replace(&mut s.borrow_mut().checksum, id));
+    if let Some(old) = old.filter(|&old| Some(old) != id) {
+        forget(old);
+    }
+}
+
+/// Timer `timer` calls back through callback `id`.
+pub(crate) fn note_timer(timer: u32, id: u32) {
+    STATE.with(|s| s.borrow_mut().timers.insert(timer, id));
+}
+
+/// Timer `timer` won't call back any more: its closure goes.
+pub(crate) fn forget_timer(timer: u32) {
+    let id = STATE.with(|s| s.borrow_mut().timers.remove(&timer));
+    if let Some(id) = id {
+        forget(id);
+    }
 }
 
 fn lookup(id: u32) -> Option<Callback> {
@@ -146,9 +176,10 @@ pub fn buffer(size: u32) -> usize {
 }
 
 pub fn callback(id: u32, addr: usize, len: u32) {
-    let _block = take_pending(addr);
+    let mut block = take_pending(addr);
+    STATE.with(|s| s.borrow_mut().answer = None);
     let Some(callback) = lookup(id) else { return };
-    // Tome's copy, alive until this returns (_block, or Tome's own memory).
+    // Tome's copy, alive until this returns (block, or Tome's own memory).
     let data = unsafe { bytes(addr, len) };
     match callback {
         Callback::Text(f) => f(&String::from_utf8_lossy(data)),
@@ -186,6 +217,27 @@ pub fn callback(id: u32, addr: usize, len: u32) {
             }
         }
         Callback::Native(_) => {}
+        Callback::Timer(f) => {
+            // [timer][state]: 0 it fires again, 1 for the last time, 2 it
+            // ended without firing (its game ended).
+            let (Some(timer), Some(state)) = (word(data, 0), word(data, 4)) else { return };
+            if state != 0 {
+                forget_timer(timer);
+            }
+            if state != 2 {
+                f(timer)
+            }
+        }
+        Callback::Checksum(f) => {
+            // The hash goes back in the block (Tome reads it after this returns).
+            if len < 8 {
+                return;
+            }
+            let hash = f().to_le_bytes();
+            unsafe { core::ptr::copy_nonoverlapping(hash.as_ptr(), addr as *mut u8, 8) };
+            let kept = block.take();
+            STATE.with(|s| s.borrow_mut().answer = kept);
+        }
     }
 }
 
@@ -266,6 +318,8 @@ pub fn disable(f: impl FnOnce()) {
     STATE.with(|s| {
         let mut s = s.borrow_mut();
         s.callbacks.clear();
+        s.timers.clear();
+        s.checksum = None;
         s.result = None;
     });
 }
@@ -328,6 +382,49 @@ mod tests {
         calls.set(None);
         callback(id, closed.as_ptr() as usize, 8);
         assert_eq!(calls.get(), None);
+    }
+
+    #[test]
+    fn a_timer_is_forgotten_after_its_last_call() {
+        let calls = Rc::new(Cell::new(0));
+        let c = calls.clone();
+        let id = register(Callback::Timer(Rc::new(move |_| c.set(c.get() + 1))), |_| 0).unwrap();
+        note_timer(9, id);
+        let again: [u8; 8] = [9, 0, 0, 0, 0, 0, 0, 0];
+        let last: [u8; 8] = [9, 0, 0, 0, 1, 0, 0, 0];
+        callback(id, again.as_ptr() as usize, 8);
+        callback(id, last.as_ptr() as usize, 8);
+        callback(id, again.as_ptr() as usize, 8);
+        assert_eq!(calls.get(), 2);
+        // Ended with its game: forgotten, not called.
+        let c = calls.clone();
+        let id = register(Callback::Timer(Rc::new(move |_| c.set(c.get() + 1))), |_| 0).unwrap();
+        note_timer(10, id);
+        let ended: [u8; 8] = [10, 0, 0, 0, 2, 0, 0, 0];
+        callback(id, ended.as_ptr() as usize, 8);
+        assert_eq!(calls.get(), 2);
+        assert!(lookup(id).is_none());
+    }
+
+    #[test]
+    fn a_checksum_answers_in_its_block() {
+        let id = register(Callback::Checksum(Rc::new(|| 0x0102_0304_0506_0708)), |_| 0).unwrap();
+        let addr = buffer(8);
+        callback(id, addr, 8);
+        let got = unsafe { bytes(addr, 8) };
+        assert_eq!(got, &[8, 7, 6, 5, 4, 3, 2, 1]);
+    }
+
+    #[test]
+    fn a_new_checksum_frees_the_one_before() {
+        let first = register(Callback::Checksum(Rc::new(|| 1)), |_| 0).unwrap();
+        replace_checksum(Some(first));
+        let second = register(Callback::Checksum(Rc::new(|| 2)), |_| 0).unwrap();
+        replace_checksum(Some(second));
+        assert!(lookup(first).is_none());
+        assert!(lookup(second).is_some());
+        replace_checksum(None);
+        assert!(lookup(second).is_none());
     }
 
     #[test]

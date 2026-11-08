@@ -29,9 +29,16 @@ namespace tome::guard {
 using FaultSink = void (*)(tome_mod* mod);
 void set_fault_sink(FaultSink sink);
 
+// Every call is also timed for the mod's profile (core/profile.h), by the
+// frame `counter` says is being drawn (events::frames; any thread). Until
+// it's set, every call counts as frame 0.
+using FrameCounter = uint32_t (*)();
+void set_frame_counter(FrameCounter counter);
+
 enum Flags : unsigned {
     kNone = 0,
     kEvenIfFaulted = 1,  // call even if the mod crashed before (disable, unload)
+    kLifecycle = 2,      // tome_mod_load/enable/disable/unload: timed apart from the frames (core/profile.h)
 };
 
 // Calls fn(context) on this thread under a guard. `what` and `detail` say
@@ -42,6 +49,11 @@ enum Flags : unsigned {
 // (tome_mod::starting_on).
 bool call(tome_mod* mod, const char* what, const char* detail, void (*fn)(void*), void* context,
           unsigned flags = kNone);
+
+// Runs fn(context) with its time left out of the guarded calls it's inside
+// (their mods' profiles): the game's own function, run by a mod's REPLACE
+// hook handing on (call_next). No guard of its own.
+void uncharged(void (*fn)(void*), void* context);
 
 // Whether `value` looks like a return address: inside a module, right
 // after a call instruction. For finding likely callers on a stack.

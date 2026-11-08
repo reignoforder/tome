@@ -105,17 +105,19 @@ static void end(uint32_t saved) {
 
 /* --- callbacks --------------------------------------------------------------- */
 
-enum kind { K_TEXT = 1, K_EVENT, K_UI, K_CLICK, K_POPUP, K_MESSAGE, K_NATIVE, K_NET };
+enum kind { K_TEXT = 1, K_EVENT, K_UI, K_CLICK, K_POPUP, K_MESSAGE, K_NATIVE, K_NET, K_TIMER, K_CHECKSUM };
 
 typedef struct entry {
     int kind;
     void* fn;
     void* user;
+    uint32_t timer; /* K_TIMER: its id, for tome_timer_stop */
 } entry;
 
 #define MAX_CALLBACKS 1024
 static entry g_callbacks[MAX_CALLBACKS];
 static uint32_t g_callback_count = 0;
+static uint32_t g_checksum = 0; /* the K_CHECKSUM slot Tome calls (tome_on_checksum), or 0 */
 
 /* An id for (kind, fn, user), from 1; 0 if the table is full. A slot comes
  * back once Tome can't call it any more (release): a popup that called
@@ -132,6 +134,7 @@ static uint32_t add(int kind, void* fn, void* user) {
     g_callbacks[i].kind = kind;
     g_callbacks[i].fn = fn;
     g_callbacks[i].user = user;
+    g_callbacks[i].timer = 0;
     return i + 1;
 }
 
@@ -144,6 +147,7 @@ static void release(uint32_t id) {
 TOME_WASM_EXPORT(tome_callbacks_revoked) void tome_callbacks_revoked(void) {
     for (uint32_t i = 0; i < g_callback_count; ++i) g_callbacks[i].kind = 0;
     g_callback_count = 0;
+    g_checksum = 0;
 }
 
 /* A registration's result: a refused one gives its slot back. */
@@ -205,6 +209,25 @@ static void callback(uint32_t id, uint32_t ptr, uint32_t len) {
         ((tome_message_fn)e->fn)((const char*)data, data + 4 + topic_len, len - 4 - topic_len, e->user);
         break;
     }
+    case K_TIMER: {
+        /* [timer][state]: 0 it fires again, 1 for the last time, 2 it
+         * ended without firing (its game ended). The slot is free again
+         * once Tome won't call it any more. */
+        if (len < 8) break;
+        const tome_timer_fn fn = (tome_timer_fn)e->fn;
+        void* const user = e->user;
+        const uint32_t timer = word(data), state = word(data + 4);
+        if (state != 0) release(id);
+        if (state != 2) fn(timer, user);
+        break;
+    }
+    case K_CHECKSUM: {
+        /* The hash goes back in the block, little-endian. */
+        if (len < 8) break;
+        const uint64_t hash = ((tome_checksum_fn)e->fn)(e->user);
+        for (int i = 0; i < 8; ++i) data[i] = (unsigned char)(hash >> (8 * i));
+        break;
+    }
     case K_NET:
         /* [player][replay][data] */
         if (len >= 8) ((tome_net_message_fn)e->fn)((int32_t)word(data), data + 8, len - 8, (int32_t)word(data + 4), e->user);
@@ -264,6 +287,48 @@ int32_t tome_subscribe(const char* topic, tome_message_fn fn, void* user) {
 int32_t tome_on_net_message(tome_net_message_fn fn, void* user) {
     const uint32_t id = add(K_NET, (void*)fn, user);
     return id ? registered(id, tome_raw_on_net_message(id)) : TOME_ERR_INVALID_ARGUMENT;
+}
+
+int32_t tome_timer_start(int32_t clock, double delay, double interval, tome_timer_fn fn, void* user, uint32_t* timer) {
+    uint32_t got = 0;
+    if (timer) *timer = 0;
+    const uint32_t id = add(K_TIMER, (void*)fn, user);
+    if (!id) return TOME_ERR_INVALID_ARGUMENT;
+    const int32_t result = registered(id, tome_raw_timer_start(clock, delay, interval, id, &got));
+    if (result == TOME_OK) {
+        g_callbacks[id - 1].timer = got;
+        if (timer) *timer = got;
+    }
+    return result;
+}
+
+int32_t tome_timer_stop(uint32_t timer) {
+    const int32_t result = tome_raw_timer_stop(timer);
+    if (result != TOME_OK) return result;
+    for (uint32_t i = 0; i < g_callback_count; ++i) {
+        if (g_callbacks[i].kind == K_TIMER && g_callbacks[i].timer == timer) release(i + 1);
+    }
+    return result;
+}
+
+/* One checksum at a time (registering again replaces it): the one before
+ * gives its slot back once Tome has the new one, or none. */
+static void replace_checksum(uint32_t id) {
+    if (g_checksum != id && get(g_checksum, K_CHECKSUM)) release(g_checksum);
+    g_checksum = id;
+}
+
+int32_t tome_on_checksum(tome_checksum_fn fn, void* user) {
+    if (!fn) {
+        const int32_t result = tome_raw_on_checksum(0);
+        if (result == TOME_OK) replace_checksum(0);
+        return result;
+    }
+    const uint32_t id = add(K_CHECKSUM, (void*)fn, user);
+    if (!id) return TOME_ERR_INVALID_ARGUMENT;
+    const int32_t result = registered(id, tome_raw_on_checksum(id));
+    if (result == TOME_OK) replace_checksum(id);
+    return result;
 }
 
 int32_t tome_register_native(const char* name, tome_native_fn fn, void* user) {

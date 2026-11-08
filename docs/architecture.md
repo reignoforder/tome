@@ -50,6 +50,9 @@ loader/
     keys.*                key names, declared keybinds, keybinds.json, conflicts
     popup.*               popup layout (rows, paged columns), keys, TomePopup.fdf
     crash_report.*        tome/startups, the crash loop popup, crash report text
+    timers.*              mods' timers: the schedule on the real and game clocks
+    desync.*              desync checks: the checksum actions, comparing players' hashes
+    profile.*             mods' times: by frame, the last 128 frames, /tome perf lines
   src/testing/            the loader without the game, not in tome.mix: the fake game image
                           (fake_game.*; tests/host too), tome_test.dll (tome_test.cpp, for
                           mods' tests) and tome-check (tome_check.cpp); "Testing" below
@@ -71,6 +74,8 @@ loader/
     mod_manager.*         discovery, state.json, lifecycle, hot reload, crashed mods, safe mode
     mod_handle.h          tome_mod, the handle mods get
     guard.*               crash isolation: an SEH frame around every call into a mod
+    timers.*              mods' timers (API 19): run from frames and game steps
+    desync.*              desync checks (API 19): checksum rounds, sending, telling the player
     crash_handler.*       crash reports for faults outside mod calls (a filter in front of the game's)
     crash_loop.*          counts starts that don't get going; safe mode after a crash loop
     api.*                 the tome_api table given to mods
@@ -1438,6 +1443,102 @@ reaches the same mod on every player's computer, the sender's included.
   line from the host, and both sides check each arrives whole from the right
   player. Not checked: playback in a replay (the test's replay runs without
   sync-test). No lobby channel yet: messages are for games.
+## Timers
+
+API version 19 (`timer_start`, `timer_stop`; `loader/src/timers.cpp`, the
+schedule in `core/timers.*`, unit-tested). Two clocks, each the sum of what
+the game reports: real time from the frames' deltas (`PresentFrame`), game
+time from the steps of a game (`OnNetGameTick`, the step's float as
+`GAME_TICK` sees it). Both count whole microseconds (`core/game_clock.*`,
+unit-tested): the step's float and the mods' delays become integers by
+reading their bits, with no floating point. In 32-bit code a float sum goes
+through the x87 FPU, whose rounding follows the thread's precision setting
+(Direct3D sets single precision, `-opengl` leaves double), so two players'
+sums could drift apart and a due time land in different steps; integers
+can't. `events.cpp` keeps the game's count (`GAME_TICK`'s `game_time` is it
+in seconds) and hands it to the timers and the desync rounds. Real-time timers fire from the frame after the
+`TICK` handlers; game-time ones in the step after the `GAME_TICK`
+handlers. Since game time only moves in steps every player's computer takes
+alike, a game timer started from a synced point fires in the same step
+everywhere. A timer fires at most once per frame or step; one that fell
+behind goes on from now, so nothing bursts. A game's timers end with it
+(`GAME_END`), real ones go on. Registration is any thread for real time
+(a mod's first enable is on the bootstrap thread), the main thread for game
+time. A mod still in its `tome_mod_load` or `tome_mod_enable` on another
+thread (the guard would skip the call) keeps its due timers due until it's
+done, so one that fires once isn't lost. One revoker per mod however many
+timers it starts (a mod starting a timer every frame mustn't grow its
+revoker list). The fake game's
+`tome_test_event(TICK)`/`(GAME_TICK)` move the clocks by `delta`
+(`events::dispatch_for_test`), so mods' own tests drive timers too.
+Wasm modules keep a record per timer and free it when the callback block
+says the timer is done (`wasm-mods.md`); `timers_api::set_ended_hook`
+tells `wasm_mods.cpp` of game timers that ended without firing.
+
+## Desync checks
+
+API version 19 (`on_checksum`; `loader/src/desync.cpp`, the wire format and
+the comparison in `core/desync.*`, unit-tested and fuzzed). A lockstep game
+desyncs when one computer computes something the others don't; the game
+then drops players without saying why. A required mod's checksum callback
+returns a hash of its game state; Tome compares it between the players.
+
+- **Rounds:** every 3 s of game time (`desync::kInterval`, in the integer
+  microseconds of `core/game_clock.h`, as the timers count), in the game step
+  that passes a multiple of it (`round_ending`), after the step's
+  `GAME_TICK` handlers and game timers: the same step on every computer.
+  Only in a multiplayer game or its replay (the game lock's rule), from the
+  first step on, and only for running `"sync": "required"` mods (the
+  handshake makes sure every player has them), called by mod id, each under
+  `guard::run`.
+- **The channel:** each hash is one SyncStoredInteger action, like the
+  messages between players: game cache `TomeSum`, mission
+  `1 <round> <mod id>`, key the hash in 16 lowercase hex digits, value 0.
+  The handshake's `OnNetSyncStoredInteger` hook hands them to
+  `desync_api::receive` and skips the game's own handling.
+- **Comparing:** `desync::Checker` keeps this computer's hashes for the
+  last 8 rounds; another player's is compared at once, or waits for this
+  computer's round (at most 8 rounds ahead, 2048 in all: the input is
+  other players'). Rounds this computer passed without a hash for that mod
+  (it doesn't run it) compare nothing. Live, its own actions coming back
+  are skipped; in a replay every recorded player's are compared with the
+  replay's.
+- **Telling:** the first match per mod and player is logged ("matches",
+  so the log shows the checks run); the first difference is logged with
+  both hashes and shown to the player (the mod, the other player's name and
+  the game time); later differences only at debug level. Malformed actions
+  are logged 10 per player per game.
+- **Tests:** `tests/test_desync.cpp`, `fuzz/fuzz_desync.cpp` (what parses
+  re-encodes to itself; what waits stays bounded), host tests for the
+  registration, and the two-instance LAN game: sync-test hashes the
+  messages it got, the same on both computers until the client's
+  `/synctest skew`; both sides check the match first, then the difference.
+
+## Profiling mods
+
+`guard::call` (every call into a mod: lifecycle, natives, hooks, events,
+commands, UI, timers, checksums) reads `QueryPerformanceCounter` around the
+call and gives the mod its own time: the call's, less the guarded calls
+inside it (a thread-local counter), which count for whoever they belong to
+(a mod's publish runs the subscribers' callbacks; a hook handler calls
+the next handler). The game's own function, when a mod's REPLACE handler
+hands on to it (`call_next`, also through Tome's own handlers after it),
+runs under `guard::uncharged`, which adds its time to that counter too
+(`Dispatch::original_handed_on`, `core/hooks.cpp`): the game's work isn't
+the mod's. A game function a mod calls itself, hooked or not, still is.
+Lifecycle calls (`tome_mod_load`, enable, disable, unload; `guard::kLifecycle`)
+count in the calls and total time and in "starting and stopping" on the
+Details page, not in the frames or the slowest call: a slow load isn't a
+slow frame, and would hide the per-frame calls. `tome_mod::profile` (`core/profile.*`, unit-tested) adds
+the times up by frame (`events::frames()`, via
+`guard::set_frame_counter`) in a ring of the last 128 frames, and keeps
+the calls, total time and slowest call (what it was: "event handler
+(tick)") since the DLL was loaded. A mod averaging over 4 ms a frame over a
+full window is named in `tome.log` once. `ModStatus::profile` carries the
+numbers to the Details page ("Time: ...", yellow when slow) and to
+`/tome perf` (the busiest 8 running mods). The cost is two counter reads
+and a lock per call.
+
 ## Hooks
 
 `loader/src/hooks.cpp` (patching, Windows) and `loader/src/core/hooks.cpp`,

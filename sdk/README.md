@@ -80,6 +80,19 @@ helpers check for you.
 - **Messages between players** [18]: send up to 1 KiB to your mod on every
   player's computer (`net_send`, `on_net_message`), all at the same point
   of the game, the replay included.
+- **Timers** [19]: run a callback after a delay, once or again and again,
+  on real time (for UI, on every screen) or game time (`TOME_CLOCK_GAME`:
+  follows the game speed and pauses, and fires in the same game step on
+  every player's computer, so gameplay can use it). `timer_start`,
+  `timer_stop`.
+- **Desync checks** [19]: give Tome a hash of your mod's game state
+  (`on_checksum`, `tome_hash_*`); in a multiplayer game it compares it
+  between the players every few seconds and tells them which mod differs
+  from whose computer, instead of the game dropping players without saying
+  why.
+- **Your mod's time**: Tome times every call into your mod. The Mods menu's
+  Details page shows its time a frame and its slowest call, `/tome perf`
+  the busiest mods.
 
 A mod built against an older `tome.h` keeps working with a newer Tome: the
 API only ever grows.

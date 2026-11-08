@@ -367,6 +367,18 @@ void call_original(void* context, tome_hook_call& call) {
     if (kind == Result::Double) call.result_float = r.fp.d;
 }
 
+// For a mod's REPLACE handler handing on: the game's time isn't the mod's.
+void call_original_uncharged(void* context, tome_hook_call& call) {
+    struct Args {
+        void* context;
+        tome_hook_call* call;
+    } args{context, &call};
+    guard::uncharged([](void* a) {
+        auto& x = *static_cast<Args*>(a);
+        call_original(x.context, *x.call);
+    }, &args);
+}
+
 // Every mod handler runs under a guard; a crashed one is abandoned and the
 // chain goes on without it.
 bool invoke_guarded(const Handler& h, tome_hook_call& call) {
@@ -798,6 +810,7 @@ extern "C" void tome_hook_dispatch(TomeHookFrame* frame) {
         d.handlers = chain->data();
         d.count = chain->size();
         d.original = call_original;
+        d.original_handed_on = call_original_uncharged;
         d.context = &original;
         d.invoke = invoke_guarded;
         run(d);

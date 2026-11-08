@@ -7,6 +7,7 @@
 #include "core/hash_cache.h"
 #include "core/json.h"
 #include "crash_handler.h"
+#include "events.h"
 #include "frames.h"
 #include "guard.h"
 #include "hooks.h"
@@ -665,7 +666,8 @@ bool ModManager::load_wasm(Runtime& rt, const Installed& mod, std::string& error
     int32_t rc = 0;
     Starting starting(rt.handle);
     wasm_mods::Instance* wasm = rt.wasm.get();
-    const bool returned = guard::run(&rt.handle, "tome_mod_load", nullptr, [&] { rc = wasm->call_load(); });
+    const bool returned = guard::run(&rt.handle, "tome_mod_load", nullptr, [&] { rc = wasm->call_load(); },
+                                     guard::kLifecycle);
     if (!returned || rc != 0) {
         error = !returned ? rt.handle.fault_text() : "tome_mod_load returned " + std::to_string(rc);
         // Nothing of a module outlives it (no threads, no patches): free it.
@@ -719,7 +721,8 @@ bool ModManager::load(Runtime& rt, const Installed& mod, std::string& error) {
     // in between (a crash marks the mod faulted, which skips it too).
     Starting starting(rt.handle);
     const bool returned =
-        guard::run(&rt.handle, "tome_mod_load", nullptr, [&] { rc = load_fn(api_table(), &rt.handle); });
+        guard::run(&rt.handle, "tome_mod_load", nullptr, [&] { rc = load_fn(api_table(), &rt.handle); },
+                   guard::kLifecycle);
     if (!returned) {
         error = rt.handle.fault_text();
         // The DLL stays loaded: whatever the crash left behind (a thread, a
@@ -762,11 +765,12 @@ void ModManager::shutdown() {
             // whatever the trap left, and it has nothing to undo.
             if (rt->wasm && !rt->handle.faulted && rt->wasm->has("tome_mod_unload")) {
                 wasm_mods::Instance* wasm = rt->wasm.get();
-                guard::run(&rt->handle, "tome_mod_unload", nullptr, [&] { wasm->call("tome_mod_unload"); });
+                guard::run(&rt->handle, "tome_mod_unload", nullptr, [&] { wasm->call("tome_mod_unload"); },
+                           guard::kLifecycle);
             }
             if (rt->unload_fn) {
                 guard::run(&rt->handle, "tome_mod_unload", nullptr, [&] { rt->unload_fn(&rt->handle); },
-                           guard::kEvenIfFaulted);
+                           guard::kEvenIfFaulted | guard::kLifecycle);
             }
             rt->handle.revoke_all();
             ++count;
@@ -781,7 +785,8 @@ void ModManager::unload(Runtime& rt) {
         // its own), so it's always freed.
         wasm_mods::Instance* wasm = rt.wasm.get();
         if (!rt.handle.faulted && wasm->has("tome_mod_unload")) {
-            guard::run(&rt.handle, "tome_mod_unload", nullptr, [&] { wasm->call("tome_mod_unload"); });
+            guard::run(&rt.handle, "tome_mod_unload", nullptr, [&] { wasm->call("tome_mod_unload"); },
+                       guard::kLifecycle);
         }
         rt.handle.revoke_all();
         rt.wasm.reset();
@@ -793,7 +798,8 @@ void ModManager::unload(Runtime& rt) {
     // A crashed mod still gets its tome_mod_disable and tome_mod_unload, to
     // undo what Tome can't (its own threads or patches).
     if (rt.unload_fn) {
-        guard::run(&rt.handle, "tome_mod_unload", nullptr, [&] { rt.unload_fn(&rt.handle); }, guard::kEvenIfFaulted);
+        guard::run(&rt.handle, "tome_mod_unload", nullptr, [&] { rt.unload_fn(&rt.handle); },
+                   guard::kEvenIfFaulted | guard::kLifecycle);
     }
     rt.handle.revoke_all();  // anything registered after disable, e.g. from tome_mod_unload
     if (rt.handle.faulted) {
@@ -815,11 +821,11 @@ void ModManager::enable(Runtime& rt) {
     // the refresh disables it.
     if (rt.enable_fn) {
         Starting starting(rt.handle);
-        guard::run(&rt.handle, "tome_mod_enable", nullptr, [&] { rt.enable_fn(&rt.handle); });
+        guard::run(&rt.handle, "tome_mod_enable", nullptr, [&] { rt.enable_fn(&rt.handle); }, guard::kLifecycle);
     } else if (rt.wasm) {
         Starting starting(rt.handle);
         wasm_mods::Instance* wasm = rt.wasm.get();
-        guard::run(&rt.handle, "tome_mod_enable", nullptr, [&] { wasm->enable(); });
+        guard::run(&rt.handle, "tome_mod_enable", nullptr, [&] { wasm->enable(); }, guard::kLifecycle);
     }
     rt.enabled = true;
     enable_order_.push_back(rt.handle.id);
@@ -830,11 +836,11 @@ void ModManager::disable(Runtime& rt) {
     if (!rt.enabled) return;
     if (rt.disable_fn) {
         guard::run(&rt.handle, "tome_mod_disable", nullptr, [&] { rt.disable_fn(&rt.handle); },
-                   guard::kEvenIfFaulted);
+                   guard::kEvenIfFaulted | guard::kLifecycle);
     } else if (rt.wasm && !rt.handle.faulted && rt.wasm->has("tome_mod_disable")) {
         // Not after a trap: the module's state is whatever the trap left.
         wasm_mods::Instance* wasm = rt.wasm.get();
-        guard::run(&rt.handle, "tome_mod_disable", nullptr, [&] { wasm->call("tome_mod_disable"); });
+        guard::run(&rt.handle, "tome_mod_disable", nullptr, [&] { wasm->call("tome_mod_disable"); }, guard::kLifecycle);
     }
     rt.handle.revoke_all();
     if (rt.wasm) rt.wasm->revoked();
@@ -1516,6 +1522,8 @@ std::vector<ModStatus> ModManager::status() const {
     for (ModStatus& s : status) {
         auto values = settings_values_.find(s.id);
         if (!s.settings.settings.empty() && values != settings_values_.end()) s.settings_values = values->second;
+        auto rt = runtime_.find(s.id);
+        if (rt != runtime_.end() && rt->second->loaded()) s.profile = rt->second->handle.profile_stats(events::frames());
     }
     return status;
 }

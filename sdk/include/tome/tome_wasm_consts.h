@@ -4,7 +4,7 @@
 
 /* tome.h's enums for WebAssembly mods (tome_wasm.h). */
 
-#define TOME_API_VERSION 18
+#define TOME_API_VERSION 19
 #define TOME_POPUP_CLOSED (-1)
 #define TOME_NET_MAX_MESSAGE 1024
 
@@ -312,6 +312,28 @@ typedef enum tome_chat_recipient {
     TOME_CHAT_OBSERVERS = 2,  /* observers or referees */
     TOME_CHAT_PRIVATE = 3
 } tome_chat_recipient;
+
+/*
+ * Timers (API version 19). A timer runs `fn` on the main thread after a
+ * delay, once or again and again, on one of two clocks:
+ *   TOME_CLOCK_REAL  real time, checked once per frame drawn (in menus,
+ *                    loading screens and games). For UI.
+ *   TOME_CLOCK_GAME  game time, as GAME_TICK counts it: only in a game,
+ *                    follows the game speed, stops while the game is paused,
+ *                    and the timer ends with the game. It fires in a game
+ *                    step, after that step's GAME_TICK handlers: in the same
+ *                    step on every player's computer, if every computer
+ *                    started it in the same step (from GAME_START, a
+ *                    GAME_TICK, a game event, another game timer or a
+ *                    net_send message; not from a TICK, a click or a key).
+ * A timer fires at most once per frame or step: one that falls behind (an
+ * interval shorter than a frame) fires once and goes on from then, never
+ * in a burst.
+ */
+typedef enum tome_clock {
+    TOME_CLOCK_REAL = 0,
+    TOME_CLOCK_GAME = 1
+} tome_clock;
 
 /*
  * Game objects (API version 16).

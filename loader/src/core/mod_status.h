@@ -6,6 +6,7 @@
 
 #include "json.h"
 #include "keys.h"
+#include "profile.h"
 #include "settings.h"
 
 #include <string>
@@ -42,6 +43,7 @@ struct ModStatus {
     std::string reload;  // "live" / "map" / "restart"
     std::vector<std::string> errors;  // every problem with tome.mod.json, in full
     std::string crash_calls;  // after a crash: where it was called from (likely), as logged
+    profile::Stats profile;   // the time its code took (core/profile.h); calls 0 if none ran
 
     // Settings (core/settings.h): the schema and the current values. A
     // schema that failed to parse leaves `settings` empty and says why in

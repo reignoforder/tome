@@ -124,7 +124,12 @@ bool call_handler(const Handler& h, Dispatch& d) {
     return finished;
 }
 
-void call_next_in(Dispatch& d) {
+// `by_handler`: a REPLACE handler handed on (call_next), the one before
+// d.next; else the chain's own start.
+void call_next_in(Dispatch& d, bool by_handler) {
+    const bool outer_by_mod = d.mod_handed_on;
+    const bool by_mod = outer_by_mod || (by_handler && d.next > 0 && d.handlers[d.next - 1].mod);
+    d.mod_handed_on = by_mod;
     ++d.handed_on;
     for (size_t i = d.next; i < d.count; ++i) {
         const Handler& h = d.handlers[i];
@@ -134,10 +139,20 @@ void call_next_in(Dispatch& d) {
         d.next = i + 1;
         const bool finished = call_handler(h, d);
         d.next = saved;
+        // A crash may have skipped the inner call_next_in that set it.
+        d.mod_handed_on = by_mod;
         // Done unless it was skipped, or crashed before calling next.
-        if (finished || d.handed_on != handed_on) return;
+        if (finished || d.handed_on != handed_on) {
+            d.mod_handed_on = outer_by_mod;
+            return;
+        }
     }
-    d.original(d.context, d.call);
+    if (by_mod && d.original_handed_on) {
+        d.original_handed_on(d.context, d.call);
+    } else {
+        d.original(d.context, d.call);
+    }
+    d.mod_handed_on = outer_by_mod;
 }
 
 } // namespace
@@ -265,7 +280,7 @@ void run(Dispatch& d) {
     if (!d.call.skip_original) {
         d.in_replace = true;
         d.next = 0;
-        call_next_in(d);
+        call_next_in(d, false);
         d.in_replace = false;
     }
     for (size_t i = 0; i < d.count; ++i) {
@@ -290,7 +305,7 @@ void call_next(tome_hook_call* call) {
     if (!call) return;
     for (auto it = t_dispatches.rbegin(); it != t_dispatches.rend(); ++it) {
         if (&(*it)->call == call) {
-            if ((*it)->in_replace) call_next_in(**it);
+            if ((*it)->in_replace) call_next_in(**it, true);
             return;
         }
     }

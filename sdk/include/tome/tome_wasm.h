@@ -217,6 +217,10 @@ TOME_WASM_IMPORT(host_player) int32_t tome_host_player(void);
  * player's computer, from the game's first step on; tome_on_net_message (below) receives them. */
 TOME_WASM_IMPORT(net_send) int32_t tome_net_send(const void* data, uint32_t size);
 TOME_WASM_IMPORT(on_net_message) int32_t tome_raw_on_net_message(uint32_t callback);
+/* Timers and desync checks (tome.h, API version 19): use tome_timer_start and tome_on_checksum (below). */
+TOME_WASM_IMPORT(timer_start) int32_t tome_raw_timer_start(int32_t clock, double delay, double interval, uint32_t callback, uint32_t* timer);
+TOME_WASM_IMPORT(timer_stop) int32_t tome_raw_timer_stop(uint32_t timer);
+TOME_WASM_IMPORT(on_checksum) int32_t tome_raw_on_checksum(uint32_t callback);
 /* One argument or the result of jass_call: the member the native's signature
  * says. Handles are JASS handle ids here (tome_handle_of), not this module's
  * object handles; strings are UTF-8. */
@@ -235,6 +239,30 @@ TOME_WASM_IMPORT(jass_call) int32_t tome_raw_jass_call(const char* name, uint32_
 #undef TOME_WASM_IMPORT
 
 /* --- the wrappers (support/tome_wasm.c) ---------------------------------- */
+
+/* A hash for desync checks, as tome.h's (FNV-1a, 64 bits; the same on every computer). */
+#define TOME_HASH_INIT 0xcbf29ce484222325ull
+static inline uint64_t tome_hash_bytes(uint64_t hash, const void* data, size_t size) {
+    const unsigned char* p = (const unsigned char*)data;
+    for (size_t i = 0; i < size; ++i) {
+        hash ^= p[i];
+        hash *= 0x100000001b3ull;
+    }
+    return hash;
+}
+static inline uint64_t tome_hash_u32(uint64_t hash, uint32_t value) {
+    const unsigned char b[4] = {(unsigned char)value, (unsigned char)(value >> 8), (unsigned char)(value >> 16),
+                                (unsigned char)(value >> 24)};
+    return tome_hash_bytes(hash, b, 4);
+}
+static inline uint64_t tome_hash_u64(uint64_t hash, uint64_t value) {
+    return tome_hash_u32(tome_hash_u32(hash, (uint32_t)value), (uint32_t)(value >> 32));
+}
+static inline uint64_t tome_hash_double(uint64_t hash, double value) {
+    uint64_t bits;
+    __builtin_memcpy(&bits, &value, sizeof(bits));
+    return tome_hash_u64(hash, bits);
+}
 
 size_t tome_strlen(const char* s);
 
@@ -304,6 +332,15 @@ int32_t tome_on_keybind(const char* id, tome_text_fn fn, void* user);          /
 int32_t tome_subscribe(const char* topic, tome_message_fn fn, void* user);
 int32_t tome_register_native(const char* name, tome_native_fn fn, void* user);
 int32_t tome_on_net_message(tome_net_message_fn fn, void* user);
+/* A timer (tome.h, timer_start: TOME_CLOCK_REAL or TOME_CLOCK_GAME); *timer (may be NULL) gets its id.
+ * A registration until it fires for the last time, is stopped or its game ends. */
+typedef void (*tome_timer_fn)(uint32_t timer, void* user);
+int32_t tome_timer_start(int32_t clock, double delay, double interval, tome_timer_fn fn, void* user, uint32_t* timer);
+int32_t tome_timer_stop(uint32_t timer);
+/* Desync checks (tome.h, on_checksum): fn returns a hash of the mod's game state (tome_hash_* below).
+ * NULL removes it. */
+typedef uint64_t (*tome_checksum_fn)(void* user);
+int32_t tome_on_checksum(tome_checksum_fn fn, void* user);
 /* fn may be NULL; *id (may be NULL) gets the popup's id. */
 int32_t tome_popup(const char* title, const char* text, const char* const* options, int32_t option_count,
                    int32_t default_option, int32_t cancel_option, tome_popup_fn fn, void* user, uint32_t* id);

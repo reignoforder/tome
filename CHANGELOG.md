@@ -26,7 +26,25 @@ API version of each addition in `tome.h` and `sdk/README.md` ("[14]").
 
 ## Unreleased
 
-API version 18.
+API version 19.
+
+- **Mods: timers** (`timer_start`, `timer_stop`, also for WebAssembly mods):
+  a callback after a delay, once or repeating, on real time (every screen)
+  or game time (a game only: follows the game speed, stops while paused,
+  fires in the same game step on every player's computer, whatever their
+  FPU settings: game time is counted in whole microseconds, ends with the
+  game). Revoked on disable; the fake game's ticks move them in mods' tests.
+- **Mods: desync checks** (`on_checksum`, `tome_hash_*`, also for
+  WebAssembly mods): a `"sync": "required"` mod gives a hash of its game
+  state; every 3 s of a multiplayer game Tome compares it between the
+  players and tells the player which mod differs from whose computer, and
+  when (also in replays, against the recorded game).
+- **Mod profiler**: Tome times every call into a mod (its own code, not
+  other mods' callbacks it causes, nor the game's function a replace hook
+  hands on to). Loading, enabling, disabling and unloading count apart
+  from the frames. The mod menu's Details page shows each
+  running mod's time a frame, its peak and slowest call; `/tome perf` lists
+  the busiest mods; a mod averaging over 4 ms a frame is named in `tome.log`.
 
 - **Mods: messages between players** (`net_send`, `on_net_message`, also for
   WebAssembly mods): up to 1 KiB to the same mod on every player's computer,

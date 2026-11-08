@@ -244,7 +244,7 @@ click:CreateButton;wait:Screen ready: create LAN game;click:PlayButton;wait:Scre
 wait:My mods 1/1: sync-test 1.0.1;click:StartGameButton;wait:not starting, the players' required mods differ;\
 wait:My mods 1/1: sync-test 1.0.0;click:StartGameButton;wait:Game started: ;\
 wait:Handshake: every player;wait:message from player 1 (1000 bytes;type:/synctest from host;\
-wait:message from player 0 (9 bytes;wait:turns off when it ends;settle;\
+wait:message from player 0 (9 bytes;wait:Desync check: told the player;wait:turns off when it ends;settle;\
 key:F10;settle;click:EndGameButton;settle;click:QuitButton;wait:Screen: score screen;settle;click:ScoreScreenOkButton"
 check "$HOST_LOG" "Handshake: lobby opened" "host: the lobby is open" || exit 1
 check "$HOST_LOG" "Screen ready: lobby" "host: the lobby takes input" || exit 1
@@ -255,7 +255,8 @@ check "$HOST_LOG" "Screen ready: lobby" "host: the lobby takes input" || exit 1
 launch client "wait:Screen ready: main menu;click:LocalAreaNetworkButton;wait:Screen ready: LAN;\
 focus:PlayerNameEditBox;text:Guest;frames:120;0.26,0.335;settle;click:JoinButton;wait:Screen ready: lobby;\
 wait:Game started: ;wait:Handshake: every player;type:/synctest hello;wait:message from player 1 (5 bytes;\
-type:/synctest big"
+type:/synctest big;\
+wait:message from player 0 (9 bytes;wait:Desync check: sync-test's state matches;type:/synctest skew"
 
 # Every check below needs the client in the lobby: without it they would
 # each wait out the watchdog.
@@ -309,7 +310,16 @@ for who in host client; do
         "$who: gets the client's 1000 bytes whole (6 actions)"
     check "$log" "\[sync-test\] message from player 0 \(9 bytes, fnv [0-9a-f]+, replay 0\): from host" \
         "$who: gets the host's message"
+    # Desync checks (sync-test's on_checksum): the same state on both
+    # computers until the client's /synctest skew, then both see it differ.
+    other=1; [[ "$who" == client ]] && other=0
+    check "$log" "Desync check: sync-test's state matches player $other " "$who: the desync check matches at first"
+    check "$log" "Desync check: sync-test's state differs between this computer \([0-9a-f]{16}\) and player $other " \
+        "$who: and catches the client's skewed state"
+    check "$log" "Desync check: told the player" "$who: tells the player"
 done
+check_order "$CLIENT_LOG" "skewed this computer's state" "Desync check: sync-test's state differs" \
+    "client: the difference comes after the skew"
 # The host is in the game: what it logs from here on is about leaving it
 # (its "Screen: LAN" from before the game mustn't count).
 IN_GAME=$(mark "$HOST_LOG")

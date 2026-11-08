@@ -37,8 +37,9 @@ extern "C" {
  * 14: the game's files (read_game_file). 15: the game's edition (tome_game_info.edition).
  * 16: game objects (object_type, object_of, handle_of, player_object, unit_info, get_property,
  * set_property, jass_call, get_keyed_property, set_keyed_property, list_objects).
- * 17: the game's host (host_player). 18: messages between players (net_send, on_net_message). */
-#define TOME_API_VERSION 18
+ * 17: the game's host (host_player). 18: messages between players (net_send, on_net_message).
+ * 19: timers (timer_start, timer_stop) and desync checks (on_checksum). */
+#define TOME_API_VERSION 19
 
 #define TOME_CALL __cdecl
 /* C linkage in C++ too: Tome looks the lifecycle functions up by their plain names. */
@@ -464,7 +465,8 @@ typedef struct tome_event_info {
     /* TICK: the number of frames so far, counting from 1. */
     uint32_t frame;
     /* GAME_TICK, GAME_END: seconds of game time since the game started (or
-     * a saved game was loaded), including this step. */
+     * a saved game was loaded), including this step. Tome counts it in
+     * whole microseconds, the same on every player's computer. */
     double game_time;
     /* API version 8: check `size` before reading these. */
     /* MAP_LOAD, GAME_START, GAME_END: the map's description, "" if none. */
@@ -696,6 +698,51 @@ typedef struct tome_net_message {
 } tome_net_message;
 
 typedef void (TOME_CALL *tome_net_message_fn)(tome_mod* mod, const tome_net_message* message, void* user);
+
+/*
+ * Timers (API version 19). A timer runs `fn` on the main thread after a
+ * delay, once or again and again, on one of two clocks:
+ *   TOME_CLOCK_REAL  real time, checked once per frame drawn (in menus,
+ *                    loading screens and games). For UI.
+ *   TOME_CLOCK_GAME  game time, as GAME_TICK counts it: only in a game,
+ *                    follows the game speed, stops while the game is paused,
+ *                    and the timer ends with the game. It fires in a game
+ *                    step, after that step's GAME_TICK handlers: in the same
+ *                    step on every player's computer, if every computer
+ *                    started it in the same step (from GAME_START, a
+ *                    GAME_TICK, a game event, another game timer or a
+ *                    net_send message; not from a TICK, a click or a key).
+ * A timer fires at most once per frame or step: one that falls behind (an
+ * interval shorter than a frame) fires once and goes on from then, never
+ * in a burst.
+ */
+typedef enum tome_clock {
+    TOME_CLOCK_REAL = 0,
+    TOME_CLOCK_GAME = 1
+} tome_clock;
+
+/* `timer` is the id timer_start gave. */
+typedef void (TOME_CALL *tome_timer_fn)(tome_mod* mod, uint32_t timer, void* user);
+
+/*
+ * Desync checks (API version 19). A multiplayer game stays in sync only if
+ * every player's computer computes the same game, mods' own state included
+ * (a mod changing the game from a value only one computer has, or keeping
+ * its own counters differently, sends the game out of sync, and the game
+ * then drops players without saying why). A "sync": "required" mod can
+ * give Tome a hash of its game state: every few seconds of game time, Tome
+ * calls the callback in the same game step on every player's computer,
+ * sends the result to the others and compares. The first difference
+ * between this computer and a player, per mod and game, is shown to the
+ * player ("<mod id> differs between you and player 2"); every one is in
+ * tome.log with both hashes and the time. In a replay of a multiplayer
+ * game, the recorded hashes are compared with the replay's.
+ *
+ * The callback returns a hash of what must be equal on every computer
+ * (the units it made, its counters and decisions), not of UI, settings or
+ * anything per player. tome_hash_* below make one. Keep it cheap.
+ */
+typedef uint64_t (TOME_CALL *tome_checksum_fn)(tome_mod* mod, void* user);
 
 /* `popup` is the id popup() gave; `choice` an index into options, or TOME_POPUP_CLOSED. */
 typedef void (TOME_CALL *tome_popup_fn)(tome_mod* mod, uint32_t popup, int32_t choice, void* user);
@@ -1312,6 +1359,34 @@ typedef struct tome_api {
      * thread (tome_mod_enable). A message from another player is untrusted
      * input: check what it says. */
     tome_result (TOME_CALL *on_net_message)(tome_mod* mod, tome_net_message_fn fn, void* user);
+
+    /* --- API version 19: timers and desync checks --- */
+
+    /* Starts a timer on `clock` (tome_clock): `fn` runs `delay` seconds from
+     * now (0: the next frame or game step), then every `interval` seconds
+     * until timer_stop (0: only once). Times are rounded to whole
+     * microseconds of the clock, so game timers fire in the same step on
+     * every player's computer. Puts its id (never 0) in *timer, if
+     * `timer` isn't NULL. Revoked on disable. TOME_ERR_INVALID_ARGUMENT for
+     * another clock or a delay or interval that's negative or not a finite
+     * number. TOME_CLOCK_REAL: any thread. TOME_CLOCK_GAME: main thread, and
+     * TOME_ERR_UNAVAILABLE outside a game. */
+    tome_result (TOME_CALL *timer_start)(tome_mod* mod, int32_t clock, double delay, double interval,
+                                         tome_timer_fn fn, void* user, uint32_t* timer);
+
+    /* Stops one of the mod's timers; it doesn't fire again (also from its own
+     * callback). TOME_ERR_INVALID_ARGUMENT if it isn't running: it was
+     * stopped, fired for the last time, or its game ended. Any thread; from
+     * another one, a callback the main thread was just starting may still
+     * run once after this returns (keep `user` alive until it can't). */
+    tome_result (TOME_CALL *timer_stop)(tome_mod* mod, uint32_t timer);
+
+    /* Gives Tome the mod's checksum callback for desync checks (see
+     * tome_checksum_fn): one per mod, registering again replaces it, NULL
+     * removes it. Called only for a "sync": "required" mod, in a
+     * multiplayer game or its replay, on the main thread. Any thread.
+     * Revoked on disable. */
+    tome_result (TOME_CALL *on_checksum)(tome_mod* mod, tome_checksum_fn fn, void* user);
 } tome_api;
 
 /*
@@ -1490,6 +1565,55 @@ static inline int tome_has_net_messages(const tome_api* api) {
 static inline int tome_has_host_player(const tome_api* api) {
     return api->api_version >= 17 &&
            api->size >= offsetof(tome_api, host_player) + sizeof(api->host_player);
+}
+
+/* True if the running Tome has timers and desync checks (version 19). */
+static inline int tome_has_timers(const tome_api* api) {
+    return api->api_version >= 19 && api->size >= offsetof(tome_api, on_checksum) + sizeof(api->on_checksum);
+}
+
+/*
+ * A hash for desync checks (FNV-1a, 64 bits): start from TOME_HASH_INIT and
+ * add values in an order every computer shares. The same bytes give the
+ * same hash on every computer.
+ *   uint64_t h = TOME_HASH_INIT;
+ *   h = tome_hash_u32(h, wave);
+ *   h = tome_hash_double(h, boss_life);
+ */
+#define TOME_HASH_INIT 0xcbf29ce484222325ull
+
+static inline uint64_t tome_hash_bytes(uint64_t hash, const void* data, size_t size) {
+    const unsigned char* p = (const unsigned char*)data;
+    size_t i;
+    for (i = 0; i < size; ++i) {
+        hash ^= p[i];
+        hash *= 0x100000001b3ull;
+    }
+    return hash;
+}
+
+static inline uint64_t tome_hash_u32(uint64_t hash, uint32_t value) {
+    unsigned char b[4];
+    b[0] = (unsigned char)value;
+    b[1] = (unsigned char)(value >> 8);
+    b[2] = (unsigned char)(value >> 16);
+    b[3] = (unsigned char)(value >> 24);
+    return tome_hash_bytes(hash, b, 4);
+}
+
+static inline uint64_t tome_hash_u64(uint64_t hash, uint64_t value) {
+    return tome_hash_u32(tome_hash_u32(hash, (uint32_t)value), (uint32_t)(value >> 32));
+}
+
+/* A number's bits: 0.0 and -0.0 differ, which they also do to the game. */
+static inline uint64_t tome_hash_double(uint64_t hash, double value) {
+    uint64_t bits;
+    memcpy(&bits, &value, sizeof(bits));
+    return tome_hash_u64(hash, bits);
+}
+
+static inline uint64_t tome_hash_string(uint64_t hash, const char* text) {
+    return text ? tome_hash_bytes(hash, text, strlen(text) + 1) : tome_hash_u32(hash, 0);
 }
 
 static inline tome_result tome_get_unit_info(const tome_api* api, const void* unit, tome_unit* out) {

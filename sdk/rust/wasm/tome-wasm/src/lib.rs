@@ -719,6 +719,104 @@ pub fn on_net_message(f: impl Fn(i32, &[u8], bool) + 'static) -> Result<()> {
     rt::register(Callback::Net(Rc::new(f)), |id| unsafe { raw::on_net_message(id) }).map(drop)
 }
 
+// --- timers and desync checks ------------------------------------------------
+
+/// Which clock a timer runs on (`tome_clock`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Clock {
+    /// Real time, checked once per frame drawn, in menus and games: for UI.
+    Real,
+    /// Game time: only in a game, follows the game speed, stops while it's
+    /// paused, ends with the game; fires in the same game step on every
+    /// player's computer if each started it in the same one.
+    Game,
+}
+
+/// Calls `f` (with the timer's id) `delay` seconds from now, then every
+/// `interval` seconds until `timer_stop` (0: only once). Returns its id.
+pub fn timer_start(clock: Clock, delay: f64, interval: f64, f: impl Fn(u32) + 'static) -> Result<u32> {
+    let clock = match clock {
+        Clock::Real => consts::TOME_CLOCK_REAL,
+        Clock::Game => consts::TOME_CLOCK_GAME,
+    };
+    let mut timer = 0u32;
+    let id = rt::register(Callback::Timer(Rc::new(f)), |cb| unsafe {
+        raw::timer_start(clock, delay, interval, cb, &mut timer)
+    })?;
+    rt::note_timer(timer, id);
+    Ok(timer)
+}
+
+/// Stops one of the mod's timers.
+pub fn timer_stop(timer: u32) -> Result<()> {
+    check(unsafe { raw::timer_stop(timer) })?;
+    rt::forget_timer(timer);
+    Ok(())
+}
+
+/// Gives Tome the mod's checksum for desync checks (tome.h, `on_checksum`):
+/// `f` returns a hash of the mod's game state ([`Hash`] makes one), which
+/// must be the same on every player's computer. For a "sync": "required"
+/// mod, called every few seconds of a multiplayer game.
+pub fn on_checksum(f: impl Fn() -> u64 + 'static) -> Result<()> {
+    let id = rt::register(Callback::Checksum(Rc::new(f)), |id| unsafe { raw::on_checksum(id) })?;
+    rt::replace_checksum(Some(id));
+    Ok(())
+}
+
+/// Removes the mod's checksum.
+pub fn clear_checksum() -> Result<()> {
+    check(unsafe { raw::on_checksum(0) })?;
+    rt::replace_checksum(None);
+    Ok(())
+}
+
+/// A hash for desync checks, as tome.h's `tome_hash_*` (FNV-1a, 64 bits):
+/// `Hash::new().u32(wave).f64(boss_life).value()`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Hash(pub u64);
+
+impl Default for Hash {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Hash {
+    /// The starting value (`TOME_HASH_INIT`).
+    pub const fn new() -> Self {
+        Hash(0xcbf2_9ce4_8422_2325)
+    }
+    /// Adds bytes.
+    pub fn bytes(mut self, data: &[u8]) -> Self {
+        for &b in data {
+            self.0 ^= u64::from(b);
+            self.0 = self.0.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        self
+    }
+    /// Adds a number, little-endian (as `tome_hash_u32`).
+    pub fn u32(self, value: u32) -> Self {
+        self.bytes(&value.to_le_bytes())
+    }
+    /// Adds a number, little-endian.
+    pub fn i32(self, value: i32) -> Self {
+        self.bytes(&value.to_le_bytes())
+    }
+    /// Adds a number, little-endian (as `tome_hash_u64`).
+    pub fn u64(self, value: u64) -> Self {
+        self.bytes(&value.to_le_bytes())
+    }
+    /// A number's bits (0.0 and -0.0 differ).
+    pub fn f64(self, value: f64) -> Self {
+        self.u64(value.to_bits())
+    }
+    /// The hash.
+    pub fn value(self) -> u64 {
+        self.0
+    }
+}
+
 // --- files --------------------------------------------------------------------
 
 /// A game file (through the archives and Tome's overlay), if there is one.
@@ -793,6 +891,14 @@ macro_rules! export_mod {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn hash_matches_fnv1a() {
+        // FNV-1a 64 of "a" is af63dc4c8601ec8c; of nothing, the start value.
+        assert_eq!(super::Hash::new().value(), 0xcbf2_9ce4_8422_2325);
+        assert_eq!(super::Hash::new().bytes(b"a").value(), 0xaf63_dc4c_8601_ec8c);
+        assert_eq!(super::Hash::new().u32(1).value(), super::Hash::new().bytes(&[1, 0, 0, 0]).value());
+    }
+
     use super::*;
 
     #[test]

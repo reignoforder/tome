@@ -2,9 +2,11 @@
 #include "events.h"
 
 #include "core/chat.h"
+#include "core/game_clock.h"
 #include "core/jass.h"
 #include "core/log_view.h"
 #include "crash_loop.h"
+#include "desync.h"
 #include "storm.h"
 #include "frames.h"
 #include "game_build.h"
@@ -16,6 +18,7 @@
 #include "mod_manager.h"
 #include "popups.h"
 #include "restart.h"
+#include "timers.h"
 #include "units.h"
 #include "unwind.h"
 
@@ -82,7 +85,9 @@ std::shared_ptr<const RegList> snapshot(int32_t event) {
 bool g_map_loaded = false;  // from the loading screen until the end of its game
 bool g_game_started = false;
 unsigned g_game_serial = 0;  // counts started games
-double g_game_time = 0;      // game seconds since the game started
+// Game time since the game started: whole microseconds, summed the same way
+// on every computer (core/game_clock.h; timers and desync rounds use it).
+game_clock::Micros g_game_time = 0;
 std::string g_map_name, g_map_path, g_map_description;
 units::Selection g_selection;  // the local selection as of the last frame
 bool g_paused = false;
@@ -107,7 +112,8 @@ tome_event_info make_info(int32_t event, double delta) {
     info.script_shadows = has_map ? static_cast<uint32_t>(g_script_shadows.size()) : 0;
     info.delta = delta;
     info.frame = event == TOME_EVENT_TICK ? g_frames.load(std::memory_order_relaxed) : 0;
-    info.game_time = event == TOME_EVENT_GAME_TICK || event == TOME_EVENT_GAME_END ? g_game_time : 0;
+    info.game_time =
+        event == TOME_EVENT_GAME_TICK || event == TOME_EVENT_GAME_END ? game_clock::to_seconds(g_game_time) : 0;
     info.units = nullptr;
     info.leader = -1;
     info.player = -1;
@@ -247,6 +253,7 @@ void end_game() {
     TOME_INFO("Game ended: %s", g_map_name.c_str());
     handshake::on_game_end();
     fire(TOME_EVENT_GAME_END);
+    timers_api::on_game_end();
     g_map_loaded = false;
     g_game_started = false;
     g_selection = {};
@@ -315,8 +322,18 @@ void tome_command(const std::string& args) {
         say(cmd.error);
         return;
     case chat::TomeAction::Help:
-        say("/tome list | enable <id> | disable <id> | reload [id] | logs [warn|error] [count]");
+        say("/tome list | enable <id> | disable <id> | reload [id] | logs [warn|error] [count] | perf");
         return;
+    case chat::TomeAction::Perf: {
+        std::vector<profile::Named> mods;
+        for (const ModStatus& s : mod_manager().status()) {
+            if (s.running) mods.push_back({s.id, s.profile});
+        }
+        std::vector<std::string> lines = profile::perf_lines(std::move(mods), 8);
+        if (lines.empty()) say("no running mod has run any code yet");
+        for (const std::string& line : lines) say(line);
+        return;
+    }
     case chat::TomeAction::Logs: {
         std::vector<std::string> lines = log_view::format(tail, cmd.filter, cmd.count);
         if (lines.empty()) {
@@ -649,6 +666,8 @@ void TOME_CALL after_enter_game(tome_mod*, tome_hook_call*, void*) {
     }
     if (void* game_ui = g_game_ui_get(0, 0)) frames::on_screen(TOME_UI_GAME, game_ui);
     handshake::on_game_start();
+    timers_api::on_game_start();
+    desync_api::on_game_start();
     fire(TOME_EVENT_GAME_START);
 }
 
@@ -679,6 +698,7 @@ void TOME_CALL before_present(tome_mod*, tome_hook_call*, void*) {
     g_frames.fetch_add(1, std::memory_order_relaxed);
     if (TOME_DEV && g_glue_get) watch_screen();
     if (g_tick_handlers.load(std::memory_order_relaxed) > 0) fire(TOME_EVENT_TICK, delta);
+    timers_api::on_frame(delta);
     if (g_game_started) check_selection();
     popups::on_frame();
 }
@@ -731,9 +751,14 @@ void TOME_CALL before_game_tick(tome_mod*, tome_hook_call* call, void*) {
                 reinterpret_cast<const char*>(static_cast<uintptr_t>(call->args[0])) +
                     g_build->game.game_tick_step_offset,
                 sizeof(step));
-    g_game_time += step;
-    handshake::on_game_tick(g_game_time);
+    // Summed as integers: a float sum would round by the FPU's precision
+    // setting, which can differ between players.
+    const game_clock::Micros before = g_game_time;
+    g_game_time += game_clock::from_seconds(step);
+    handshake::on_game_tick(game_clock::to_seconds(g_game_time));
     if (g_game_tick_handlers.load(std::memory_order_relaxed) > 0) fire(TOME_EVENT_GAME_TICK, step);
+    timers_api::on_game_step(g_game_time);
+    desync_api::on_game_step(before, g_game_time);
     check_resources();
     check_time_of_day();
 }
@@ -1402,7 +1427,19 @@ void dispatch_for_test(tome_event_info info) {
                               &info.object_name, &info.save_name}) {
         if (!*text) *text = "";
     }
+    // Timers follow the test's frames and steps, as they follow the game's.
+    static game_clock::Micros test_game_time = 0;
+    if (info.event == TOME_EVENT_GAME_START) {
+        timers_api::on_game_start();
+        test_game_time = 0;
+    }
     fire_info(info);
+    if (info.event == TOME_EVENT_TICK) timers_api::on_frame(info.delta);
+    if (info.event == TOME_EVENT_GAME_TICK) {
+        test_game_time += game_clock::from_seconds(info.delta);
+        timers_api::on_game_step(test_game_time);
+    }
+    if (info.event == TOME_EVENT_GAME_END) timers_api::on_game_end();
 }
 
 tome_event_info default_info_for_test(int32_t event) {

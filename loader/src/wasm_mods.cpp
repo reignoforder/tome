@@ -14,6 +14,8 @@
 #include "objects.h"
 #include "paths.h"
 #include "storm.h"
+#include "guard.h"
+#include "timers.h"
 
 #include "wasm_export.h"
 
@@ -98,6 +100,11 @@ struct Instance::Impl {
     // The `user` of each callback the module registered; they live as long
     // as the instance (revoked on disable, before it's destroyed).
     std::deque<Callback> callbacks;
+    // Timers share one `user` (a module may start a timer every frame):
+    // each running one's callback id is kept by timer id, until it fires
+    // for the last time, is stopped or its game ends.
+    Callback timer_cb{this, 0};
+    std::map<uint32_t, uint32_t> timer_slots;
 
     // What a frame handle stands for: looked up again on every use, so a
     // frame that's gone is never touched (frames::frame_alive's rule).
@@ -296,6 +303,7 @@ struct Instance::Impl {
         if (!revoked || depth > 0) return true;
         revoked = false;
         callbacks.clear();
+        timer_slots.clear();
         natives.clear();
         uint32_t argv[1] = {0};
         return !fn_revoked || invoke("tome_callbacks_revoked", fn_revoked, 0, argv);
@@ -307,6 +315,20 @@ struct Instance::Impl {
         if (!to_buffer(make, ptr, len)) return false;
         uint32_t argv[3] = {id, ptr, len};
         return invoke("tome_callback", fn_callback, 3, argv);
+    }
+    // A callback that answers in its block: `size` zero bytes go in, and
+    // what the module left there comes back in `out` (support/tome_wasm.c
+    // writes a checksum's 8 bytes there).
+    bool send_for_result(uint32_t id, uint32_t size, std::vector<uint8_t>& out) {
+        uint32_t ptr = 0, len = 0;
+        if (!to_buffer([&](uint32_t) { return std::string(size, '\0'); }, ptr, len)) return false;
+        uint32_t argv[3] = {id, ptr, len};
+        if (!invoke("tome_callback", fn_callback, 3, argv)) return false;
+        if (!wasm::read_bytes(memory(), ptr, size, size, out) || out.size() != size) {
+            TOME_ERROR("[%s] the module's answer to a callback is outside its memory", mod->id.c_str());
+            return false;
+        }
+        return true;
     }
     bool send_text(uint32_t id, std::string_view text) {
         return send(id, [&](uint32_t) { return std::string(text); });
@@ -506,6 +528,48 @@ bool deliver_net_message(Callback* cb, const tome_net_message* m) {
 void TOME_CALL on_net_message_cb(tome_mod*, const tome_net_message* m, void* user) {
     auto* cb = static_cast<Callback*>(user);
     if (!deliver_net_message(cb, m) && cb->impl->depth == 0) fail_call();
+}
+
+// A timer: [timer id][state], state 0 if it fires again, 1 for its last
+// time, 2 if it ended without firing (its game ended; the module only
+// frees its record of it).
+void TOME_CALL on_timer(tome_mod*, uint32_t timer, void* user) {
+    Impl* impl = static_cast<Callback*>(user)->impl;
+    auto it = impl->timer_slots.find(timer);
+    if (it == impl->timer_slots.end()) return;
+    const uint32_t slot = it->second;
+    const bool last = !timers_api::running(timer);
+    if (last) impl->timer_slots.erase(it);
+    if (!impl->send_words(slot, {timer, last ? 1u : 0u}) && impl->depth == 0) fail_call();
+}
+
+void on_timer_ended(tome_mod* mod, uint32_t timer, tome_timer_fn fn, void* user) {
+    if (fn != on_timer) return;
+    Impl* impl = static_cast<Callback*>(user)->impl;
+    auto it = impl->timer_slots.find(timer);
+    if (it == impl->timer_slots.end()) return;
+    const uint32_t slot = it->second;
+    impl->timer_slots.erase(it);
+    guard::run(mod, "timer callback", "(ended)", [&] {
+        if (!impl->send_words(slot, {timer, 2u}) && impl->depth == 0) fail_call();
+    });
+}
+
+// A checksum: 8 bytes the module overwrites with its hash. Its own frame,
+// so the answer is freed before fail_call.
+bool read_checksum(Callback* cb, uint64_t& hash) {
+    std::vector<uint8_t> answer;
+    if (!cb->impl->send_for_result(cb->id, 8, answer)) return false;
+    hash = 0;
+    for (int i = 0; i < 8; ++i) hash |= static_cast<uint64_t>(answer[i]) << (8 * i);
+    return true;
+}
+
+uint64_t TOME_CALL on_checksum(tome_mod*, void* user) {
+    auto* cb = static_cast<Callback*>(user);
+    uint64_t hash = 0;
+    if (!read_checksum(cb, hash) && cb->impl->depth == 0) fail_call();
+    return hash;
 }
 
 // --- imports (module "tome") ------------------------------------------------
@@ -1128,6 +1192,39 @@ int32_t w_on_net_message(wasm_exec_env_t env, uint32_t callback) {
     return impl->registered(cb, api()->on_net_message(impl->mod, on_net_message_cb, cb));
 }
 
+// Timers and desync checks.
+
+int32_t w_timer_start(wasm_exec_env_t env, int32_t clock, double delay, double interval, uint32_t callback,
+                      uint32_t out) {
+    Impl* impl = impl_of(env);
+    if (!impl->can_take_callbacks("timer_start")) return TOME_ERR_INVALID_ARGUMENT;
+    if (out && !wasm::in_bounds(impl->memory(), out, 4)) {
+        TOME_ERROR("[%s] timer_start: the timer id's place is outside the module's memory", impl->mod->id.c_str());
+        return TOME_ERR_INVALID_ARGUMENT;
+    }
+    uint32_t id = 0;
+    const int32_t r = api()->timer_start(impl->mod, clock, delay, interval, on_timer, &impl->timer_cb, &id);
+    if (r != TOME_OK) return r;
+    impl->timer_slots[id] = callback;
+    store(impl, out, id);
+    return r;
+}
+
+int32_t w_timer_stop(wasm_exec_env_t env, uint32_t timer) {
+    Impl* impl = impl_of(env);
+    const int32_t r = api()->timer_stop(impl->mod, timer);
+    if (r == TOME_OK) impl->timer_slots.erase(timer);
+    return r;
+}
+
+int32_t w_on_checksum(wasm_exec_env_t env, uint32_t callback) {
+    Impl* impl = impl_of(env);
+    if (callback == 0) return api()->on_checksum(impl->mod, nullptr, nullptr);
+    if (!impl->can_take_callbacks("on_checksum")) return TOME_ERR_INVALID_ARGUMENT;
+    Callback* cb = impl->callback(callback);
+    return impl->registered(cb, api()->on_checksum(impl->mod, on_checksum, cb));
+}
+
 // Every object of a type, as the module's handles (u32s) in `out`, up to
 // `max`; how many there are, or -1.
 int32_t w_list_objects(wasm_exec_env_t env, int32_t type, uint32_t out, int32_t max) {
@@ -1279,6 +1376,7 @@ Instance::Instance(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}
 Instance::~Instance() = default;
 
 std::unique_ptr<Instance> Instance::load(tome_mod* mod, const std::wstring& path, std::string& error) {
+    timers_api::set_ended_hook(on_timer_ended);
     if (!runtime()) {
         error = "the WebAssembly runtime couldn't start";
         return nullptr;

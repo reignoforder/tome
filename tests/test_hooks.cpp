@@ -335,3 +335,47 @@ TEST(hooks_call_next_outside_replace_does_nothing) {
     hooks::call_next(nullptr);
     CHECK(g_trace.empty());
 }
+
+namespace {
+void original_handed_on(void* context, tome_hook_call& call) {
+    g_trace += "uncharged-";
+    original(context, call);
+}
+
+uint32_t run_with_handed_on(const std::vector<hooks::Handler>& chain, uint32_t arg) {
+    g_trace.clear();
+    uint32_t args[1] = {arg};
+    hooks::Dispatch d;
+    d.call.args = args;
+    d.call.arg_count = 1;
+    d.handlers = chain.data();
+    d.count = chain.size();
+    d.original = original;
+    d.original_handed_on = original_handed_on;
+    hooks::run(d);
+    return d.call.result;
+}
+} // namespace
+
+// The original runs uncharged (guard::uncharged in the loader) only when a
+// mod's REPLACE handler handed on towards it (through Tome's own handlers
+// too): not without one, nor for Tome's handlers alone (no mod, no
+// profile; the time stays with whoever called the function).
+TEST(hooks_original_handed_on_by_a_mod) {
+    tome_mod* mod = reinterpret_cast<tome_mod*>(0x1000);
+    run_with_handed_on({}, 1);
+    CHECK_EQ(g_trace, std::string("original "));
+    run_with_handed_on({handler(TOME_HOOK_REPLACE, 0, replace_calls_next, "a", 1, mod)}, 1);
+    CHECK_EQ(g_trace, std::string("a( uncharged-original ) "));
+    run_with_handed_on({handler(TOME_HOOK_REPLACE, 0, replace_calls_next, "tome", 1)}, 1);
+    CHECK_EQ(g_trace, std::string("tome( original ) "));
+    // Tome's handler first, then a mod's: the mod's is the one handing on.
+    run_with_handed_on({handler(TOME_HOOK_REPLACE, 1, replace_calls_next, "tome", 1),
+                        handler(TOME_HOOK_REPLACE, 0, replace_calls_next, "a", 2, mod)},
+                       1);
+    CHECK_EQ(g_trace, std::string("tome( a( uncharged-original ) ) "));
+    run_with_handed_on({handler(TOME_HOOK_REPLACE, 1, replace_calls_next, "a", 1, mod),
+                        handler(TOME_HOOK_REPLACE, 0, replace_calls_next, "tome", 2)},
+                       1);
+    CHECK_EQ(g_trace, std::string("a( tome( uncharged-original ) ) "));
+}

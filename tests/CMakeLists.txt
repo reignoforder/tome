@@ -10,7 +10,9 @@ add_executable(tome_tests
     test_context_restore.cpp
     test_crash_report.cpp
     test_debug_script.cpp
+    test_desync.cpp
     test_frames.cpp
+    test_game_clock.cpp
     test_game_lock.cpp
     test_handshake.cpp
     test_netmsg.cpp
@@ -33,11 +35,13 @@ add_executable(tome_tests
     test_package.cpp
     test_path_guard.cpp
     test_popup.cpp
+    test_profile.cpp
     test_resolver.cpp
     test_rtti.cpp
     test_settings.cpp
     test_signature.cpp
     test_text.cpp
+    test_timers.cpp
     test_tome_hpp.cpp
     test_objects.cpp
     test_units.cpp
@@ -107,6 +111,7 @@ add_executable(tome_host_tests
     host/test_lifecycle.cpp
     host/test_manager.cpp
     host/test_mods.cpp
+    host/test_sdk_features.cpp
     host/test_wasm.cpp
 )
 target_link_libraries(tome_host_tests PRIVATE tome_testing tome_runtime monocypher)  # monocypher: signs mods in tests

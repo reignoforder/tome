@@ -9,6 +9,8 @@
 #include "hooks.h"
 #include "log.h"
 #include "mod_manager.h"
+#include "desync.h"
+#include "core/desync.h"
 #include "net_messages.h"
 #include "units.h"
 
@@ -404,6 +406,14 @@ void TOME_CALL before_sync_integer(tome_mod*, tome_hook_call* call, void*) {
         net_messages::receive(field<uint8_t>(event, n.sync_sender_offset), text_field(event, n.sync_mission_offset),
                               text_field(event, n.sync_key_offset), field<int32_t>(event, n.sync_value_offset),
                               g_replay);
+        return;
+    }
+    if (file == desync::kCacheFile) {
+        // A mod's state checksum (desync.cpp); nothing reads the cache either.
+        call->skip_original = 1;
+        call->result = 1;
+        desync_api::receive(field<uint8_t>(event, n.sync_sender_offset), text_field(event, n.sync_mission_offset),
+                            text_field(event, n.sync_key_offset), g_replay);
         return;
     }
     if (file != kCacheFile || text_field(event, n.sync_mission_offset) != kMission) return;

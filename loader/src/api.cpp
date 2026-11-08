@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "api.h"
 
+#include "desync.h"
 #include "events.h"
 #include "frames.h"
+#include "guard.h"
 #include "handshake.h"
 #include "hooks.h"
 #include "intermod.h"
@@ -16,6 +18,7 @@
 #include "popups.h"
 #include "settings_api.h"
 #include "storm.h"
+#include "timers.h"
 #include "units.h"
 #include "unwind.h"
 
@@ -184,6 +187,8 @@ void init_api(const GameBuild& build) {
         }
     }
 
+    guard::set_frame_counter(events::frames);
+
     g_api = {};
     g_api.size = sizeof(g_api);
     g_api.api_version = TOME_API_VERSION;
@@ -213,6 +218,8 @@ void init_api(const GameBuild& build) {
     popups::fill_api(g_api);
     intermod_api::fill_api(g_api);
     objects::fill_api(g_api);
+    timers_api::fill_api(g_api);
+    desync_api::fill_api(g_api);
 }
 
 const tome_api* api_table() {

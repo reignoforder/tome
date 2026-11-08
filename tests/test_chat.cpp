@@ -67,6 +67,9 @@ TEST(chat_parse_tome) {
     CHECK(parse_tome("frobnicate").action == TomeAction::Invalid);
     CHECK(parse_tome("enable a b").action == TomeAction::Invalid);
     CHECK(parse_tome("list everything").action == TomeAction::Invalid);
+    CHECK(parse_tome("perf").action == TomeAction::Perf);
+    CHECK(parse_tome("PERF").action == TomeAction::Perf);
+    CHECK(parse_tome("perf hello").action == TomeAction::Invalid);
 }
 
 TEST(chat_parse_tome_logs) {

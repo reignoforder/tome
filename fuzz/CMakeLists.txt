@@ -22,6 +22,7 @@ set(CORE ${ROOT}/loader/src/core)
 add_library(fuzz_core STATIC
     ${CORE}/blp.cpp
     ${CORE}/chat.cpp
+    ${CORE}/desync.cpp
     ${CORE}/edition.cpp
     ${CORE}/frames.cpp
     ${CORE}/handshake.cpp
@@ -51,7 +52,7 @@ target_include_directories(fuzz_core PUBLIC ${ROOT}/loader/src ${ROOT}/sdk/inclu
 target_compile_options(fuzz_core PUBLIC -g -O1 -fno-exceptions -fno-rtti ${SANITIZERS} -fsanitize=fuzzer-no-link)
 target_link_options(fuzz_core PUBLIC ${SANITIZERS})
 
-foreach(name handshake netmsg chat zip inflate json jass paths blp signature update wasm_abi wasm_layout)
+foreach(name handshake netmsg desync chat zip inflate json jass paths blp signature update wasm_abi wasm_layout)
     add_executable(fuzz_${name} fuzz_${name}.cpp)
     target_link_libraries(fuzz_${name} PRIVATE fuzz_core)
     target_compile_options(fuzz_${name} PRIVATE -fsanitize=fuzzer)
