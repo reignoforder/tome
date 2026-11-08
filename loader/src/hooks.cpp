@@ -472,25 +472,50 @@ Target* install(const std::string& name, uintptr_t address, mappings::Convention
         if (shade::active()) {
             // Recompiled code: Shade runs the hook and the original. The
             // jmp is still written, so memory reads as it would on Windows.
+            // Nothing moves, but the jmp mustn't cover another hook's start.
+            if (const Target* other = overlapping(address, kJmpSize)) {
+                error = "its first " + std::to_string(kJmpSize) + " bytes would move the start of \"" + other->name +
+                        "\" (hooked at " + hex_address(other->address) + ")";
+                break;
+            }
+            if (!shade::can_hook_functions()) {
+                error = "this Shade can't hook functions (it has no ShadeOriginal: version 2)";
+                break;
+            }
             Target* raw = t.get();
             const auto entry = reinterpret_cast<uintptr_t>(&tome_hook_entry);
             const auto context = reinterpret_cast<uintptr_t>(raw);
-            uintptr_t original = shade::hook_function(address, entry, context);
-            uintptr_t stub = original ? shade::make_stub(entry, context) : 0;
-            if (!stub) {
+            // All the Target needs, before the hook goes on: a call that
+            // comes in at once (another thread) finds it complete.
+            t->moved = kJmpSize;
+            std::memcpy(t->original, code, kJmpSize);
+            t->trampoline = reinterpret_cast<uint8_t*>(shade::original(address));
+            if (!t->trampoline) {
                 error = hex_address(address) + " isn't the start of a function Shade recompiled";
                 break;
             }
-            t->moved = kJmpSize;
-            std::memcpy(t->original, code, kJmpSize);
-            t->trampoline = reinterpret_cast<uint8_t*>(original);
-            t->entry = reinterpret_cast<uint8_t*>(stub);
-            if (!write_patch(address, t->entry, error)) break;
-            TOME_INFO("Hooked %s at 0x%08lx (Shade, %zu arguments)", name.c_str(), static_cast<unsigned long>(address),
-                      raw->layout.params.size());
-            g_by_address[address] = raw;
-            result = raw;
-            g_targets[name] = raw;
+            t->entry = reinterpret_cast<uint8_t*>(shade::make_stub(entry, context));
+            if (!t->entry) {
+                error = "Shade made no stub for its jmp";
+                break;
+            }
+            if (!shade::hook_function(address, entry, context)) {
+                error = hex_address(address) + " isn't the start of a function Shade recompiled";
+                break;  // not hooked: nothing has the Target
+            }
+            if (write_patch(address, t->entry, error)) {
+                TOME_INFO("Hooked %s at 0x%08lx (Shade, %zu arguments)", name.c_str(),
+                          static_cast<unsigned long>(address), raw->layout.params.size());
+                g_by_address[address] = raw;
+                result = raw;
+                g_targets[name] = raw;
+            } else if (!shade::unhook(address)) {
+                // Failed after Shade hooked it, which then stays on.
+                TOME_WARN("Shade can't unhook 0x%08lx: its calls go through Tome's dispatcher to the original",
+                          static_cast<unsigned long>(address));
+            }
+            // Kept either way (unregistered on failure): a call already on
+            // its way through the hook still has the Target.
             g_owned.push_back(std::move(t));
             break;
         }

@@ -3,6 +3,7 @@
 
 #include <windows.h>
 
+#include "pe.h"
 #include "shade.h"
 #include "unwind.h"
 
@@ -50,11 +51,18 @@ bool check_readable(uintptr_t address, size_t n, std::string& error) {
 
 // Copies `n` bytes over `address`, making the page writable around the write
 // (`protect`), then flushes the instruction cache in case it was code.
-bool write(uintptr_t address, const void* src, size_t n, DWORD protect, std::string& error) {
+// `before` runs once the page is writable, so nothing fails after it (it
+// may fail itself, setting `error`: then nothing is written).
+template <typename Before>
+bool write(uintptr_t address, const void* src, size_t n, DWORD protect, std::string& error, Before&& before) {
     auto at = reinterpret_cast<void*>(address);
     DWORD old_protect;
     if (!VirtualProtect(at, n, protect, &old_protect)) {
         error = "VirtualProtect failed";
+        return false;
+    }
+    if (!before()) {
+        VirtualProtect(at, n, old_protect, &old_protect);
         return false;
     }
     note_original(address, n);
@@ -62,6 +70,22 @@ bool write(uintptr_t address, const void* src, size_t n, DWORD protect, std::str
     VirtualProtect(at, n, old_protect, &old_protect);
     FlushInstructionCache(GetCurrentProcess(), at, n);
     return true;
+}
+
+bool write(uintptr_t address, const void* src, size_t n, DWORD protect, std::string& error) {
+    return write(address, src, n, protect, error, [] { return true; });
+}
+
+// Whether `address` is in an executable section of a loaded module (by its
+// section headers, which Shade maps too).
+bool in_code(uintptr_t address) {
+    HMODULE module = nullptr;
+    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                            reinterpret_cast<LPCWSTR>(address), &module)) {
+        return false;
+    }
+    const IMAGE_SECTION_HEADER* section = pe::section_at(module, address);
+    return section && (section->Characteristics & (IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_CNT_CODE)) != 0;
 }
 
 } // namespace
@@ -87,15 +111,18 @@ bool patch_call(uintptr_t call_address, uintptr_t expected_target, const void* n
         return false;
     }
 
-    // Under Shade the call is C code: Shade redirects it (before the write,
-    // which it reads the call's target from). The write keeps memory as on Windows.
-    if (shade::active() && !shade::hook_call(call_address, reinterpret_cast<uintptr_t>(new_target))) {
-        snprintf(buf, sizeof(buf), "Shade can't redirect the call at 0x%08lx", static_cast<unsigned long>(call_address));
+    // Under Shade the call is C code: Shade redirects it, reading the call's
+    // target from memory, so before the write (which keeps memory as on
+    // Windows). Only once the page is writable: a redirect never stays
+    // behind a failed patch, since Shade can't take one back.
+    int32_t new_rel = static_cast<int32_t>(reinterpret_cast<uintptr_t>(new_target) - (call_address + 5));
+    return write(call_address + 1, &new_rel, sizeof(new_rel), PAGE_EXECUTE_READWRITE, error, [&] {
+        if (!shade::active() || shade::hook_call(call_address, reinterpret_cast<uintptr_t>(new_target))) return true;
+        snprintf(buf, sizeof(buf), "Shade can't redirect the call at 0x%08lx",
+                 static_cast<unsigned long>(call_address));
         error = buf;
         return false;
-    }
-    int32_t new_rel = static_cast<int32_t>(reinterpret_cast<uintptr_t>(new_target) - (call_address + 5));
-    return write(call_address + 1, &new_rel, sizeof(new_rel), PAGE_EXECUTE_READWRITE, error);
+    });
 }
 
 bool patch_bytes(uintptr_t address, const uint8_t* expected, const uint8_t* replacement, size_t n,
@@ -124,6 +151,15 @@ bool patch_pointer(uintptr_t address, uintptr_t expected, const void* new_value,
         snprintf(buf, sizeof(buf), "pointer at 0x%08lx is 0x%08lx, expected 0x%08lx",
                  static_cast<unsigned long>(address), static_cast<unsigned long>(current),
                  static_cast<unsigned long>(expected));
+        error = buf;
+        return false;
+    }
+    // A pointer inside an instruction (an operand) is compiled in under
+    // Shade: writing it would change nothing and look like it worked.
+    if (shade::active() && in_code(address)) {
+        char buf[160];
+        snprintf(buf, sizeof(buf), "0x%08lx is inside code, which doesn't change under Shade (it's recompiled)",
+                 static_cast<unsigned long>(address));
         error = buf;
         return false;
     }

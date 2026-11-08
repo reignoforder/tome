@@ -1680,18 +1680,46 @@ nothing there. `loader/src/shade.cpp` finds Shade's natives
 (`GetModuleHandle("shade.dll")`, which exists only under Shade) and the hook
 manager and patch functions use them instead of patching code:
 
-- `hooks::install`: `ShadeHookPushJump(address, tome_hook_entry, Target*)`
-  makes the function run the same stub; its result is the trampoline (no
-  instructions are moved). The `jmp` is still written, so memory reads as on
-  Windows.
+- `hooks::install`: `ShadeOriginal(address)` gives the trampoline (no
+  instructions are moved; the same address before, during and after the
+  hook) and `ShadeMakeStub` the stub, both stored in the `Target` before
+  `ShadeHookPushJump(address, tome_hook_entry, Target*)` makes the function
+  run that stub. Shade's hook is on before that native returns, so a call
+  on another thread can reach the dispatcher at once: it finds the `Target`
+  complete. `ShadeOriginal` is in Shade's natives from version 2; a Shade
+  without it can't hook functions (each hook fails, saying so). The `jmp`
+  is still written, so memory reads as on Windows (and may not cover
+  another hook's start). If writing it fails after Shade hooked the
+  function, `ShadeUnhook` takes the hook off (a warning if it can't) and
+  the `Target` is kept (unregistered) for calls already on their way.
 - `hooks::install_import`: the slot gets a stub from `ShadeMakeStub` (code
   made at run time can't run under Shade); the slot write itself works.
-- `patch_call`: `ShadeHookCall(site, target)` before the write.
+- `patch_call`: `ShadeHookCall(site, target)` before the write (Shade reads
+  the call's target from memory), once the page is writable: Shade can't
+  take a redirect back, so none stays behind a failed patch.
+- JASS natives: instead of a thunk written at run time, each slot gets
+  `ShadeMakeStub(tome_native_entry, Slot*)`; `tome_native_entry` (asm in
+  `natives.cpp`) asks `tome_native_route` and either jumps to Tome's own
+  native with the engine's stack frame or returns a mod's guarded result.
 - `patch_bytes` fails ("code patches don't apply under Shade"), so the
-  patches built on it (blp-guard, widescreen, the movie ones) report that
-  they're off until they're ported to hooks. `patch_pointer` (vtables) works.
+  patches built on it (blp-guard, movie-display-reset) report that they're
+  off until they're ported to hooks. `patch_pointer` works on data (vtables)
+  but refuses an address in a module's executable section: a pointer there
+  is an instruction's operand, compiled in, so widescreen's UI part (which
+  repoints operands of the coordinate conversions) reports that it's off
+  ("the UI stays stretched"); its 3D part, hooks only, works.
+- Mods' DLLs don't load: Shade runs only code recompiled with the game. A
+  mod with a DLL (and no Wasm module) gets an error saying so and never
+  asks for approval; Wasm mods run (WAMR's interpreter).
 
 On Windows and Wine nothing changes: `shade::active()` is false.
+
+Tests: `tests/shade/fake_shade.cpp` is a fake `shade.dll` (Shade's natives
+on Windows; each can fail on request, and a hook can catch a call on another
+thread while it goes on). `tome_hook_runtime_shade_tests` loads it and runs
+the whole hook runtime suite plus `tests/test_shade.cpp`; the host test
+`host_shade_natives` calls natives through the Shade stubs and
+`host_shade_refuses_mod_dlls` checks a DLL mod is refused.
 
 ## Mod menu
 

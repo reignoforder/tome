@@ -129,11 +129,15 @@ static void shows_failures(void) {
     TOME_EXPECT_STR(NULL, "wanted");
 }
 
+/* A null pointer read at run time: a write through a constant null is
+   undefined, and GCC drops it below -O2 (above, it puts a trap there). */
+static volatile int* volatile null_pointer;
+
 /* The same, before tome_test_start, and then a crash. */
 static void shows_a_crash(void) {
     if (!getenv("TOME_TEST_SHOW_FAILURES")) return;
     TOME_EXPECT(tome_test_install(TOME_TEST_SOURCE_DIR "/tests/e2e/mods/needs-ghost"));
-    *(volatile int*)0 = 1;
+    *null_pointer = 1;
 }
 
 static const tome_test_case cases[] = {

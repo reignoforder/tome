@@ -28,6 +28,11 @@ struct Register {
     Register(const char* name, void (*fn)()) { registry().push_back({name, fn}); }
 };
 
+// A null pointer read at run time, for a real access violation: a write
+// through a constant null is undefined, and GCC drops it below -O2 (above,
+// it puts a trap there).
+inline volatile int* volatile null_int = nullptr;
+
 inline void fail(const char* file, int line, const std::string& message) {
     ++failures();
     std::printf("  FAIL %s:%d: %s\n", file, line, message.c_str());

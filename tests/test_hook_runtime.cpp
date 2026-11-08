@@ -862,7 +862,7 @@ int g_crash_after_runs = 0;
 int g_crash_replace_results[2];
 
 void crash() {
-    *static_cast<volatile int*>(nullptr) = 1;
+    *test::null_int = 1;
 }
 
 void TOME_CALL crash_before(tome_mod*, tome_hook_call*, void*) {

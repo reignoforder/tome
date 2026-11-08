@@ -3,6 +3,7 @@
 
 #include "core/embedded_mappings.h"
 #include "core/verify.h"
+#include "pe.h"
 
 #include <memory>
 
@@ -56,16 +57,8 @@ const Database& database() {
     return db;
 }
 
-const IMAGE_NT_HEADERS32* nt_headers(HMODULE module) {
-    auto base = reinterpret_cast<const uint8_t*>(module);
-    auto dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
-    if (dos->e_magic != IMAGE_DOS_SIGNATURE) return nullptr;
-    auto nt = reinterpret_cast<const IMAGE_NT_HEADERS32*>(base + dos->e_lfanew);
-    return nt->Signature == IMAGE_NT_SIGNATURE ? nt : nullptr;
-}
-
 const Loaded* find_by_header(const std::vector<std::unique_ptr<Loaded>>& builds, HMODULE module) {
-    const IMAGE_NT_HEADERS32* nt = nt_headers(module);
+    const IMAGE_NT_HEADERS32* nt = pe::nt_headers(module);
     if (!nt) return nullptr;
     for (const auto& build : builds) {
         if (nt->FileHeader.TimeDateStamp == build->data.pe_timestamp &&
@@ -107,7 +100,7 @@ bool verify_loaded_build(HMODULE game, const BuildMappings& build, std::vector<s
 }
 
 bool verify_loaded_module(HMODULE module, const mappings::Build& build, std::vector<std::string>& errors) {
-    const IMAGE_NT_HEADERS32* nt = nt_headers(module);
+    const IMAGE_NT_HEADERS32* nt = pe::nt_headers(module);
     if (!nt) {
         errors.push_back(build.module + " has no PE header");
         return false;

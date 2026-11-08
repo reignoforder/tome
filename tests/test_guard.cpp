@@ -97,7 +97,7 @@ TEST(guard_access_violation) {
     tome_mod mod;
     mod.id = "crashy";
     void* before = fs0();
-    CHECK(!guard::run(&mod, "event handler", "(tick)", [] { *static_cast<volatile int*>(nullptr) = 1; }));
+    CHECK(!guard::run(&mod, "event handler", "(tick)", [] { *test::null_int = 1; }));
     CHECK(fs0() == before);
     CHECK(mod.faulted);
     CHECK_EQ(g_sink_calls, 1);
@@ -114,7 +114,7 @@ TEST(guard_access_violation) {
     CHECK_EQ(calls, 1);
 
     // A second crash is logged, but the first one stays the mod's record.
-    CHECK(!guard::run(&mod, "native", "X", [] { (void)*static_cast<volatile int*>(nullptr); },
+    CHECK(!guard::run(&mod, "native", "X", [] { (void)*test::null_int; },
                       guard::kEvenIfFaulted));
     CHECK_EQ(g_sink_calls, 2);
     CHECK(contains(mod.fault_text(), "event handler"));
@@ -205,7 +205,7 @@ void fault_inside_a_frame(void*) {
     reg.handler = reinterpret_cast<void*>(&count_unwind);
     asm volatile("mov %%fs:0, %0" : "=r"(reg.next));
     asm volatile("mov %0, %%fs:0" ::"r"(&reg) : "memory");
-    *static_cast<volatile int*>(nullptr) = 1;
+    *test::null_int = 1;
     asm volatile("mov %0, %%fs:0" ::"r"(reg.next) : "memory");
 }
 
@@ -228,7 +228,7 @@ TEST(guard_nested) {
     bool inner_ok = true;
     int after = 0;
     CHECK(guard::run(&outer, "outer", nullptr, [&] {
-        inner_ok = guard::run(&inner, "inner", nullptr, [] { *static_cast<volatile int*>(nullptr) = 1; });
+        inner_ok = guard::run(&inner, "inner", nullptr, [] { *test::null_int = 1; });
         ++after;
     }));
     CHECK(!inner_ok);
@@ -286,7 +286,7 @@ TEST(guard_stack_overflow) {
 namespace {
 
 void crash_now() {
-    *static_cast<volatile int*>(nullptr) = 1;
+    *test::null_int = 1;
 }
 
 // Code between the guard and the fault that holds a lock and owns memory.

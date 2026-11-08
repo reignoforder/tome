@@ -78,11 +78,8 @@ set_target_properties(sync_test PROPERTIES OUTPUT_NAME sync-test)
 
 # The hook engine and the crash guard on real code in this process: the
 # Windows side of loader/src/hooks.cpp and guard.cpp, compiled in directly
-# (they only need the log).
-add_executable(tome_hook_runtime_tests
-    main.cpp
-    test_guard.cpp
-    test_hook_runtime.cpp
+# (they only need the log). Compiled once for both suites below.
+add_library(tome_hook_runtime_loader OBJECT
     ../loader/src/guard.cpp
     ../loader/src/hooks.cpp
     ../loader/src/log.cpp
@@ -92,12 +89,47 @@ add_executable(tome_hook_runtime_tests
     ../loader/src/paths.cpp
     ../loader/src/unwind.cpp
 )
-target_link_libraries(tome_hook_runtime_tests PRIVATE tome_core)
-target_include_directories(tome_hook_runtime_tests PRIVATE ../loader/src)
-target_compile_definitions(tome_hook_runtime_tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_link_libraries(tome_hook_runtime_loader PUBLIC tome_core)
+target_include_directories(tome_hook_runtime_loader PUBLIC ../loader/src)
+target_compile_definitions(tome_hook_runtime_loader PUBLIC UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_compile_options(tome_hook_runtime_loader PRIVATE -Wall -Wextra -fno-exceptions -fno-rtti)
+
+add_executable(tome_hook_runtime_tests
+    main.cpp
+    test_guard.cpp
+    test_hook_runtime.cpp
+)
+target_link_libraries(tome_hook_runtime_tests PRIVATE tome_hook_runtime_loader)
 target_compile_options(tome_hook_runtime_tests PRIVATE -Wall -Wextra -fno-exceptions -fno-rtti)
 target_link_options(tome_hook_runtime_tests PRIVATE -static)
 add_test(NAME tome_hook_runtime_tests COMMAND tome_hook_runtime_tests)
+
+# A fake shade.dll (shade/fake_shade.cpp): Shade's hook natives on Windows,
+# for Tome's Shade paths (loader/src/shade.*). Loaded by path, by the tests
+# that want it.
+add_library(fake_shade SHARED shade/fake_shade.cpp)
+set_target_properties(fake_shade PROPERTIES OUTPUT_NAME shade PREFIX "" LIBRARY_OUTPUT_DIRECTORY
+    ${CMAKE_CURRENT_BINARY_DIR}/fake-shade RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/fake-shade)
+target_link_libraries(fake_shade PRIVATE tome_core)
+target_include_directories(fake_shade PRIVATE ../loader/src)
+target_compile_definitions(fake_shade PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_compile_options(fake_shade PRIVATE -Wall -Wextra -fno-exceptions -fno-rtti)
+target_link_options(fake_shade PRIVATE -static -Wl,--kill-at)  # ShadeVersion, not ShadeVersion@0
+
+# The same suite again as under Shade, with its own tests (test_shade.cpp).
+add_executable(tome_hook_runtime_shade_tests
+    main.cpp
+    test_guard.cpp
+    test_hook_runtime.cpp
+    test_shade.cpp
+)
+target_link_libraries(tome_hook_runtime_shade_tests PRIVATE tome_hook_runtime_loader)
+target_include_directories(tome_hook_runtime_shade_tests PRIVATE .)
+target_compile_definitions(tome_hook_runtime_shade_tests PRIVATE TOME_TEST_FAKE_SHADE="$<TARGET_FILE:fake_shade>")
+target_compile_options(tome_hook_runtime_shade_tests PRIVATE -Wall -Wextra -fno-exceptions -fno-rtti)
+target_link_options(tome_hook_runtime_shade_tests PRIVATE -static)
+add_dependencies(tome_hook_runtime_shade_tests fake_shade)
+add_test(NAME tome_hook_runtime_shade_tests COMMAND tome_hook_runtime_shade_tests)
 
 # The loader itself (tome_runtime: everything in tome.mix but DllMain) driven
 # in this process against a fake game image, with the fixture mods in a
@@ -113,6 +145,7 @@ add_executable(tome_host_tests
     host/test_manager.cpp
     host/test_mods.cpp
     host/test_sdk_features.cpp
+    host/test_shade.cpp
     host/test_wasm.cpp
 )
 target_link_libraries(tome_host_tests PRIVATE tome_testing tome_runtime monocypher)  # monocypher: signs mods in tests
@@ -120,10 +153,11 @@ target_include_directories(tome_host_tests PRIVATE .)
 target_compile_definitions(tome_host_tests PRIVATE
     TOME_TEST_BUILD_DIR="${CMAKE_BINARY_DIR}"
     TOME_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    TOME_TEST_FAKE_SHADE="$<TARGET_FILE:fake_shade>"
 )
 target_compile_options(tome_host_tests PRIVATE -Wall -Wextra -fno-exceptions -fno-rtti)
 target_link_options(tome_host_tests PRIVATE -static)
-add_dependencies(tome_host_tests hook_a hook_b crash hello hello_cpp)
+add_dependencies(tome_host_tests hook_a hook_b crash hello hello_cpp fake_shade)
 if(TARGET hello_wasm)
     add_dependencies(tome_host_tests hello_wasm)
     target_compile_definitions(tome_host_tests PRIVATE TOME_TEST_WASM_EXAMPLE=1)
@@ -190,6 +224,19 @@ target_compile_options(tome_game_tests PRIVATE -Wall -Wextra -fno-exceptions -fn
 target_link_options(tome_game_tests PRIVATE -static)
 add_dependencies(tome_game_tests hook_a hook_b crash)
 add_test(NAME tome_game_tests COMMAND tome_game_tests)
+
+# The tests' own sources build at -O1 (about half the compile time of the
+# Release -O3, most of a cold build being test code). Only theirs: the
+# loader sources compiled in (tome_hook_runtime_loader) and the libraries
+# they link (tome_core, tome_runtime) keep the flags tome.mix ships with, so
+# the code under test is the shipped code. Not in Debug (-O0).
+if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+    foreach(target tome_tests tome_hook_runtime_tests tome_hook_runtime_shade_tests tome_host_tests tome_game_tests)
+        get_target_property(sources ${target} SOURCES)
+        list(FILTER sources EXCLUDE REGEX "^\\.\\./")
+        set_property(SOURCE ${sources} APPEND PROPERTY COMPILE_OPTIONS -O1)
+    endforeach()
+endif()
 
 # Tome's tools for mod makers (loader/src/testing): tome_test.dll on mods of
 # every kind, and tome-check on broken fixtures (it checks every mod this

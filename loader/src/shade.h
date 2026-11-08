@@ -13,10 +13,23 @@ namespace tome::shade {
 // True when running under Shade (checked once).
 bool active();
 
-// Makes the function at `target` run `push value; jmp dest` instead. Returns
-// the address that runs its original code (the trampoline), 0 if `target`
-// isn't a function Shade can hook.
-uintptr_t hook_function(uintptr_t target, uintptr_t dest, uintptr_t value);
+// Whether this Shade can hook functions: it has ShadeOriginal (version 2).
+bool can_hook_functions();
+
+// The address that runs `target`'s original code (the trampoline), before
+// it's hooked: the same one stays valid while and after it is. 0 if
+// `target` isn't a function Shade can hook (or !can_hook_functions()).
+// Stored before hook_function, so no call through the hook finds it missing.
+uintptr_t original(uintptr_t target);
+
+// Makes the function at `target` run `push value; jmp dest` instead (on
+// before this returns). False if `target` isn't a function Shade can hook.
+bool hook_function(uintptr_t target, uintptr_t dest, uintptr_t value);
+
+// Undoes hook_function: `target` runs its own code again (the trampoline
+// it returned stays valid, for calls already on their way). False if it
+// can't (a Shade without ShadeUnhook): the hook then stays on.
+bool unhook(uintptr_t target);
 
 // Runs `push value; jmp dest` from an address of its own (what an import
 // slot or a hook's entry points at), 0 on failure.

@@ -22,6 +22,7 @@
 #include "core/package.h"
 #include "core/signature.h"
 #include "sha256.h"
+#include "shade.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -519,6 +520,13 @@ std::vector<ModManager::Installed> ModManager::discover() const {
                     mod.errors.push_back("\"wasm\" module \"" + mod.meta.wasm + "\" not found");
                     mod.valid = false;
                 }
+            }
+            // Shade runs only the code it recompiled with the game: a mod's
+            // DLL can't load there (its Wasm module, if it has one, can).
+            if (mod.valid && !mod.dll.empty() && !mod.wasm && shade::active()) {
+                mod.errors.push_back("its DLL can't run under Shade, which runs only code recompiled with the game "
+                                     "(Wasm mods run there)");
+                mod.valid = false;
             }
             if (!mod.meta.config.empty()) read_settings_schema(mod);
             read_mappings(mod);

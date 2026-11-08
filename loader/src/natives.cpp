@@ -10,6 +10,7 @@
 #include "log.h"
 #include "mods_ready.h"
 #include "patch.h"
+#include "shade.h"
 #include "unwind.h"
 
 #include <tome/utf8.h>
@@ -53,6 +54,7 @@ struct Slot {
     uint32_t arg_count = 0;           // parameters; each one is a 32-bit word
     tome_mod* mod = nullptr;          // the attached mod, for the guard (main thread)
     uint8_t* thunk = nullptr;
+    bool guarded = false;             // a mod's (call_guarded), not Tome's own (jumped to)
     unsigned bind_count = 0;
 };
 
@@ -137,6 +139,57 @@ uint32_t call_guarded(Slot* slot, const uint32_t* args) {
     return result;
 }
 
+} // namespace
+} // namespace tome::natives
+
+// What a thunk does, for tome_native_entry (under Shade): returns the
+// function to jump to (Tome's own natives), or null with the native's result
+// in *result (a mod's, called guarded, or none attached).
+extern "C" const void* tome_native_route(void* s, const uint32_t* args, uint32_t* result) {
+    using namespace tome::natives;
+    auto* slot = static_cast<Slot*>(s);
+    if (slot->code_mask) note_codes(slot, args);
+    *result = 0;
+    void* target = slot->target;
+    if (!target) return nullptr;
+    if (!slot->guarded) return target;
+    *result = call_guarded(slot, args);
+    return nullptr;
+}
+
+extern "C" void tome_native_entry();
+
+// tome_native_entry: a stub jumps here with the Slot* pushed over the
+// engine's return address. Pops it, makes room for the result and asks
+// tome_native_route; jumps to its answer with the engine's stack frame as
+// it was (cdecl: eax, ecx and edx are free), or returns the result.
+asm(R"(
+    .intel_syntax noprefix
+    .text
+    .globl _tome_native_entry
+_tome_native_entry:
+    pop eax
+    sub esp, 4
+    mov ecx, esp
+    lea edx, [esp + 8]
+    push ecx
+    push edx
+    push eax
+    call _tome_native_route
+    add esp, 12
+    test eax, eax
+    jz .Ltome_native_result
+    add esp, 4
+    jmp eax
+.Ltome_native_result:
+    pop eax
+    ret
+    .att_syntax prefix
+)");
+
+namespace tome::natives {
+namespace {
+
 // If the native takes `code`: note_codes(slot, the arguments). Then
 // mov eax, [slot->target] ; test eax, eax ; jz default ; <call> ; default: xor eax, eax ; ret
 // Tome's own natives jump to the target: natives are __cdecl, so jumping
@@ -144,7 +197,13 @@ uint32_t call_guarded(Slot* slot, const uint32_t* args) {
 // cleans up either way. A mod's native goes through call_guarded(slot,
 // the arguments) instead. eax, ecx and edx are free to use at a cdecl
 // function's entry.
-uint8_t* make_thunk(Slot* slot, bool guarded) {
+uint8_t* make_thunk(Slot* slot) {
+    // Code made at run time can't run under Shade: a stub of its own pushes
+    // the slot and goes to tome_native_entry, which does the same.
+    if (shade::active()) {
+        return reinterpret_cast<uint8_t*>(
+            shade::make_stub(reinterpret_cast<uintptr_t>(&tome_native_entry), reinterpret_cast<uintptr_t>(slot)));
+    }
     if (g_thunk_used + kThunkSize > kThunkPage) {
         g_thunk_page = static_cast<uint8_t*>(
             VirtualAlloc(nullptr, kThunkPage, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
@@ -192,7 +251,7 @@ uint8_t* make_thunk(Slot* slot, bool guarded) {
     std::memcpy(bytes + 15, &slot_addr, 4);
     std::memcpy(bytes + 20, &rel, 4);
     std::memcpy(bytes + 28, &target_addr, 4);
-    if (guarded) {
+    if (slot->guarded) {
         std::memcpy(bytes + 34, guarded_call, sizeof(guarded_call));
         auto guarded_rel = static_cast<int32_t>(reinterpret_cast<uintptr_t>(&call_guarded) -
                                                 (reinterpret_cast<uintptr_t>(code) + 51));
@@ -462,7 +521,8 @@ bool declare(const std::string& owner, const std::string& declaration, std::stri
         slot->owner = owner;
         slot->code_mask = decl.code_mask();
         slot->arg_count = static_cast<uint32_t>(decl.param_types.size());
-        slot->thunk = make_thunk(slot.get(), owner != "tome");
+        slot->guarded = owner != "tome";
+        slot->thunk = make_thunk(slot.get());
         if (!slot->thunk) {
             error = "out of memory for native thunks";
             ok = false;
