@@ -88,6 +88,7 @@ add_executable(tome_hook_runtime_tests
     ../loader/src/log.cpp
     ../loader/src/mod_mappings.cpp
     ../loader/src/patch.cpp
+    ../loader/src/shade.cpp
     ../loader/src/paths.cpp
     ../loader/src/unwind.cpp
 )

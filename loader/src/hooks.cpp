@@ -6,6 +6,7 @@
 #include "log.h"
 #include "mod_mappings.h"
 #include "patch.h"
+#include "shade.h"
 #include "unwind.h"
 
 #include <windows.h>
@@ -468,6 +469,32 @@ Target* install(const std::string& name, uintptr_t address, mappings::Convention
             break;
         }
 
+        if (shade::active()) {
+            // Recompiled code: Shade runs the hook and the original. The
+            // jmp is still written, so memory reads as it would on Windows.
+            Target* raw = t.get();
+            const auto entry = reinterpret_cast<uintptr_t>(&tome_hook_entry);
+            const auto context = reinterpret_cast<uintptr_t>(raw);
+            uintptr_t original = shade::hook_function(address, entry, context);
+            uintptr_t stub = original ? shade::make_stub(entry, context) : 0;
+            if (!stub) {
+                error = hex_address(address) + " isn't the start of a function Shade recompiled";
+                break;
+            }
+            t->moved = kJmpSize;
+            std::memcpy(t->original, code, kJmpSize);
+            t->trampoline = reinterpret_cast<uint8_t*>(original);
+            t->entry = reinterpret_cast<uint8_t*>(stub);
+            if (!write_patch(address, t->entry, error)) break;
+            TOME_INFO("Hooked %s at 0x%08lx (Shade, %zu arguments)", name.c_str(), static_cast<unsigned long>(address),
+                      raw->layout.params.size());
+            g_by_address[address] = raw;
+            result = raw;
+            g_targets[name] = raw;
+            g_owned.push_back(std::move(t));
+            break;
+        }
+
         uint8_t* block = alloc_code();
         if (!block) {
             error = "out of memory for hook code";
@@ -561,23 +588,34 @@ Target* install_import(const std::string& name, uintptr_t slot, mappings::Conven
             error = buf;
             break;
         }
-        uint8_t* block = alloc_code();
-        if (!block) {
-            error = "out of memory for hook code";
-            break;
-        }
-        t->entry = block;
-        t->trampoline = reinterpret_cast<uint8_t*>(original);
-        t->entry[0] = 0x68;  // push imm32
         Target* raw = t.get();
-        std::memcpy(t->entry + 1, &raw, 4);
-        write_jmp(t->entry + 5, reinterpret_cast<const void*>(&tome_hook_entry));
-        FlushInstructionCache(GetCurrentProcess(), block, kCodeBlock);
+        uint8_t* block = nullptr;
+        t->trampoline = reinterpret_cast<uint8_t*>(original);
+        if (shade::active()) {
+            // Code made at run time doesn't run under Shade: it makes the stub.
+            t->entry = reinterpret_cast<uint8_t*>(
+                shade::make_stub(reinterpret_cast<uintptr_t>(&tome_hook_entry), reinterpret_cast<uintptr_t>(raw)));
+            if (!t->entry) {
+                error = "Shade made no stub for it";
+                break;
+            }
+        } else {
+            block = alloc_code();
+            if (!block) {
+                error = "out of memory for hook code";
+                break;
+            }
+            t->entry = block;
+            t->entry[0] = 0x68;  // push imm32
+            std::memcpy(t->entry + 1, &raw, 4);
+            write_jmp(t->entry + 5, reinterpret_cast<const void*>(&tome_hook_entry));
+            FlushInstructionCache(GetCurrentProcess(), block, kCodeBlock);
+        }
 
         DWORD old_protect;
         if (!VirtualProtect(const_cast<LONG*>(entry), 4, PAGE_READWRITE, &old_protect)) {
             error = "VirtualProtect failed";
-            g_code_used -= kCodeBlock;
+            if (block) g_code_used -= kCodeBlock;
             break;
         }
         note_original(slot, 4);

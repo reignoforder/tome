@@ -3,6 +3,7 @@
 
 #include <windows.h>
 
+#include "shade.h"
 #include "unwind.h"
 
 #include <cstdio>
@@ -86,6 +87,13 @@ bool patch_call(uintptr_t call_address, uintptr_t expected_target, const void* n
         return false;
     }
 
+    // Under Shade the call is C code: Shade redirects it (before the write,
+    // which it reads the call's target from). The write keeps memory as on Windows.
+    if (shade::active() && !shade::hook_call(call_address, reinterpret_cast<uintptr_t>(new_target))) {
+        snprintf(buf, sizeof(buf), "Shade can't redirect the call at 0x%08lx", static_cast<unsigned long>(call_address));
+        error = buf;
+        return false;
+    }
     int32_t new_rel = static_cast<int32_t>(reinterpret_cast<uintptr_t>(new_target) - (call_address + 5));
     return write(call_address + 1, &new_rel, sizeof(new_rel), PAGE_EXECUTE_READWRITE, error);
 }
@@ -98,6 +106,11 @@ bool patch_bytes(uintptr_t address, const uint8_t* expected, const uint8_t* repl
         snprintf(buf, sizeof(buf), "bytes at 0x%08lx aren't what the mapping expects",
                  static_cast<unsigned long>(address));
         error = buf;
+        return false;
+    }
+    if (shade::active()) {
+        // Recompiled code doesn't change when its bytes do.
+        error = "code patches don't apply under Shade (the game's code is recompiled)";
         return false;
     }
     return write(address, replacement, n, PAGE_EXECUTE_READWRITE, error);

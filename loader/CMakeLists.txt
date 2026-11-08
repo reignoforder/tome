@@ -210,6 +210,7 @@ add_library(tome_runtime OBJECT
     src/overlay.cpp
     src/packages.cpp
     src/patch.cpp
+    src/shade.cpp
     src/patches.cpp
     src/patches/ambient_sound.cpp
     src/patches/background_mute.cpp

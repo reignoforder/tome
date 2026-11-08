@@ -1672,6 +1672,27 @@ API version 4 (`hook`, `unhook`, `hook_call_next` in `tome.h`).
   handlers, hook-a's changed argument reaching the original through
   hook-b's REPLACE, and the chain after disabling and re-enabling hook-a.
 
+### Under Shade
+
+Shade (`../shade`) recompiles the game to C and runs `tome.mix` recompiled
+too, so writing a `jmp` or a call's target into the game's code changes
+nothing there. `loader/src/shade.cpp` finds Shade's natives
+(`GetModuleHandle("shade.dll")`, which exists only under Shade) and the hook
+manager and patch functions use them instead of patching code:
+
+- `hooks::install`: `ShadeHookPushJump(address, tome_hook_entry, Target*)`
+  makes the function run the same stub; its result is the trampoline (no
+  instructions are moved). The `jmp` is still written, so memory reads as on
+  Windows.
+- `hooks::install_import`: the slot gets a stub from `ShadeMakeStub` (code
+  made at run time can't run under Shade); the slot write itself works.
+- `patch_call`: `ShadeHookCall(site, target)` before the write.
+- `patch_bytes` fails ("code patches don't apply under Shade"), so the
+  patches built on it (blp-guard, widescreen, the movie ones) report that
+  they're off until they're ported to hooks. `patch_pointer` (vtables) works.
+
+On Windows and Wine nothing changes: `shade::active()` is false.
+
 ## Mod menu
 
 - Tome generates `UI\FrameDef\Glue\TomeModMenu.fdf` plus `UI\FrameDef\Tome.toc`
