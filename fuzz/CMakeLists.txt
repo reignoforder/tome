@@ -32,10 +32,13 @@ add_library(fuzz_core STATIC
     ${CORE}/log_view.cpp
     ${CORE}/mappings.cpp
     ${CORE}/metadata.cpp
+    ${CORE}/metadata_check.cpp
     ${CORE}/netmsg.cpp
+    ${CORE}/objects.cpp
     ${CORE}/package.cpp
     ${CORE}/path_guard.cpp
     ${CORE}/popup.cpp
+    ${CORE}/resolver.cpp
     ${CORE}/settings.cpp
     ${CORE}/signature.cpp
     ${CORE}/update_check.cpp

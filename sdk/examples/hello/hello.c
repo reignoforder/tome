@@ -705,6 +705,23 @@ static void TOME_CALL on_setting_changed(tome_mod* mod, const char* key, void* u
     tome_logf(api, mod, TOME_LOG_INFO, "setting changed: %s", key);
 }
 
+/* API version 20: the installed mods, and versions by Tome's rules. The
+ * strings stay valid until this mod's next list_mods call. */
+static void TOME_CALL on_mods_changed(tome_mod* mod, const tome_event_info* info, void* user) {
+    tome_mod_info mods[32];
+    int32_t count, i, active = 0, newer = 0;
+    (void)info;
+    (void)user;
+    count = tome_list_mods(api, mod, mods, 32);
+    for (i = 0; i < count && i < 32; ++i) {
+        if (mods[i].state == TOME_MOD_ACTIVE) ++active;
+        /* What an updater asks of a release before it offers it. */
+        if (api->version_match(TOME_VERSION_MOD, ">=1.0.0", mods[i].version) == 1) ++newer;
+    }
+    tome_logf(api, mod, TOME_LOG_INFO, "mods changed: %d installed, %d active, %d at 1.0.0 or later", (int)count,
+              (int)active, (int)newer);
+}
+
 TOME_EXPORT int TOME_CALL tome_mod_load(const tome_api* tome, tome_mod* mod) {
     const tome_symbol* set_text;
     if (tome->api_version < 2 || tome->size < offsetof(tome_api, resolve) + sizeof(tome->resolve)) {
@@ -759,6 +776,7 @@ TOME_EXPORT void TOME_CALL tome_mod_enable(tome_mod* mod) {
         for (i = TOME_EVENT_SPELL_CHANNEL; i <= TOME_EVENT_NIGHT; ++i) api->on_event(mod, i, on_more_event, NULL);
     }
     if (tome_has_objects(api)) api->register_command(mod, "helloobj", on_objects_command, NULL);
+    if (tome_has_mod_list(api)) api->on_event(mod, TOME_EVENT_MODS_CHANGED, on_mods_changed, NULL);
     if (tome_has_settings(api)) {
         api->on_setting_changed(mod, on_setting_changed, NULL);
         api->on_keybind(mod, "greet", on_greet_key, NULL);

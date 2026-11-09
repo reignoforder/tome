@@ -35,6 +35,7 @@ struct ModStatus {
     std::string description;
     std::string icon;  // tome.mod.json "icon", relative to the mod folder; "" if none or its files aren't allowed yet
     std::vector<std::string> authors;
+    std::vector<std::string> provides;  // tome.mod.json "provides"
     std::string sync;    // "client" / "required"; "" if the metadata is invalid
     std::string sync_hash;  // a running "required" mod: its identity in the multiplayer handshake (8 hex digits)
     std::string code_hash;  // a mod with code: SHA-256 of its files (core/mod_state.h); "" otherwise

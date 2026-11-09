@@ -6,10 +6,12 @@
 #include "core/keys.h"
 #include "core/mappings.h"
 #include "core/metadata.h"
+#include "core/metadata_check.h"
 #include "core/settings.h"
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <string_view>
 
@@ -26,6 +28,18 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 
     ModMetadata meta;
     parse_metadata(root, meta);
+    // The mod API's check_metadata, on the same bytes (a release a mod is about to install).
+    static const ResolveEnvironment env = [] {
+        ResolveEnvironment e;
+        parse_semver("0.1.0", e.tome_version);
+        parse_game_version("1.27b", e.game_version);
+        return e;
+    }();
+    MetadataCheck check = check_metadata_text(text, env, nullptr);
+    if (check.result < -1 || check.result > 1 || (check.result == 1) != check.reason.empty()) __builtin_trap();
+    char reason[16];
+    copy_text(check.reason, reason, sizeof(reason));
+    if (std::memchr(reason, 0, sizeof(reason)) == nullptr) __builtin_trap();
 
     settings::Schema schema;
     std::vector<std::string> errors, warnings;

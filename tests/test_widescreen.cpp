@@ -183,3 +183,64 @@ TEST(widescreen_constant_operands) {
     const uint8_t unknown[] = {0x0f, 0x04, 0xc3};  // undefined
     CHECK(!constant_operands(unknown, sizeof unknown, 0x6faa9328, at));
 }
+
+TEST(widescreen_box_margin) {
+    CHECK(box_margin(kBaseWidth) == 0.0f);
+    CHECK(box_margin(0.5f) == 0.0f);
+    CHECK(std::fabs(box_margin(ui_width(1280, 720)) - (0.6f * 16 / 9 - 0.8f) / 2) < 1e-6f);
+}
+
+TEST(widescreen_blur_samples) {
+    CHECK(blur_samples(0, 0.04f, 0.4f).empty());
+    for (int n : {1, 8, 24}) {
+        const std::vector<BlurSample> samples = blur_samples(n, 0.04f, 0.4f);
+        CHECK_EQ(samples.size(), static_cast<size_t>(n));
+        // Blended one over the other from black, every copy ends up with the
+        // same weight, together the brightness asked for.
+        std::vector<float> weight(samples.size(), 0.0f);
+        for (size_t k = 0; k < samples.size(); ++k) {
+            for (size_t j = 0; j < k; ++j) weight[j] *= 1.0f - samples[k].alpha;
+            weight[k] = samples[k].alpha;
+        }
+        float total = 0.0f;
+        for (float w : weight) {
+            CHECK(std::fabs(w - 0.4f / n) < 1e-5f);
+            total += w;
+        }
+        CHECK(std::fabs(total - 0.4f) < 1e-5f);
+        for (const BlurSample& s : samples) {
+            CHECK(s.alpha > 0.0f && s.alpha <= 1.0f);
+            CHECK(std::hypot(s.dx, s.dy) <= 0.04f + 1e-6f);
+        }
+    }
+    // At full brightness a single copy is drawn as it is.
+    CHECK(std::fabs(blur_samples(1, 0.04f, 1.0f)[0].alpha - 1.0f) < 1e-6f);
+}
+
+TEST(widescreen_slice_art) {
+    // At 4:3, or with a cut or tile that makes no sense: the art as it is.
+    for (const auto& pieces : {slice_art(kBaseWidth, 0.6f, 0.05f), slice_art(1.0f, 0.0f, 0.05f),
+                               slice_art(1.0f, 0.6f, 0.0f), slice_art(1.0f, 0.6f, 0.7f)}) {
+        CHECK_EQ(pieces.size(), static_cast<size_t>(1));
+        CHECK(near(pieces[0].art_from, 0.0f) && near(pieces[0].art_to, kBaseWidth));
+        CHECK(near(pieces[0].at_from, 0.0f) && near(pieces[0].at_to, kBaseWidth));
+    }
+    // 16:9: 0.2667 more units, five 0.05 tiles stretched to 0.0533.
+    const float wide = ui_width(1280, 720);
+    const std::vector<ArtPiece> pieces = slice_art(wide, 0.6f, 0.05f);
+    CHECK_EQ(pieces.size(), static_cast<size_t>(7));
+    CHECK(near(pieces.front().art_from, 0.0f) && near(pieces.front().art_to, 0.6f));
+    CHECK(near(pieces.front().at_from, 0.0f) && near(pieces.front().at_to, 0.6f));
+    CHECK(near(pieces.back().art_from, 0.6f) && near(pieces.back().art_to, kBaseWidth));
+    CHECK(near(pieces.back().at_to, wide) && near(pieces.back().at_from, wide - 0.2f));
+    for (size_t i = 1; i < pieces.size(); ++i) {
+        CHECK(near(pieces[i].at_from, pieces[i - 1].at_to));  // no gaps, no overlaps
+        // The tiles: the art just before the cut, all as wide.
+        if (i + 1 < pieces.size()) {
+            CHECK(near(pieces[i].art_from, 0.55f) && near(pieces[i].art_to, 0.6f));
+            CHECK(std::fabs((pieces[i].at_to - pieces[i].at_from) - (wide - 0.8f) / 5) < 1e-5f);
+        }
+    }
+    // A gap smaller than half a tile still gets one, squeezed.
+    CHECK_EQ(slice_art(0.82f, 0.6f, 0.05f).size(), static_cast<size_t>(3));
+}

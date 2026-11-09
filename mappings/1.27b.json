@@ -134,6 +134,29 @@
       "doc": "void __thiscall Show(void). Also shows every child."
     },
     "CLayoutFrame.points": { "kind": "offset", "value": "0x8", "doc": "The frame's anchor points, one pointer per point (TOPLEFT 0 ... BOTTOMRIGHT 8), NULL where unset. A point (made by 0x11E3C0) holds the relative CLayoutFrame* at +4, the relative point at +8 and the offsets x, y at +0xC, +0x10, multiplied by the frame's own scale. SetAllPoints (0x1114B0) clears the points (0x110A00) and sets TOPLEFT and BOTTOMRIGHT." },
+    "CSpriteFrame::Render": {
+      "kind": "function", "rva": "0x000f72f0", "conv": "thiscall", "sig": "void(CSpriteFrame* this)",
+      "bytes": "56 8d b1 80 01 00 00 8b ce e8",
+      "doc": "vtable slot +0x30: renders what the frame's draw (slot +0x2C, 0xF73E0: SetupCamera, then each model instance into the scene at +0x180) queued, with the projection SetupCamera set. Plain ret."
+    },
+    "CModelFrame::Render": {
+      "kind": "function", "rva": "0x000f81b0", "conv": "thiscall", "sig": "void(CModelFrame* this)",
+      "bytes": "56 8b b1 6c 01 00 00 57 8b b9 70 01 00 00",
+      "doc": "vtable slot +0x30 of a MODEL frame (CModelFrame, vtable 0xA8B454): renders each of its models (+0x16C count, +0x170 array; 0x18CCA0) with the projection its draw (slot +0x2C, 0xF8200) set up through CSpriteFrame::SetupCamera. Plain ret."
+    },
+    "CSpriteFrame.vtable.Render": { "kind": "offset", "value": "0x30", "doc": "vtable slot: void(CSpriteFrame* this), thiscall: renders what the draw (slot +0x2C) queued (CSpriteFrame::Render, CModelFrame::Render)." },
+    "CFrame.alpha": { "kind": "offset", "value": "0xac", "doc": "uint8: the frame's alpha, 255 opaque (set with its children by 0x0F07B0, which then calls CFrame.vtable.ApplyAlpha)." },
+    "CFrame.vtable.ApplyAlpha": { "kind": "offset", "value": "0xa4", "doc": "vtable slot: void(CFrame* this), thiscall: passes CFrame.alpha on to what the frame draws (a sprite frame to its model instances, 0xF7260, through 0x1ACAB0 with property 6; a MODEL frame to its models, 0xF8150, through 0x187E30)." },
+    "CLayoutFrame.vtable.GetRect": { "kind": "offset", "value": "0x10", "doc": "vtable slot of the CLayoutFrame: int(CLayoutFrame* this, float* out), thiscall, ret 4: its rect in UI units, {bottom, left, top, right}." },
+    "GxXformSetViewport": {
+      "kind": "function", "rva": "0x001371f0", "conv": "stdcall", "sig": "void(float x0, float x1, float y0, float y1, float z0, float z1)",
+      "bytes": "55 8b ec f3 0f 10 45 1c 83 ec 18",
+      "doc": "Sets the viewport, fractions of the window (0..1), through the device's vtable +0x4C (GxDevice.instance), which keeps it at CGxDevice.viewport. The UI's clips set it (CFrame render, 0xECF70). ret 0x18."
+    },
+    "GxDevice.instance": { "kind": "data", "rva": "0x00d52eb8", "doc": "CGxDevice*: the graphics device (CGxDeviceD3d or CGxDeviceOpenGl)." },
+    "CGxDevice.viewport": { "kind": "offset", "value": "0xe4", "doc": "float[6]: the viewport as GxXformSetViewport last set it, {x0, x1, y0, y1, z0, z1} (the base setter 0x13A7E0, which both devices' call)." },
+    "CHighlightFrame.vtable": { "kind": "data", "rva": "0x00a8b744", "doc": "CHighlightFrame's vtable (RTTI; a CSpriteFrame, through CSpriteFrame::SetupCamera): button highlights, and the full-screen layer that dims a glue screen behind a dialog (\"Please enter your account name.\"), a model made for 0.8 x 0.6." },
+    "CCursorFrame.vtable": { "kind": "data", "rva": "0x00a8da14", "doc": "CCursorFrame's vtable (RTTI): the mouse cursor, a sprite frame that fills the screen with its model drawn at the pointer (the layout's vtable at +0xB4 is 0xA8DB04)." },
     "CLayoutFrame.relative_point_vtable": { "kind": "data", "rva": "0x00a8ddd0", "doc": "The vtable of a point relative to a frame (made by 0x11E3C0): only such a point holds a CLayoutFrame* at +4. A point relative to the screen (0x11E380, vtable 0xA8DDBC) holds x, y at +4, +8 instead." },
     "CLayoutFrame.dependents": { "kind": "offset", "value": "0x40", "doc": "The frames anchored to this one (0x111280 adds them): a list whose first node is here and ends at a value <= 0; a node's next is at +8, the dependent CLayoutFrame* at +0xC, flags at +0x10." },
     "CLayoutFrame.scale": { "kind": "offset", "value": "0x60", "doc": "float, 1 by default: multiplies the frame's width (+0x58) and height (+0x5C) (0x110BA0, 0x110B50) and its anchor offsets. A top-level frame without anchors keeps its rectangle at +0x44 (left, bottom, top, right; CGameUI's is 0, 0, 0.6, 0.8)." },

@@ -35,6 +35,30 @@ bool could_meet(const Dependency& dep, const ModMetadata& meta) {
 
 } // namespace
 
+bool compatible(const ModMetadata& m, const ResolveEnvironment& env, ModState& state, std::string& reason) {
+    // Every problem, "; "-separated; the state is the first one's.
+    bool ok = true;
+    reason.clear();
+    auto fail = [&](ModState s, const std::string& problem) {
+        if (ok) state = s;
+        ok = false;
+        reason += (reason.empty() ? "" : "; ") + problem;
+    };
+    if (!m.game.matches(env.game_version)) {
+        const char* alias = game_version_alias(env.game_version);
+        fail(ModState::IncompatibleGame, "supports game " + m.game.text() + ", this is " +
+                                             (alias ? std::string(alias) : env.game_version.to_string()));
+    }
+    if (!edition_matches(m.edition, env.edition)) {
+        fail(ModState::IncompatibleGame,
+             std::string("is for ") + edition_name(m.edition) + ", this is " + edition_name(env.edition));
+    }
+    if (!m.tome.matches(env.tome_version)) {
+        fail(ModState::IncompatibleTome, "needs Tome " + m.tome.text() + ", this is " + env.tome_version.to_string());
+    }
+    return ok;
+}
+
 ResolveResult resolve(const std::vector<ResolveInput>& inputs, const ResolveEnvironment& env) {
     const size_t n = inputs.size();
     ResolveResult result;
@@ -60,18 +84,10 @@ ResolveResult resolve(const std::vector<ResolveInput>& inputs, const ResolveEnvi
 
     for (size_t i = 0; i < n; ++i) {
         if (mods[i].state != ModState::Active) continue;
-        const ModMetadata& m = *inputs[i].meta;
-        if (!m.game.matches(env.game_version)) {
-            const char* alias = game_version_alias(env.game_version);
-            set_state(i, ModState::IncompatibleGame,
-                      "supports game " + m.game.text() + ", this is " +
-                      (alias ? std::string(alias) : env.game_version.to_string()));
-        } else if (!edition_matches(m.edition, env.edition)) {
-            set_state(i, ModState::IncompatibleGame,
-                      std::string("is for ") + edition_name(m.edition) + ", this is " + edition_name(env.edition));
-        } else if (!m.tome.matches(env.tome_version)) {
-            set_state(i, ModState::IncompatibleTome,
-                      "needs Tome " + m.tome.text() + ", this is " + env.tome_version.to_string());
+        ModState state;
+        std::string reason;
+        if (!compatible(*inputs[i].meta, env, state, reason)) {
+            set_state(i, state, reason);
         } else if (!inputs[i].user_enabled) {
             set_state(i, ModState::DisabledByUser, "disabled");
         }

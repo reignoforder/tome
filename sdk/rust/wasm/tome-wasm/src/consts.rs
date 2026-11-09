@@ -5,7 +5,7 @@
 
 #![allow(missing_docs)]
 
-pub const TOME_API_VERSION: u32 = 19;
+pub const TOME_API_VERSION: u32 = 20;
 pub const TOME_POPUP_CLOSED: i32 = -1;
 pub const TOME_NET_MAX_MESSAGE: u32 = 1024;
 
@@ -125,6 +125,7 @@ pub const TOME_EVENT_HERO_XP: i32 = 66;
 pub const TOME_EVENT_PLAYER_RESOURCE: i32 = 67;
 pub const TOME_EVENT_DAY: i32 = 68;
 pub const TOME_EVENT_NIGHT: i32 = 69;
+pub const TOME_EVENT_MODS_CHANGED: i32 = 70;
 
 // tome_resource
 pub const TOME_RESOURCE_GOLD: i32 = 1;
@@ -198,6 +199,17 @@ pub const TOME_PROPERTY_DAMAGE_DICE: i32 = 28;
 pub const TOME_PROPERTY_DAMAGE_SIDES: i32 = 29;
 pub const TOME_PROPERTY_ATTACK_COOLDOWN: i32 = 30;
 pub const TOME_PROPERTY_ATTACK_RANGE: i32 = 31;
+
+// tome_version_kind
+pub const TOME_VERSION_MOD: i32 = 0;
+pub const TOME_VERSION_GAME: i32 = 1;
+
+// tome_mod_state
+pub const TOME_MOD_ACTIVE: i32 = 0;
+pub const TOME_MOD_DISABLED: i32 = 1;
+pub const TOME_MOD_APPROVAL: i32 = 2;
+pub const TOME_MOD_WAITING: i32 = 3;
+pub const TOME_MOD_ERROR: i32 = 4;
 
 impl crate::FramePoint {
     pub const TOPLEFT: Self = Self(TOME_FRAMEPOINT_TOPLEFT);
@@ -297,4 +309,5 @@ impl crate::Event {
     pub const PLAYER_RESOURCE: Self = Self(TOME_EVENT_PLAYER_RESOURCE);
     pub const DAY: Self = Self(TOME_EVENT_DAY);
     pub const NIGHT: Self = Self(TOME_EVENT_NIGHT);
+    pub const MODS_CHANGED: Self = Self(TOME_EVENT_MODS_CHANGED);
 }

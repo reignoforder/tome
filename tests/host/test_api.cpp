@@ -707,6 +707,180 @@ TEST(host_objects_outside_a_game) {
     CHECK_EQ(api->on_net_message(mod, nullptr, nullptr), TOME_ERR_INVALID_ARGUMENT);
 }
 
+// Versions and the installed mods (API version 20): the mod list as the
+// mod menu has it, kept alive for the mod that asked, and the event that
+// says it changed once a refresh installs, removes or toggles a mod.
+int g_mods_changed = 0;
+void TOME_CALL count_mods_changed(tome_mod*, const tome_event_info* info, void*) {
+    if (info->event == TOME_EVENT_MODS_CHANGED) ++g_mods_changed;
+}
+
+const tome_mod_info* find_mod(const std::vector<tome_mod_info>& list, const char* id) {
+    for (const tome_mod_info& m : list) {
+        if (std::strcmp(m.id, id) == 0) return &m;
+    }
+    return nullptr;
+}
+
+// A mod without code: tome/mods/<folder>/tome.mod.json.
+bool write_mod(Home& home, const wchar_t* folder, const char* metadata) {
+    CreateDirectoryW((home.paths().mods_dir + L"\\" + folder).c_str(), nullptr);
+    return home.write(std::wstring(L"tome\\mods\\") + folder + L"\\tome.mod.json", metadata);
+}
+
+std::vector<tome_mod_info> list_all(const tome_api* api, tome_mod* mod) {
+    int32_t count = tome_list_mods(api, mod, nullptr, 0);
+    std::vector<tome_mod_info> list(count > 0 ? static_cast<size_t>(count) : 0);
+    if (count > 0) CHECK_EQ(tome_list_mods(api, mod, list.data(), count), count);
+    return list;
+}
+
+TEST(host_versions_and_installed_mods) {
+    Home home;
+    CHECK(home.install_mod("hello"));
+    CHECK(write_mod(home, L"lib-plain",
+                     R"({"schema": 1, "id": "lib-plain", "version": "2.1.0-rc.1", "name": "Plain library",
+                         "game": "*", "tome": "*", "provides": ["plain-api"], "sync": "required"})"));
+    CHECK(write_mod(home, L"needs-lib",
+                     R"({"schema": 1, "id": "needs-lib", "version": "1.0.0", "game": "*", "tome": "*", "sync": "client",
+                         "depends": {"missing-lib": "^1"}})"));
+    CHECK(write_mod(home, L"broken", "{not json"));
+    // Valid metadata, but its DLL is missing: an error that still says what it is.
+    CHECK(write_mod(home, L"no-dll",
+                     R"({"schema": 1, "id": "no-dll", "version": "3.0.0", "name": "No DLL", "game": "*", "tome": "*",
+                         "sync": "client", "entry": "gone.dll"})"));
+    Session session;
+    session.events = true;
+    const tome_api* api = start(home, session);
+    CHECK(api != nullptr);
+    if (!api) return;
+    CHECK(tome_has_mod_list(api));
+    CHECK_EQ(api->api_version, 20u);
+
+    // Versions, by Tome's rules; the details are in tests/test_version.cpp.
+    int32_t order = 5;
+    CHECK_EQ(api->version_compare(TOME_VERSION_MOD, "1.2.3", "1.10.0", &order), TOME_OK);
+    CHECK_EQ(order, -1);
+    CHECK_EQ(api->version_compare(TOME_VERSION_GAME, "1.27b", "1.27.1.7085", &order), TOME_OK);
+    CHECK_EQ(order, 0);
+    CHECK_EQ(api->version_compare(TOME_VERSION_MOD, "1.2", "1.2.0", &order), TOME_ERR_INVALID_ARGUMENT);
+    CHECK_EQ(api->version_compare(TOME_VERSION_MOD, nullptr, "1.2.0", &order), TOME_ERR_INVALID_ARGUMENT);
+    CHECK_EQ(api->version_compare(TOME_VERSION_MOD, "1.2.0", "1.2.0", nullptr), TOME_ERR_INVALID_ARGUMENT);
+    CHECK_EQ(api->version_compare(7, "1.2.0", "1.2.0", &order), TOME_ERR_INVALID_ARGUMENT);
+    CHECK_EQ(api->version_match(TOME_VERSION_MOD, "^1.2", "1.9.0"), 1);
+    CHECK_EQ(api->version_match(TOME_VERSION_MOD, "^1.2", "2.0.0"), 0);
+    CHECK_EQ(api->version_match(TOME_VERSION_MOD, "*", api->tome_version), 1);
+    CHECK_EQ(api->version_match(TOME_VERSION_GAME, ">=1.26a <1.28", api->game_info()->file_version), 1);
+    CHECK_EQ(api->version_match(TOME_VERSION_MOD, ">=banana", "1.0.0"), -1);
+    CHECK_EQ(api->version_match(TOME_VERSION_GAME, nullptr, "1.27b"), -1);
+    CHECK_EQ(api->version_match(-1, "*", "1.0.0"), -1);
+
+    CHECK_EQ(std::string(api->mods_dir()), tome::narrow(home.paths().mods_dir));
+
+    // A release's tome.mod.json, before it's installed: checked against this
+    // Tome, the fake 1.27b game and its mapping database.
+    const std::string fits =
+        R"({"schema": 1, "id": "release", "version": "2.0.0", "game": "1.27b", "tome": "*", "sync": "client",
+            "requires": ["CTextFrame::SetText"]})";
+    char reason[128] = "untouched";
+    CHECK_EQ(api->check_metadata(fits.data(), fits.size(), reason, sizeof(reason)), 1);
+    CHECK_EQ(std::string(reason), std::string());
+    const std::string other_game =
+        R"({"schema": 1, "id": "release", "version": "2.0.0", "game": "1.26a", "tome": "*", "sync": "client"})";
+    CHECK_EQ(api->check_metadata(other_game.data(), other_game.size(), reason, sizeof(reason)), 0);
+    CHECK_EQ(std::string(reason), std::string("supports game 1.26a, this is 1.27b"));
+    const std::string unmapped =
+        R"({"schema": 1, "id": "release", "version": "2.0.0", "game": "*", "tome": "*", "sync": "client",
+            "requires": ["No::SuchFunction"]})";
+    CHECK_EQ(api->check_metadata(unmapped.data(), unmapped.size(), nullptr, 0), 0);
+    CHECK_EQ(api->check_metadata("{", 1, reason, 4), -1);
+    CHECK_EQ(std::string(reason), std::string("tom"));  // cut to fit
+    CHECK_EQ(api->check_metadata(nullptr, 5, reason, sizeof(reason)), -1);
+    CHECK_EQ(api->check_metadata(nullptr, 0, reason, sizeof(reason)), -1);  // empty text
+
+    tome_mod* mod = make_mod("zeppelin");
+    CHECK_EQ(api->list_mods(nullptr, nullptr, 0, 0), -1);
+    CHECK_EQ(api->list_mods(mod, nullptr, sizeof(tome_mod_info), 1), -1);
+    CHECK_EQ(api->list_mods(mod, nullptr, sizeof(tome_mod_info), -1), -1);
+    std::vector<tome_mod_info> list = list_all(api, mod);
+    CHECK_EQ(list.size(), size_t(5));
+    const tome_mod_info* hello = find_mod(list, "hello");
+    const tome_mod_info* lib = find_mod(list, "lib-plain");
+    const tome_mod_info* needs = find_mod(list, "needs-lib");
+    const tome_mod_info* broken = find_mod(list, "");
+    CHECK(hello && lib && needs && broken);
+    if (!hello || !lib || !needs || !broken) return;
+    // A DLL nobody allowed yet: waits for the player.
+    CHECK_EQ(hello->state, TOME_MOD_APPROVAL);
+    CHECK_EQ(hello->enabled, 0);
+    CHECK_EQ(std::string(hello->folder), std::string("hello"));
+    CHECK(hello->reason[0] != '\0');
+    CHECK_EQ(lib->enabled, 1);
+    CHECK_EQ(std::string(lib->reason), std::string());
+    CHECK_EQ(lib->state, TOME_MOD_ACTIVE);
+    CHECK_EQ(std::string(lib->version), std::string("2.1.0-rc.1"));
+    CHECK_EQ(std::string(lib->name), std::string("Plain library"));
+    CHECK_EQ(lib->sync_required, 1);
+    CHECK_EQ(lib->package, 0);
+    CHECK_EQ(lib->provides_count, 1);
+    CHECK_EQ(std::string(lib->provides[0]), std::string("plain-api"));
+    CHECK_EQ(std::string(lib->dir), tome::narrow(home.paths().mods_dir + L"\\lib-plain"));
+    CHECK_EQ(needs->state, TOME_MOD_ERROR);
+    CHECK(std::string(needs->reason).find("missing-lib") != std::string::npos);
+    CHECK_EQ(broken->state, TOME_MOD_ERROR);
+    CHECK_EQ(std::string(broken->folder), std::string("broken"));
+    CHECK_EQ(std::string(broken->version), std::string());
+    const tome_mod_info* no_dll = find_mod(list, "no-dll");
+    CHECK(no_dll != nullptr);
+    if (no_dll) {
+        CHECK_EQ(no_dll->state, TOME_MOD_ERROR);
+        CHECK_EQ(std::string(no_dll->version), std::string("3.0.0"));
+        CHECK_EQ(std::string(no_dll->name), std::string("No DLL"));
+        CHECK(std::string(no_dll->reason).find("gone.dll") != std::string::npos);
+    }
+
+    // Nothing changed since: a refresh says nothing.
+    CHECK_EQ(api->on_event(mod, TOME_EVENT_MODS_CHANGED, count_mods_changed, nullptr), TOME_OK);
+    tome::mod_manager().refresh();
+    CHECK_EQ(g_mods_changed, 0);
+
+    // A mod installed: the next refresh lists it and says so. The strings
+    // of the list this mod was given before stay valid until it asks again.
+    const char* old_lib_version = lib->version;
+    CHECK(write_mod(home, L"missing-lib",
+                     R"({"schema": 1, "id": "missing-lib", "version": "1.4.0", "game": "*", "tome": "*", "sync": "client"})"));
+    tome::mod_manager().refresh();
+    CHECK_EQ(g_mods_changed, 1);
+    CHECK_EQ(std::string(old_lib_version), std::string("2.1.0-rc.1"));
+    CHECK_EQ(tome_list_mods(api, mod, nullptr, 0), 6);  // counting keeps the old list
+    CHECK_EQ(std::string(old_lib_version), std::string("2.1.0-rc.1"));
+    list = list_all(api, mod);
+    CHECK_EQ(list.size(), size_t(6));
+    needs = find_mod(list, "needs-lib");
+    CHECK(needs && needs->state == TOME_MOD_ACTIVE);
+    CHECK(find_mod(list, "missing-lib") != nullptr);
+
+    // Turned off by the player: disabled, not wanted, no reason.
+    tome::mod_manager().set_enabled("needs-lib", false);
+    CHECK_EQ(g_mods_changed, 2);
+    list = list_all(api, mod);
+    needs = find_mod(list, "needs-lib");
+    CHECK(needs != nullptr);
+    if (needs) {
+        CHECK_EQ(needs->state, TOME_MOD_DISABLED);
+        CHECK_EQ(needs->enabled, 0);
+        CHECK_EQ(std::string(needs->reason), std::string());
+    }
+
+    // Removed.
+    CHECK(home.remove(L"tome\\mods\\broken"));
+    tome::mod_manager().refresh();
+    CHECK_EQ(g_mods_changed, 3);
+    list = list_all(api, mod);
+    CHECK_EQ(list.size(), size_t(5));
+    CHECK(find_mod(list, "") == nullptr);
+}
+
 // Keybinds: a broken keybinds.json, the game's CustomKeys.txt, keys asked
 // for by name, one the mod never declared, and resetting every key.
 TEST(host_keybinds_files_and_reset) {

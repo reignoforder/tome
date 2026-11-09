@@ -362,6 +362,76 @@ pub fn host_player() -> Option<i32> {
     (slot >= 0).then_some(slot)
 }
 
+/// Which kind of version [`version_compare`] and [`version_match`] read
+/// (`tome_version_kind`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VersionKind {
+    /// Semantic versions: mods' `"version"` and `"depends"`, and Tome's own.
+    Mod,
+    /// Game versions: `"game"` in `tome.mod.json` (`"1.27.1.7085"`, `"1.27b"`).
+    Game,
+}
+
+fn version_kind(kind: VersionKind) -> i32 {
+    match kind {
+        VersionKind::Mod => consts::TOME_VERSION_MOD,
+        VersionKind::Game => consts::TOME_VERSION_GAME,
+    }
+}
+
+/// Compares two versions by Tome's own rules; an error if either isn't one.
+pub fn version_compare(kind: VersionKind, a: &str, b: &str) -> Result<core::cmp::Ordering> {
+    let (a_ptr, a_len) = str_arg(a);
+    let (b_ptr, b_len) = str_arg(b);
+    let mut order = 0i32;
+    check(unsafe { raw::version_compare(version_kind(kind), a_ptr, a_len, b_ptr, b_len, &mut order) })?;
+    Ok(order.cmp(&0))
+}
+
+/// What [`check_metadata`] says of a `tome.mod.json`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MetadataCheck {
+    /// It would run here (if what it `"depends"` on is installed).
+    Runs,
+    /// Valid, but not for this game, edition, Tome or build: why.
+    NotHere(String),
+    /// Not a valid `tome.mod.json`: why.
+    Invalid(String),
+}
+
+/// Checks a `tome.mod.json` (a release's, before installing it) as Tome
+/// checks an installed one. Up to 64 KiB.
+pub fn check_metadata(text: &str) -> MetadataCheck {
+    let mut reason = vec![0u8; 1024];
+    let r = unsafe {
+        raw::check_metadata(
+            text.as_ptr(),
+            text.len() as u32,
+            reason.as_mut_ptr(),
+            reason.len() as u32,
+        )
+    };
+    let end = reason.iter().position(|&b| b == 0).unwrap_or(reason.len());
+    let why = String::from_utf8_lossy(&reason[..end]).into_owned();
+    match r {
+        1 => MetadataCheck::Runs,
+        0 => MetadataCheck::NotHere(why),
+        _ => MetadataCheck::Invalid(why),
+    }
+}
+
+/// Whether `version` is in `range`, as Tome checks `"depends"`, `"tome"` and
+/// `"game"`; `None` if either can't be parsed.
+pub fn version_match(kind: VersionKind, range: &str, version: &str) -> Option<bool> {
+    let (r_ptr, r_len) = str_arg(range);
+    let (v_ptr, v_len) = str_arg(version);
+    match unsafe { raw::version_match(version_kind(kind), r_ptr, r_len, v_ptr, v_len) } {
+        1 => Some(true),
+        0 => Some(false),
+        _ => None,
+    }
+}
+
 /// A unit as the selection describes it, if it's a live unit.
 pub fn unit_info(unit: u32) -> Option<OwnedUnit> {
     let block = read_out(256, |out, cap| unsafe { raw::unit_info(unit, out, cap) })?;

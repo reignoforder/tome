@@ -28,6 +28,8 @@ add_executable(tome_tests
     test_main_menu_fdf.cpp
     test_mappings.cpp
     test_metadata.cpp
+    test_metadata_check.cpp
+    test_mod_list.cpp
     test_mod_menu_model.cpp
     test_mod_state.cpp
     test_movie_decoder.cpp

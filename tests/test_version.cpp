@@ -159,3 +159,50 @@ TEST(game_ranges) {
     std::string err;
     CHECK(!parse_game_range(">=1.27z", range, err));
 }
+
+// The mod API's version_compare and version_match (API version 20).
+TEST(version_api_compare) {
+    int order = 7;
+    CHECK(compare_versions(false, "1.2.3", "1.10.0", order));
+    CHECK_EQ(order, -1);
+    CHECK(compare_versions(false, "1.0.0", "1.0.0-beta.2", order));
+    CHECK_EQ(order, 1);
+    CHECK(compare_versions(false, "1.0.0+build.5", "1.0.0", order));
+    CHECK_EQ(order, 0);
+    CHECK(compare_versions(false, "1.0.0-alpha.10", "1.0.0-alpha.9", order));
+    CHECK_EQ(order, 1);
+    CHECK(!compare_versions(false, "1.2", "1.2.0", order));
+    CHECK_EQ(order, 0);
+    CHECK(!compare_versions(false, "v1.2.3", "1.2.3", order));
+    CHECK(!compare_versions(false, "", "1.2.3", order));
+
+    CHECK(compare_versions(true, "1.27b", "1.27.1.7085", order));
+    CHECK_EQ(order, 0);
+    CHECK(compare_versions(true, "1.26a", "1.27b", order));
+    CHECK_EQ(order, -1);
+    CHECK(compare_versions(true, "1.28", "1.27.1.7085", order));
+    CHECK_EQ(order, 1);
+    CHECK(!compare_versions(true, "1.27z", "1.27b", order));
+}
+
+TEST(version_api_match) {
+    CHECK_EQ(match_version(false, "^1.2", "1.9.0"), 1);
+    CHECK_EQ(match_version(false, "^1.2", "2.0.0"), 0);
+    CHECK_EQ(match_version(false, ">=1.2 <2 || ^3", "3.1.0"), 1);
+    CHECK_EQ(match_version(false, "~1.2.3", "1.3.0"), 0);
+    CHECK_EQ(match_version(false, "*", "0.0.1-alpha"), 1);
+    CHECK_EQ(match_version(false, "", "4.5.6"), 1);
+    // In version order, as the header says.
+    CHECK_EQ(match_version(false, "^1.2.0", "1.3.0-beta"), 1);
+    CHECK_EQ(match_version(false, "^1.2.0", "2.0.0-beta"), 0);
+    CHECK_EQ(match_version(false, "1.2", "1.3.0-beta"), 0);
+    CHECK_EQ(match_version(false, ">=banana", "1.0.0"), -1);
+    CHECK_EQ(match_version(false, "^1", "1.0"), -1);
+
+    CHECK_EQ(match_version(true, ">=1.26a <1.28", "1.27b"), 1);
+    CHECK_EQ(match_version(true, ">=1.26a <1.28", "1.27.1.7085"), 1);
+    CHECK_EQ(match_version(true, "1.26a", "1.27b"), 0);
+    CHECK_EQ(match_version(true, "1.27", "1.27.0.52240"), 1);
+    CHECK_EQ(match_version(true, ">=1.27z", "1.27b"), -1);
+    CHECK_EQ(match_version(true, "*", "not a version"), -1);
+}

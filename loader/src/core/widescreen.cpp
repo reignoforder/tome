@@ -3,6 +3,7 @@
 
 #include "core/x86.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 
@@ -110,6 +111,43 @@ std::string console_fdf() {
 
 float middle_shift(float wide) {
     return wide > kBaseWidth ? (wide - kBaseWidth) / 2 : 0.0f;
+}
+
+std::vector<ArtPiece> slice_art(float wide, float cut, float tile) {
+    if (wide <= kBaseWidth || !(cut > 0.0f && cut < kBaseWidth) || !(tile > 0.0f && tile <= cut)) {
+        return {{0.0f, kBaseWidth, 0.0f, kBaseWidth}};
+    }
+    std::vector<ArtPiece> out;
+    out.push_back({0.0f, cut, 0.0f, cut});
+    const float right = wide - (kBaseWidth - cut);  // where the art after the cut starts
+    // Whole tiles only, each a little wider or narrower to fit: a part of
+    // one would show a cut slot.
+    const int count = std::max(1, static_cast<int>(std::lround((right - cut) / tile)));
+    const float each = (right - cut) / static_cast<float>(count);
+    for (int i = 0; i < count; ++i) {
+        const float x = cut + each * static_cast<float>(i);
+        out.push_back({cut - tile, cut, x, i + 1 == count ? right : x + each});
+    }
+    out.push_back({cut, kBaseWidth, right, wide});
+    return out;
+}
+
+std::vector<BlurSample> blur_samples(int count, float radius, float brightness) {
+    std::vector<BlurSample> out;
+    if (count < 1) return out;
+    // Blending copy k over the result at a_k weighs the copies before it by
+    // (1 - a_k): for weights w_k proportional to a plain average, w_k =
+    // w_{k-1} / (1 + w_{k-1}), so 1 / a_k = 1 / a_1 + k (from 0), and the
+    // last copy's weight, a_{n-1}, is brightness / n.
+    const float n = static_cast<float>(count);
+    const float inv_a1 = n / brightness - n + 1;
+    constexpr float kGoldenAngle = 2.39996323f;
+    out.reserve(static_cast<size_t>(count));
+    for (int k = 0; k < count; ++k) {
+        const float r = radius * std::sqrt((k + 0.5f) / n), angle = k * kGoldenAngle;
+        out.push_back({r * std::cos(angle), r * std::sin(angle), 1.0f / (inv_a1 + k)});
+    }
+    return out;
 }
 
 std::vector<Piece> console_layout(float wide) {

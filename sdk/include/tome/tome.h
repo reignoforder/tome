@@ -38,8 +38,10 @@ extern "C" {
  * 16: game objects (object_type, object_of, handle_of, player_object, unit_info, get_property,
  * set_property, jass_call, get_keyed_property, set_keyed_property, list_objects).
  * 17: the game's host (host_player). 18: messages between players (net_send, on_net_message).
- * 19: timers (timer_start, timer_stop) and desync checks (on_checksum). */
-#define TOME_API_VERSION 19
+ * 19: timers (timer_start, timer_stop) and desync checks (on_checksum).
+ * 20: versions and the installed mods (version_compare, version_match, list_mods, mods_dir,
+ * check_metadata, TOME_EVENT_MODS_CHANGED). */
+#define TOME_API_VERSION 20
 
 #define TOME_CALL __cdecl
 /* C linkage in C++ too: Tome looks the lifecycle functions up by their plain names. */
@@ -392,7 +394,14 @@ typedef enum tome_event {
      * it across one: amount = the time of day in hours. Checked every game
      * tick. */
     TOME_EVENT_DAY = 68,
-    TOME_EVENT_NIGHT = 69
+    TOME_EVENT_NIGHT = 69,
+    /* API version 20: what list_mods returns changed: a mod was installed,
+     * removed, updated, turned on or off, allowed, or stopped by an error.
+     * On any screen, once Tome has applied the change; also right after
+     * the change that enabled the listening mod itself, Tome's first look
+     * at startup included (once the game's window is up: list_mods has
+     * nothing in tome_mod_enable then). No fields. */
+    TOME_EVENT_MODS_CHANGED = 70
 } tome_event;
 
 /* tome_event_info.resource for TOME_EVENT_PLAYER_RESOURCE (the JASS
@@ -857,6 +866,58 @@ typedef union tome_jass_value {
     tome_jass_code code;      /* a code value the map script passed to a Tome native */
     const char* string;
 } tome_jass_value;
+
+/* API version 20: which kind of version version_compare and version_match read. */
+typedef enum tome_version_kind {
+    /* Semantic versions: mods' "version", "depends" and the like, and
+     * Tome's own (tome_api.tome_version). "1.2.3", "1.0.0-beta.1"; ranges
+     * "*", "1.2.3", ">=1.2 <2", "^1.2", "~1.2", "1.2" (1.2.x), "a || b". */
+    TOME_VERSION_MOD = 0,
+    /* Game versions: tome.mod.json "game". The game binary's four-part
+     * version ("1.27.1.7085", tome_game_info.file_version) or a known name
+     * ("1.27b"); ranges "*", ">=1.26a <1.28", "1.27" (1.27.x.x), "a || b". */
+    TOME_VERSION_GAME = 1
+} tome_version_kind;
+
+/* API version 20: tome_mod_info.state. */
+typedef enum tome_mod_state {
+    TOME_MOD_ACTIVE = 0,    /* running */
+    TOME_MOD_DISABLED = 1,  /* turned off by the player, or safe mode (reason "safe mode") */
+    TOME_MOD_APPROVAL = 2,  /* its code waits for the player to allow it (the mod menu) */
+    TOME_MOD_WAITING = 3,   /* held off by a multiplayer game until it ends */
+    /* Can't run: tome.mod.json can't be read, a dependency is missing, it's
+     * for another game or Tome, its DLL failed or crashed... (reason) */
+    TOME_MOD_ERROR = 4
+} tome_mod_state;
+
+/* API version 20: one installed mod, as list_mods reports it. */
+typedef struct tome_mod_info {
+    uint32_t size;            /* sizeof(tome_mod_info) as known to Tome */
+    const char* id;           /* "" if its tome.mod.json couldn't be read */
+    const char* name;         /* its folder's name if its tome.mod.json couldn't be read */
+    /* What runs: a mod a multiplayer game keeps running has the version it
+     * started with until the game ends. "" if tome.mod.json couldn't be read. */
+    const char* version;
+    /* Its entry in mods_dir(): a folder's name, or a package's file name
+     * ("hello.tome"). Two entries may have the same id (then one is an error). */
+    const char* folder;
+    const char* dir;          /* where its files are; a package's is where Tome unpacked it */
+    int32_t state;            /* tome_mod_state */
+    const char* reason;       /* why it isn't running, for people; "" if it is or was turned off */
+    /* 1: the player wants it on and its code is allowed (for a mod a
+     * multiplayer game keeps running: the code that runs, allowed when it
+     * started, whatever its folder holds now) */
+    int32_t enabled;
+    int32_t package;          /* 1: a .tome package file */
+    int32_t sync_required;    /* 1: "sync": "required" */
+    /* 1: changes to its assets wait for the game to restart (a mod updated
+     * while the game ran, "reload": "restart"). */
+    int32_t restart_pending;
+    /* Its tome.mod.json "provides": the ids it stands in for in other mods'
+     * "depends" (only those without a version range). */
+    const char* const* provides;
+    int32_t provides_count;
+} tome_mod_info;
 
 typedef struct tome_api {
     uint32_t size;               /* sizeof(tome_api) as known to Tome */
@@ -1387,6 +1448,65 @@ typedef struct tome_api {
      * multiplayer game or its replay, on the main thread. Any thread.
      * Revoked on disable. */
     tome_result (TOME_CALL *on_checksum)(tome_mod* mod, tome_checksum_fn fn, void* user);
+
+    /* --- API version 20: versions and the installed mods --- */
+
+    /* Compares two versions of a tome_version_kind by Tome's own rules (the
+     * ones tome.mod.json is checked with): *order (not NULL) becomes -1 if
+     * a comes first, 0 if they're equal, 1 if b does. Pre-releases come
+     * before their release ("1.0.0-beta" < "1.0.0"); build metadata
+     * ("+build.5") doesn't count; game versions compare by number, so
+     * "1.27b" equals "1.27.1.7085". TOME_ERR_INVALID_ARGUMENT (*order 0)
+     * if either isn't a version of that kind: a mod version needs all
+     * three numbers. Any thread. */
+    tome_result (TOME_CALL *version_compare)(int32_t kind, const char* a, const char* b, int32_t* order);
+
+    /* Whether `version` is in `range` (both of a tome_version_kind), as
+     * Tome checks "depends", "tome" and "game": 1 if it is, 0 if it isn't,
+     * -1 if either can't be parsed. Ranges compare in version order, so
+     * pre-releases inside one count ("^1.2.0" takes "1.3.0-beta"), but not
+     * those of the version a range ends before ("^1.2.0" doesn't take
+     * "2.0.0-beta", nor "1.2" "1.3.0-beta"). Any thread. */
+    int32_t (TOME_CALL *version_match)(int32_t kind, const char* range, const char* version);
+
+    /*
+     * Every mod in mods_dir() as of Tome's last look (the mod menu's list,
+     * this mod too), in the order Tome found them: fills up to `max` (use
+     * tome_list_mods; `out` may be NULL with max 0, to count them) and
+     * returns how many there are, possibly more than `max` (0 until Tome's
+     * first look ends: in tome_mod_enable at startup, wait for
+     * TOME_EVENT_MODS_CHANGED); -1 for bad
+     * arguments. Tome looks again when files there change (a moment
+     * later; TOME_EVENT_MODS_CHANGED says when what this returns changed).
+     * The strings stay valid until this mod calls list_mods again with
+     * max > 0. Any thread.
+     */
+    int32_t (TOME_CALL *list_mods)(tome_mod* mod, tome_mod_info* out, uint32_t info_size, int32_t max);
+
+    /*
+     * The folder mods are installed in (tome/mods; UTF-8, no trailing
+     * backslash): a folder with a tome.mod.json, or a .tome package file,
+     * per mod. Tome notices what's added, changed or removed there and
+     * applies it. Put a new mod together elsewhere (config_dir) and move it
+     * in whole (MoveFileExW), so Tome never reads half of it. A mod with
+     * code waits for the player to allow it (TOME_MOD_APPROVAL), and so
+     * does an update with new code, unless it's signed by the key the
+     * player allowed before. Any thread.
+     */
+    const char* (TOME_CALL *mods_dir)(void);
+
+    /*
+     * Checks a tome.mod.json (`size` bytes of `text`: a release's, before
+     * installing it) as Tome checks an installed one: 1 if it would run
+     * here, 0 if it's valid but not for this game, edition or Tome, or
+     * "requires" names this build doesn't map, or its DLL can't run here
+     * (a Shade that loads no mods' DLLs), -1 if it isn't a valid
+     * tome.mod.json. What else it needs ("depends") isn't checked: compare
+     * list_mods with version_match. `reason` (may be NULL) gets why not,
+     * every problem "; "-separated ("" for 1), NUL-terminated and cut short
+     * to fit `reason_size`. Any thread.
+     */
+    int32_t (TOME_CALL *check_metadata)(const char* text, size_t size, char* reason, size_t reason_size);
 } tome_api;
 
 /*
@@ -1570,6 +1690,16 @@ static inline int tome_has_host_player(const tome_api* api) {
 /* True if the running Tome has timers and desync checks (version 19). */
 static inline int tome_has_timers(const tome_api* api) {
     return api->api_version >= 19 && api->size >= offsetof(tome_api, on_checksum) + sizeof(api->on_checksum);
+}
+
+/* True if the running Tome has version_compare, version_match, list_mods, mods_dir and
+ * check_metadata (version 20). */
+static inline int tome_has_mod_list(const tome_api* api) {
+    return api->api_version >= 20 && api->size >= offsetof(tome_api, check_metadata) + sizeof(api->check_metadata);
+}
+
+static inline int32_t tome_list_mods(const tome_api* api, tome_mod* mod, tome_mod_info* out, int32_t max) {
+    return api->list_mods(mod, out, (uint32_t)sizeof(tome_mod_info), max);
 }
 
 /*

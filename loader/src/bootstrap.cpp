@@ -358,9 +358,16 @@ DWORD bootstrap() {
         start_exit_watch();
         // Mods enabled above may have asked for a main menu that already exists.
         main_thread::post(frames::catch_up);
+        // The first refresh above ran before the dispatcher, so its
+        // TOME_EVENT_MODS_CHANGED waited (ModManager::locked): the mods it
+        // enabled had no list in tome_mod_enable (it's made after them).
+        main_thread::post([] { events::fire_mods_changed(); });
         main_thread::post([] { patches::background_mute_start(g_paths.tome_dir); });
     } else {
         TOME_WARN("No game window to attach to; mod changes will apply off the main thread");
+        // Then the events fire where the list changes, the first refresh's here.
+        mods.fire_events_without_dispatcher();
+        events::fire_mods_changed();
     }
     start_watcher(g_paths, [] {
         if (mod_manager().poll_changed()) {

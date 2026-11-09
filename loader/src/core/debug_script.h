@@ -22,6 +22,8 @@
 //   key:<name>      a key press with modifiers ("Ctrl+J", core/keys.h)
 //   close           WM_CLOSE, like Alt-F4
 //   minimize, restore   like Alt-Tab away and back
+//   resize:<w>x<h>  the window's client area to w x h pixels, as dragging
+//                   its border (or leaving fullscreen) would
 //   wait:<text>     until tome.log has a line containing the text; each wait
 //                   looks only after the line the last one matched (or the
 //                   script's start)
@@ -45,7 +47,7 @@
 
 namespace tome::debug_script {
 
-enum class Kind { Click, ClickFrame, Focus, Move, Type, Text, Key, Close, Minimize, Restore, Wait, Frames, Until, Settle };
+enum class Kind { Click, ClickFrame, Focus, Move, Type, Text, Key, Close, Minimize, Restore, Resize, Wait, Frames, Until, Settle };
 
 // Frames between an until step's tries.
 inline constexpr uint32_t kUntilFrames = 30;
@@ -58,6 +60,7 @@ struct Step {
     std::string text;     // Type, Text, Key, Wait, Until; ClickFrame, Focus: the frame's name
     int context = 0;      // ClickFrame, Focus
     uint32_t frames = 0;  // Frames
+    uint32_t width = 0, height = 0;  // Resize: the client area, pixels
     uint32_t at_ms = 0;
 };
 

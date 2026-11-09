@@ -41,6 +41,7 @@ pub mod events;
 pub mod hooks;
 pub mod intermod;
 pub mod jass;
+pub mod mods;
 pub mod popup;
 mod settings;
 pub mod ui;
@@ -56,6 +57,7 @@ use std::borrow::Cow;
 pub use events::{Event, EventInfo, Unit};
 pub use hooks::{HookCall, Phase};
 pub use jass::{Boolean, Code, Handle, Integer, JString, Real, RealRet, StringRet};
+pub use mods::{MetadataCheck, ModInfo, ModState, VersionKind};
 pub use popup::Popup;
 pub use rt::{LoadResult, guard};
 
@@ -246,7 +248,8 @@ impl Tome {
             8 | 9 => version_end!(selection),
             10 => version_end!(restart_game),
             11 | 12 => version_end!(publish),
-            _ => version_end!(map_script_shadows),
+            13..=19 => version_end!(map_script_shadows),
+            _ => version_end!(check_metadata),
         };
         self.api.api_version >= version && self.api.size as usize >= end
     }

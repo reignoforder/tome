@@ -6,6 +6,7 @@
 #include "core/hash.h"
 #include "core/hash_cache.h"
 #include "core/json.h"
+#include "core/metadata_check.h"
 #include "crash_handler.h"
 #include "events.h"
 #include "frames.h"
@@ -28,6 +29,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <set>
+#include <utility>
 
 namespace tome {
 namespace {
@@ -190,6 +192,7 @@ ModManager& mod_manager() {
 
 void ModManager::init(const Paths& paths, const GameBuild& build) {
     paths_ = paths;
+    mods_dir_utf8_ = narrow(paths.mods_dir);
     build_ = build;
     parse_semver(TOME_VERSION, tome_version_);
     parse_game_version(build.file_version, game_version_);
@@ -474,26 +477,12 @@ std::vector<ModManager::Installed> ModManager::discover() const {
                 MetadataResult meta = parse_metadata(root, cached.meta);
                 cached.errors = std::move(meta.errors);
                 cached.warnings = std::move(meta.warnings);
-                cached.valid = meta.ok;
+                cached.valid = cached.meta_ok = meta.ok;
                 if (cached.valid && build_.known) {
-                    // Names with a single ':' are capabilities ("property:mana", core/objects.h);
-                    // only "property:" ones are checked so far. "Class::Method" is a mapping.
-                    // "<id>/<name>" is a mod's own mapping (check_mod_requires).
-                    const mappings::Build* data = build_.known->data;
-                    for (const std::string& name : cached.meta.requires_) {
-                        if (name.find('/') != std::string::npos) continue;
-                        const bool capability =
-                            name.find(':') != std::string::npos && name.find("::") == std::string::npos;
-                        std::string error;
-                        if (capability && !objects::capability_met(
-                                              name, [&](const char* s) { return data->find(s) != nullptr; }, error)) {
-                            cached.errors.push_back(error);
-                            cached.valid = false;
-                        } else if (!capability && !data->find(name)) {
-                            cached.errors.push_back("needs \"" + name + "\", which isn't mapped for " +
-                                                    build_.known->data->name);
-                            cached.valid = false;
-                        }
+                    // "<id>/<name>" is a mod's own mapping: check_mod_requires.
+                    for (std::string& error : unmet_requires(cached.meta, *build_.known->data)) {
+                        cached.errors.push_back(std::move(error));
+                        cached.valid = false;
                     }
                 }
             }
@@ -502,6 +491,7 @@ std::vector<ModManager::Installed> ModManager::discover() const {
         mod.errors = cached.errors;
         mod.warnings = cached.warnings;
         mod.valid = cached.valid;
+        mod.meta_ok = cached.meta_ok;
         if (mod.valid) {
             std::string entry = mod.meta.entry_for(game_version_);
             if (!entry.empty()) {
@@ -525,8 +515,7 @@ std::vector<ModManager::Installed> ModManager::discover() const {
             // version 3 of its natives, once its code is built (shade-recomp
             // build-mod); before that, not at all (a Wasm module does).
             if (mod.valid && !mod.dll.empty() && !mod.wasm && shade::active() && !shade::can_load_dlls()) {
-                mod.errors.push_back("its DLL can't run under this Shade, which runs only code recompiled with the "
-                                     "game (Wasm mods run there; a newer Shade runs DLLs too)");
+                mod.errors.push_back(kShadeRefusesDll);
                 mod.valid = false;
             }
             if (!mod.meta.config.empty()) read_settings_schema(mod);
@@ -872,6 +861,7 @@ void ModManager::disable(Runtime& rt) {
 void ModManager::mount_startup_assets(const Paths& paths, const GameBuild& build, std::string& report) {
     ExclusiveLock hold(lock_);
     paths_ = paths;
+    mods_dir_utf8_ = narrow(paths.mods_dir);
     build_ = build;
     parse_semver(TOME_VERSION, tome_version_);
     parse_game_version(build.file_version, game_version_);
@@ -889,7 +879,7 @@ void ModManager::mount_startup_assets(const Paths& paths, const GameBuild& build
         inputs.push_back({&mod.meta, wanted_and_allowed(state, mod)});
         input_mods.push_back(&mod);
     }
-    ResolveResult resolved = resolve(inputs, {tome_version_, game_version_, build_.edition});
+    ResolveResult resolved = resolve(inputs, environment());
     std::vector<const Installed*> running;
     for (size_t i : resolved.load_order) running.push_back(input_mods[i]);
     report = apply_assets(running, assets::Moment::Startup);
@@ -984,12 +974,40 @@ void ModManager::refresh() {
 
 void ModManager::locked(const std::function<void()>& fn) {
     std::vector<std::pair<std::string, std::vector<std::string>>> changes;
+    bool list_changed = false;
     {
         ExclusiveLock hold(lock_);
         fn();
         changes.swap(settings_changed_);
+        list_changed = std::exchange(mod_list_changed_, false);
     }
     notify_settings(std::move(changes));
+    // Outside the lock: the handlers may well call list_mods, or toggle mods.
+    // Not from the first refresh at startup, on the bootstrap thread before
+    // the dispatcher exists (post would run it right there): bootstrap posts
+    // that one once the dispatcher is installed (or, without a game window,
+    // once it knows there won't be one).
+    if (list_changed && (main_thread::installed() || frames::on_main_thread() || events_without_dispatcher_)) {
+        main_thread::post([] { events::fire_mods_changed(); });
+    }
+}
+
+void ModManager::publish_mod_list() {
+    // Only the refresh writes mod_list_, so it can be compared before the
+    // new snapshot is made (most refreshes change nothing).
+    {
+        SharedLock hold(mod_list_lock_);
+        if (mod_list_ && mod_list_->same_as(status_)) return;
+    }
+    auto next = std::make_shared<const mod_list::Snapshot>(status_);
+    ExclusiveLock hold(mod_list_lock_);
+    mod_list_ = std::move(next);
+    mod_list_changed_ = true;
+}
+
+std::shared_ptr<const mod_list::Snapshot> ModManager::mod_list() const {
+    SharedLock hold(mod_list_lock_);
+    return mod_list_;
 }
 
 void ModManager::notify_settings(std::vector<std::pair<std::string, std::vector<std::string>>> changes) const {
@@ -1149,7 +1167,7 @@ std::vector<std::string> ModManager::set_enabled_locked(const std::string& id, b
             inputs.push_back({&mod.meta, wanted_and_allowed(state, mod)});
         }
         if (target != SIZE_MAX) {
-            for (size_t i : dependents_of(inputs, {tome_version_, game_version_, build_.edition}, target)) {
+            for (size_t i : dependents_of(inputs, environment(), target)) {
                 ids.push_back(inputs[i].meta->id);
                 TOME_INFO("%s: disabled, since it depends on %s", ids.back().c_str(), id.c_str());
             }
@@ -1647,7 +1665,7 @@ void ModManager::refresh_locked(std::vector<Installed> installed, assets::Moment
             inputs[k].user_enabled = false;
         }
     }
-    ResolveResult resolved = resolve(inputs, {tome_version_, game_version_, build_.edition});
+    ResolveResult resolved = resolve(inputs, environment());
     if (!waiting_inputs.empty()) {
         for (size_t k : waiting_dependents(inputs, resolved, waiting_inputs)) waiting.insert(inputs[k].meta->id);
     }
@@ -1965,9 +1983,12 @@ void ModManager::refresh_locked(std::vector<Installed> installed, assets::Moment
         // The game decodes the icon, so only once the mod's files are allowed.
         if (mod.valid && approval_need(state, mod) == mod_state::Need::None) s.icon = mod.meta.icon;
         s.authors = mod.meta.authors;
+        s.provides = mod.meta.provides;
         if (!mod.valid) {
             s.id = mod.meta.id;
-            s.name = mod.folder;
+            // What tome.mod.json says if it was read, though the mod can't run.
+            s.name = mod.meta_ok ? mod.meta.name : mod.folder;
+            if (mod.meta_ok) s.version = mod.meta.version.to_string();
             s.state = "error";
             s.errors = mod.errors;
             s.warnings = mod.warnings;
@@ -2067,6 +2088,8 @@ void ModManager::refresh_locked(std::vector<Installed> installed, assets::Moment
             s.version = rt->second->handle.version;
         }
         s.sync = rt->second->required ? "required" : "client";
+        // What runs was allowed when it started (tome_mod_info.enabled):
+        // only the player's wish can change.
         s.user_enabled = wanted_by_user(state, id);
         s.running = true;
         s.state = "active";
@@ -2114,6 +2137,7 @@ void ModManager::refresh_locked(std::vector<Installed> installed, assets::Moment
         }
     }
     status_ = std::move(status);
+    publish_mod_list();
 
     // For crash reports (crash_handler.h): what ran, and whose DLL is whose.
     std::vector<crash_report::ModLine> lines;

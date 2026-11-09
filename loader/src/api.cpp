@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "api.h"
 
+#include "core/metadata_check.h"
+#include "core/version.h"
 #include "desync.h"
 #include "events.h"
 #include "frames.h"
@@ -17,6 +19,7 @@
 #include "objects.h"
 #include "popups.h"
 #include "settings_api.h"
+#include "shade.h"
 #include "storm.h"
 #include "timers.h"
 #include "units.h"
@@ -25,6 +28,7 @@
 #include <windows.h>
 
 #include <cstring>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -34,6 +38,7 @@ namespace {
 std::string g_build_name;
 std::string g_file_version;
 tome_game_info g_game_info;
+const mappings::Build* g_mappings = nullptr;  // the running build's, or null (check_metadata)
 std::vector<tome_symbol> g_symbols;  // the running build's mapping database
 tome_api g_api;
 
@@ -98,6 +103,48 @@ const tome_symbol* TOME_CALL api_resolve(const char* name) {
 int32_t TOME_CALL api_host_player() {
     if (!frames::on_main_thread()) return -1;
     return handshake::host_slot();
+}
+
+tome_result TOME_CALL api_version_compare(int32_t kind, const char* a, const char* b, int32_t* order) {
+    if (order) *order = 0;
+    if (!a || !b || !order || (kind != TOME_VERSION_MOD && kind != TOME_VERSION_GAME)) return TOME_ERR_INVALID_ARGUMENT;
+    int result = 0;
+    if (!compare_versions(kind == TOME_VERSION_GAME, a, b, result)) return TOME_ERR_INVALID_ARGUMENT;
+    *order = result;
+    return TOME_OK;
+}
+
+int32_t TOME_CALL api_version_match(int32_t kind, const char* range, const char* version) {
+    if (!range || !version || (kind != TOME_VERSION_MOD && kind != TOME_VERSION_GAME)) return -1;
+    return match_version(kind == TOME_VERSION_GAME, range, version);
+}
+
+int32_t TOME_CALL api_list_mods(tome_mod* mod, tome_mod_info* out, uint32_t info_size, int32_t max) {
+    if (!mod || max < 0 || (max > 0 && (!out || info_size < sizeof(uint32_t)))) return -1;
+    std::shared_ptr<const mod_list::Snapshot> list = mod_manager().mod_list();
+    if (!list) return 0;
+    if (max > 0) {
+        // Keeps the strings alive; the snapshot it held before goes now.
+        ExclusiveLock hold(mod->lock);
+        mod->listed_mods = list;
+    }
+    return list->fill(out, info_size, max);
+}
+
+int32_t TOME_CALL api_check_metadata(const char* text, size_t size, char* reason, size_t reason_size) {
+    MetadataCheck check;
+    if (!text && size > 0) {
+        check.reason = "no text";
+    } else {
+        check = check_metadata_text(std::string_view(text ? text : "", size), mod_manager().environment(), g_mappings,
+                                    !shade::active() || shade::can_load_dlls());
+    }
+    copy_text(check.reason, reason, reason_size);
+    return check.result;
+}
+
+const char* TOME_CALL api_mods_dir() {
+    return mod_manager().mods_dir_utf8().c_str();
 }
 
 size_t TOME_CALL api_read_game_file(const char* name, void* buffer, size_t size) {
@@ -179,6 +226,8 @@ void init_api(const GameBuild& build) {
                   static_cast<int32_t>(Edition::FrozenThrone) == TOME_EDITION_FROZEN_THRONE);
     g_game_info.edition = static_cast<int32_t>(build.edition);
 
+    g_mappings = build.known ? build.known->data : nullptr;
+
     // The strings point into the database, which lives as long as the process.
     g_symbols.clear();
     if (build.known) {
@@ -203,6 +252,11 @@ void init_api(const GameBuild& build) {
     g_api.resolve = api_resolve;
     g_api.read_game_file = api_read_game_file;
     g_api.host_player = api_host_player;
+    g_api.version_compare = api_version_compare;
+    g_api.version_match = api_version_match;
+    g_api.list_mods = api_list_mods;
+    g_api.mods_dir = api_mods_dir;
+    g_api.check_metadata = api_check_metadata;
     net_messages::fill_api(g_api);
     frames::fill_api(g_api);
     hooks::init(build.base, build.known ? build.known->data : nullptr);

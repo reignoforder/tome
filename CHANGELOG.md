@@ -26,7 +26,18 @@ API version of each addition in `tome.h` and `sdk/README.md` ("[14]").
 
 ## Unreleased
 
-API version 19.
+API version 20.
+
+- **Mods: versions and the installed mods** (API version 20): `version_compare`
+  and `version_match` compare versions and check ranges by Tome's own rules
+  (mods' semver and game versions, as `tome.mod.json` is checked; also for
+  WebAssembly mods), `list_mods` lists every installed mod with its version,
+  folder, state and why it isn't running, `TOME_EVENT_MODS_CHANGED` says when
+  that list changed, `mods_dir` is where mods are installed, and
+  `check_metadata` checks a release's `tome.mod.json` as Tome checks an
+  installed one (game, edition, Tome, mapped names; also for WebAssembly
+  mods). For mods that install and update others. The Rust crate wraps them
+  all (`Tome::list_mods`, `Tome::check_metadata`, `Event::MODS_CHANGED`...).
 
 - **Mods: timers** (`timer_start`, `timer_stop`, also for WebAssembly mods):
   a callback after a delay, once or repeating, on real time (every screen)
@@ -60,6 +71,26 @@ API version 19.
   make the client open a file outside `Maps\` or a device.
 - **Stop on Memory Corruption** (Tome > Settings, off by default): Windows'
   heap termination on corruption, from the next start.
+- **Widescreen: the menus' panels in proportion.** They were stretched
+  across a wide window (a third too wide at 16:9) under buttons that
+  weren't; now the menus fill the window as in 1.29, with the border on its
+  edges and each panel in proportion on its side. The loading and score
+  screens, whose art was stretched off the frames placed on it (the loading
+  screen's minimap off its border), are laid out at 4:3 in the middle of the
+  window, with the same art stretched, blurred and darkened filling the
+  sides. Battle.net's login doors are stretched across the window (in
+  proportion they left black sides, with the fields and buttons off the
+  doors), and so is the layer that dims a menu behind a dialog (it left a
+  bright strip at the left). Battle.net's button bar keeps its buttons on
+  their slots: its left part stays at the window's left, its end goes to
+  the right edge, and empty slots fill the space between.
+  A menu follows the window when its size changes (leaving fullscreen
+  after a click on Battle.net's banner drew the right panel at its 4:3
+  place, its edge a bar down the middle, until the next screen).
+- **Widescreen: the cursor is drawn where it points.** It was stretched with
+  the menus' full-screen art, so in a wide window it was drawn further right
+  than the pointer (a third at 16:9, in menus and games), and clicks landed
+  left of it.
 
 ## [0.1.0] - unreleased
 

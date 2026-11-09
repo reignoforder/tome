@@ -84,4 +84,71 @@ std::vector<Piece> console_layout(float wide);
 // clock) moves right for a UI `wide` units across: half the extra width.
 float middle_shift(float wide);
 
+// --- warped art ----------------------------------------------------------------------
+
+// Full-screen models on the menus that are stretched across the window, as
+// the game draws them at any shape, instead of drawn in proportion: art
+// whose frames the game anchors to the window's edges, which in proportion
+// would leave those frames off the art and black at the sides (Battle.net's
+// login doors, its chat screen's button bar). By FDF frame name; the layer
+// that dims a screen behind a dialog (a CHighlightFrame) is warped too.
+inline constexpr const char* kWarpedFrames[] = {
+    "BattleNetMainBackground",  // BattleNetMain.fdf: the login screen's doors
+};
+
+// Full-screen models drawn in pieces on a wider UI: art [0, cut] at the
+// window's left in proportion, [cut, kBaseWidth] at its right, and between
+// them the `tile` units of art before `cut` repeated, as many whole times
+// as fit best, each stretched a little to fill the gap (art units: the model
+// as made for 0..kBaseWidth). For art with frames anchored on both sides
+// that a stretch would leave off it: Battle.net's button bar, whose buttons
+// hang from the left, its end from the right, and whose slots repeat.
+struct SlicedFrame {
+    const char* name;  // FDF frame name
+    float cut;
+    float tile;
+};
+inline constexpr SlicedFrame kSlicedFrames[] = {
+    // BattleNetChatPanel.fdf: the bar under the ad, its buttons' slots 0.0547
+    // apart; cut after the last slot (the profile button's), before the
+    // bolts and the right end.
+    {"ButtonBarBackground", 0.607f, 0.0547f},
+};
+
+// One piece of a sliced model: the art from art_from to art_to drawn from
+// at_from to at_to of the UI (units from its left edge).
+struct ArtPiece {
+    float art_from;
+    float art_to;
+    float at_from;
+    float at_to;
+};
+
+// The pieces of art sliced at `cut` with a `tile` repeated, for a UI `wide`
+// units across, left to right. At kBaseWidth or narrower (or for a cut or
+// tile out of range) one piece: the art as it is.
+std::vector<ArtPiece> slice_art(float wide, float cut, float tile);
+
+// --- the boxed screens' side fill ---------------------------------------------------
+
+// The loading and score screens are laid out at kBaseWidth in the middle of
+// a UI `wide` units across: their box is box_margin in from each side (the
+// same as middle_shift).
+inline float box_margin(float wide) { return middle_shift(wide); }
+
+// One copy of the blurred art drawn beside a boxed screen: shifted by dx, dy
+// (UI units) and blended over the copies before it at `alpha` (0..1 of the
+// art's own alpha).
+struct BlurSample {
+    float dx;
+    float dy;
+    float alpha;
+};
+
+// `count` copies spread evenly over a disc `radius` across (a Vogel spiral),
+// with alphas a_k (1 / a_k = 1 / a_1 + k) chosen so that blending them one
+// over the other in order gives `brightness` times their plain average.
+// Empty for a count below 1.
+std::vector<BlurSample> blur_samples(int count, float radius, float brightness);
+
 } // namespace tome::widescreen

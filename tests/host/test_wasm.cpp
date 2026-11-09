@@ -806,6 +806,99 @@ TEST(host_wasm_imports_checked) {
     CHECK(config.find("3.5") != std::string::npos);
 }
 
+// Versions by Tome's rules (API version 20), from a module: strings and
+// the result's place checked like every other import's.
+TEST(host_wasm_versions) {
+    Fixture f;
+    const uint32_t compare = f.b.import("tome", "version_compare", {I32, I32, I32, I32, I32, I32}, {I32});
+    const uint32_t match = f.b.import("tome", "version_match", {I32, I32, I32, I32, I32}, {I32});
+    const uint32_t check = f.b.import("tome", "check_metadata", {I32, I32, I32, I32}, {I32});
+    const std::string fits =
+        R"({"schema": 1, "id": "release", "version": "2.0.0", "game": "*", "tome": "*", "sync": "client"})";
+    const std::string other_game =
+        R"({"schema": 1, "id": "release", "version": "2.0.0", "game": "1.26a", "tome": "*", "sync": "client"})";
+    f.b.data(3000, fits);
+    f.b.data(3200, other_game);
+    f.b.data(200, "1.2.3");
+    f.b.data(210, "1.10.0");
+    f.b.data(220, "^1.2");
+    f.b.data(230, "1.27b");
+    f.b.data(240, ">=1.26a <1.28");
+    f.b.data(260, "nope");
+    constexpr int32_t kOrder = 2000, kOutside = 70000;
+
+    Bytes body;
+    int checks = 0;
+    auto add = [&](std::initializer_list<Bytes> parts) {
+        for (const Bytes& p : parts) body.insert(body.end(), p.begin(), p.end());
+    };
+    auto expect = [&](std::initializer_list<Bytes> call, int32_t expected) {
+        char marker[8];
+        std::snprintf(marker, sizeof(marker), "ok%02d", ++checks);
+        const int32_t at = 1100 + 8 * checks;
+        f.b.data(static_cast<uint32_t>(at), marker);
+        add(call);
+        add({op::i32_const(expected), op::i32_eq(), op::if_(), f.log_at(at, 4), op::end()});
+    };
+    using namespace op;
+    expect({i32_const(TOME_VERSION_MOD), i32_const(200), i32_const(5), i32_const(210), i32_const(6), i32_const(kOrder),
+            call(compare)},
+           TOME_OK);
+    expect({i32_const(kOrder), i32_load()}, -1);
+    expect({i32_const(TOME_VERSION_MOD), i32_const(210), i32_const(6), i32_const(200), i32_const(5), i32_const(kOrder),
+            call(compare)},
+           TOME_OK);
+    expect({i32_const(kOrder), i32_load()}, 1);
+    expect({i32_const(TOME_VERSION_MOD), i32_const(260), i32_const(4), i32_const(200), i32_const(5), i32_const(kOrder),
+            call(compare)},
+           TOME_ERR_INVALID_ARGUMENT);
+    expect({i32_const(TOME_VERSION_MOD), i32_const(200), i32_const(5), i32_const(210), i32_const(6),
+            i32_const(kOutside), call(compare)},
+           TOME_ERR_INVALID_ARGUMENT);
+    expect({i32_const(TOME_VERSION_MOD), i32_const(kOutside), i32_const(5), i32_const(210), i32_const(6),
+            i32_const(kOrder), call(compare)},
+           TOME_ERR_INVALID_ARGUMENT);
+    expect({i32_const(TOME_VERSION_MOD), i32_const(220), i32_const(4), i32_const(210), i32_const(6), call(match)}, 1);
+    expect({i32_const(TOME_VERSION_GAME), i32_const(240), i32_const(13), i32_const(230), i32_const(5), call(match)}, 1);
+    expect({i32_const(TOME_VERSION_GAME), i32_const(230), i32_const(5), i32_const(260), i32_const(4), call(match)}, -1);
+    expect({i32_const(TOME_VERSION_MOD), i32_const(kOutside), i32_const(4), i32_const(210), i32_const(6), call(match)},
+           -1);
+
+    constexpr int32_t kReason = 3400;
+    expect({i32_const(3000), i32_const(static_cast<int32_t>(fits.size())), i32_const(kReason), i32_const(64),
+            call(check)},
+           1);
+    expect({i32_const(kReason), i32_load()}, 0);  // "" for a mod that runs
+    expect({i32_const(3200), i32_const(static_cast<int32_t>(other_game.size())), i32_const(kReason), i32_const(64),
+            call(check)},
+           0);
+    add({f.log_at(kReason, 34)});  // "supports game 1.26a, this is 1.27b"
+    expect({i32_const(3200), i32_const(10), i32_const(0), i32_const(0), call(check)}, -1);  // cut: not JSON
+    expect({i32_const(kOutside), i32_const(10), i32_const(0), i32_const(0), call(check)}, -1);
+    expect({i32_const(3000), i32_const(static_cast<int32_t>(fits.size())), i32_const(kOutside), i32_const(64),
+            call(check)},
+           -1);
+    f.load({i32_const(0)});
+    f.b.export_func("tome_mod_enable", f.b.func({}, {}, {body}));
+    f.callbacks();
+    Home home;
+    CHECK(install_wasm(home, "wasm-versions", f.b.bytes()));
+    Session session;
+    CHECK(session.start(home));
+    mod_manager().set_enabled("wasm-versions", true);
+    CHECK(running("wasm-versions"));
+    for (int i = 1; i <= checks; ++i) {
+        char marker[24];
+        std::snprintf(marker, sizeof(marker), "[wasm-versions] ok%02d", i);
+        CHECK_LOG(marker);
+    }
+    CHECK_LOG("[wasm-versions] version_compare: the result's place is outside the module's memory");
+    CHECK_LOG("[wasm-versions] version_match: a string argument is");
+    CHECK_LOG("[wasm-versions] supports game 1.26a, this is 1.27b");
+    CHECK_LOG("[wasm-versions] check_metadata: the text is outside the module's memory");
+    CHECK_LOG("[wasm-versions] check_metadata: the reason's buffer is outside the module's memory");
+}
+
 // More of what Tome refuses a module: callbacks without the exports they
 // need, config files too large or outside its memory, natives that aren't
 // its own, a string result that isn't one, and a module file too large.

@@ -105,12 +105,15 @@ outside memory; nothing is terminated.
 | `host_player` | same | `tome_host_player` in C, `host_player()` (an `Option`) in Rust |
 | `net_send`, `on_net_message` | same | `tome_net_send` and `tome_on_net_message(fn(player, data, size, replay, user), user)` in C; `net_send(&[u8])` and `on_net_message(\|player, data, replay\| ...)` in Rust |
 | `timer_start`, `timer_stop` | same | `tome_timer_start(clock, delay, interval, fn(timer, user), user, &id)` in C, `timer_start(Clock::Game, ...)` in Rust; the callback block is `[timer][state]` (0: fires again, 1: its last time, 2: ended with its game, not called), so the module frees its side of a timer that's done |
+| `check_metadata` | same | the text up to 64 KiB; `tome_check_metadata` in C, `check_metadata(&str)` (a `MetadataCheck`) in Rust |
+| `version_compare`, `version_match` | same | `tome_version_compare(kind, a, b, &order)` and `tome_version_match(kind, range, version)` in C; `version_compare(VersionKind::Mod, a, b)` (an `Ordering`) and `version_match(...)` (an `Option<bool>`) in Rust |
 | `on_checksum` | same | `tome_on_checksum(fn(user) -> uint64_t, user)` in C, `on_checksum(\|\| hash)` and `Hash` in Rust; the module writes the hash over its 8-byte callback block, which Tome reads back |
 | `jass_call` | same | arguments one word each (`tome_jass_value`), strings as pointers to NUL-terminated text in the module's memory, copied in; a string result copied into a buffer of the module's (`tome_jass_call` in C, `jass_call` in Rust); the same checks as for DLLs (below) |
 | `resolve`, `hook`, `unhook`, `hook_call_next` | **no** | addresses and raw arguments |
 | `service_*`, `on_service` | **no** | function tables; `publish`/`subscribe` instead |
 | `jass_string`, `jass_string_create` | not needed | strings come and go as text (below) |
-| `mod_dir`, `config_dir` | **no** | paths |
+| `mod_dir`, `config_dir`, `mods_dir` | **no** | paths |
+| `list_mods` | **no** | structs of pointers; `TOME_EVENT_MODS_CHANGED` still arrives through `on_event` |
 
 New API functions get a Wasm import when they can be one without handing out
 a pointer; `tools/gen-wasm-consts.py` keeps the constants in step (a test

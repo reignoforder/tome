@@ -780,6 +780,7 @@ REMAINING=$(find "$MODS" -mindepth 1 -maxdepth 1 -type d ! -name config | wc -l)
 ROC_ONLY=0; [[ "$EDITION" == roc ]] && ROC_ONLY=1
 ACTIVE=$(( (${#MAP_ARG[@]} ? 5 : 6) + WASM + WASMRS + ROC_ONLY ))
 check "Mods: $REMAINING installed, $ACTIVE active" "mod list refreshed"
+check "\[hello\] mods changed: $REMAINING installed, $ACTIVE active" "TOME_EVENT_MODS_CHANGED: a mod hears it, and list_mods agrees"
 if ! tail -n 5 "$LOG" | grep -q "needs-ghost"; then pass "removed mod gone from the list"; else fail "removed mod still listed"; fi
 
 echo ".tome packages"

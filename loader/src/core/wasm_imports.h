@@ -91,4 +91,7 @@ constexpr size_t kMaxModuleSize = 16u << 20;
     X(on_net_message, "(i)i") \
     X(timer_start, "(iFFii)i") \
     X(timer_stop, "(i)i") \
-    X(on_checksum, "(i)i")
+    X(on_checksum, "(i)i") \
+    X(version_compare, "(iiiiii)i") \
+    X(version_match, "(iiiii)i") \
+    X(check_metadata, "(iiii)i")

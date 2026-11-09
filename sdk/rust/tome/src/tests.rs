@@ -104,6 +104,81 @@ unsafe extern "C" fn mock_popup(
     sys::tome_result::TOME_OK
 }
 
+// Versions and the installed mods (API version 20): mocks that answer for
+// a few fixed inputs, so the wrappers' conversions are what's tested.
+unsafe extern "C" fn mock_version_compare(
+    _: i32,
+    a: *const c_char,
+    b: *const c_char,
+    order: *mut i32,
+) -> sys::tome_result {
+    let (a, b) = unsafe { (CStr::from_ptr(a), CStr::from_ptr(b)) };
+    unsafe { *order = 0 };
+    if a == c"bad" || b == c"bad" {
+        return sys::tome_result::TOME_ERR_INVALID_ARGUMENT;
+    }
+    unsafe { *order = a.cmp(b) as i32 };
+    sys::tome_result::TOME_OK
+}
+
+unsafe extern "C" fn mock_version_match(kind: i32, range: *const c_char, _: *const c_char) -> i32 {
+    match (kind, unsafe { CStr::from_ptr(range) }.to_bytes()) {
+        (1, b"yes") => 1,
+        (1, b"no") => 0,
+        _ => -1,
+    }
+}
+
+thread_local! {
+    // Mods "added" before the next list_mods call returns (a race the wrapper retries).
+    static MODS_ADDED: Cell<i32> = const { Cell::new(0) };
+}
+
+unsafe extern "C" fn mock_list_mods(_: *mut sys::tome_mod, out: *mut sys::tome_mod_info, size: u32, max: i32) -> i32 {
+    let provides = [c"hp-bars".as_ptr(), c"mana-bars".as_ptr()];
+    // The extra mods show up once, when the list is filled after counting.
+    let count = 2 + if max > 0 { MODS_ADDED.with(|c| c.replace(0)) } else { 0 };
+    assert_eq!(size as usize, size_of::<sys::tome_mod_info>());
+    for i in 0..count.min(max) {
+        let mut m: sys::tome_mod_info = unsafe { zeroed() };
+        m.size = size;
+        m.id = if i == 0 { c"zeppelin".as_ptr() } else { c"lib".as_ptr() };
+        m.name = c"Name".as_ptr();
+        m.version = c"1.2.0".as_ptr();
+        m.folder = c"lib.tome".as_ptr();
+        m.dir = c"C:\\mods\\lib".as_ptr();
+        m.reason = if i == 0 { c"".as_ptr() } else { c"new code".as_ptr() };
+        m.state = if i == 0 { 0 } else { 2 };
+        m.enabled = (i == 0) as i32;
+        m.package = (i != 0) as i32;
+        if i != 0 {
+            m.provides = Box::leak(Box::new(provides)).as_ptr();
+            m.provides_count = 2;
+        }
+        unsafe { out.add(i as usize).write(m) };
+    }
+    count
+}
+
+unsafe extern "C" fn mock_mods_dir() -> *const c_char {
+    c"C:\\tome\\mods".as_ptr()
+}
+
+unsafe extern "C" fn mock_check_metadata(text: *const c_char, size: usize, reason: *mut c_char, cap: usize) -> i32 {
+    let text = unsafe { core::slice::from_raw_parts(text as *const u8, size) };
+    let (r, why): (i32, &[u8]) = match text {
+        b"fits" => (1, b""),
+        b"old" => (0, b"needs Tome >=9"),
+        _ => (-1, b"tome.mod.json: expected a value"),
+    };
+    let n = why.len().min(cap - 1);
+    unsafe {
+        core::ptr::copy_nonoverlapping(why.as_ptr(), reason as *mut u8, n);
+        *reason.add(n) = 0;
+    }
+    r
+}
+
 static mut MOD: u8 = 0;
 
 /// A table of `version` with every function this test needs; the rest NULL.
@@ -120,6 +195,11 @@ fn api(version: u32, size: usize) -> &'static sys::tome_api {
     api.on_keybind = Some(mock_on_keybind);
     api.register_command = Some(mock_register_command);
     api.popup = Some(mock_popup);
+    api.version_compare = Some(mock_version_compare);
+    api.version_match = Some(mock_version_match);
+    api.list_mods = Some(mock_list_mods);
+    api.mods_dir = Some(mock_mods_dir);
+    api.check_metadata = Some(mock_check_metadata);
     Box::leak(Box::new(api))
 }
 
@@ -394,4 +474,49 @@ fn callbacks_outlive_the_thread_that_registered_them() {
     unsafe { rt::disable(rt::mod_ptr(), None) };
     unsafe { rt::enable(rt::mod_ptr(), None) };
     assert_eq!(drops.load(SeqCst), 1);
+}
+
+#[test]
+fn versions_and_installed_mods() {
+    let _serial = SERIAL.lock().unwrap();
+    let tome = loaded(20, size_of::<sys::tome_api>());
+    assert!(tome.has(20));
+    assert_eq!(tome.version_compare(VersionKind::Mod, "a", "b"), Ok(core::cmp::Ordering::Less));
+    assert_eq!(tome.version_compare(VersionKind::Mod, "b", "b"), Ok(core::cmp::Ordering::Equal));
+    assert_eq!(tome.version_compare(VersionKind::Mod, "bad", "b"), Err(Error::INVALID_ARGUMENT));
+    assert_eq!(tome.version_compare(VersionKind::Mod, "a\0", "b"), Err(Error::INVALID_ARGUMENT));
+    assert_eq!(tome.version_match(VersionKind::Game, "yes", "1.27b"), Some(true));
+    assert_eq!(tome.version_match(VersionKind::Game, "no", "1.27b"), Some(false));
+    assert_eq!(tome.version_match(VersionKind::Mod, "yes", "1.0.0"), None);
+    assert_eq!(tome.mods_dir(), "C:\\tome\\mods");
+    assert_eq!(tome.check_metadata("fits"), Ok(MetadataCheck::Runs));
+    assert_eq!(tome.check_metadata("old"), Ok(MetadataCheck::NotHere("needs Tome >=9".into())));
+    assert_eq!(
+        tome.check_metadata("{"),
+        Ok(MetadataCheck::Invalid("tome.mod.json: expected a value".into()))
+    );
+
+    // A mod added between counting and filling: asked again.
+    MODS_ADDED.with(|c| c.set(3));
+    let mods = tome.list_mods().unwrap();
+    assert_eq!(mods.len(), 2);
+    assert_eq!(mods[0].id, "zeppelin");
+    assert_eq!(mods[0].state, ModState::Active);
+    assert!(mods[0].enabled && !mods[0].package && mods[0].provides.is_empty());
+    assert_eq!(mods[1].id, "lib");
+    assert_eq!(mods[1].state, ModState::Approval);
+    assert_eq!(mods[1].reason, "new code");
+    assert_eq!(mods[1].folder, "lib.tome");
+    assert_eq!(mods[1].provides, ["hp-bars", "mana-bars"]);
+    assert_eq!(Event::MODS_CHANGED.name(), Some("MODS_CHANGED"));
+    assert_eq!(Event::MODS_CHANGED.api_version(), 20);
+
+    // A Tome before version 20 has none of it.
+    let old = loaded(19, offset_of!(sys::tome_api, version_compare));
+    assert_eq!(old.version_compare(VersionKind::Mod, "a", "b"), Err(Error::UNAVAILABLE));
+    assert_eq!(old.version_match(VersionKind::Game, "yes", "1.27b"), None);
+    assert_eq!(old.list_mods(), Err(Error::UNAVAILABLE));
+    assert_eq!(old.mods_dir(), "");
+    assert_eq!(old.check_metadata("fits"), Err(Error::UNAVAILABLE));
+    assert_eq!(old.on_event(Event::MODS_CHANGED, |_| ()), Err(Error::UNAVAILABLE));
 }

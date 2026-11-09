@@ -396,6 +396,7 @@ Frame classes in RTTI include `CFrame`, `CLayoutFrame`, `CTextFrame`,
 | CTextFrame | `0x6FA8B9C0` (secondary `0x6FA8BAD4`, +0xB4) |
 | CCheckBox | `0x6FA8C1F4` |
 | CSpriteFrame | `0x6FA8B214` (secondary `0x6FA8B304`) |
+| CHighlightFrame | `0x6FA8B744` (1.26a `0x6F96F974`; a sprite frame: highlights, and the layer that dims a glue screen behind a dialog) |
 | CMainMenu | `0x6FAB1894` (secondary `0x6FAB197C`, +0xB4) |
 | COptionsMenu | `0x6FAA7170` |
 | CSinglePlayerMenu | `0x6FAB19E8` |
@@ -1452,6 +1453,48 @@ checked clamp tooltips to the screen or pick a color, nothing that lays out.
   the eye sits at the view's middle, so a model made for 0..0.8 lands at
   0..0.8 of a wider screen (the loading screen squeezed to the left).
   `(-width/2, 0.8 - width/2)` stretches it across as the game draws it.
+  The cursor is such a frame too: `CCursorFrame` (vtable `0xA8DA14`, 1.26a
+  `0x97063C`; `CCursorFrame.vtable`) fills the screen and draws its model
+  at the pointer, in the same units as the rest of the UI. Stretched like a
+  menu model, it was drawn `width / 0.8` times as far from the left edge as
+  the pointer, so it's left as it is. A sprite frame's model is placed from
+  the root's left edge, while its flat camera is centered on its own frame:
+  a model in a frame that doesn't start at the root's left edge is drawn
+  that much further right.
+- **Clipping.** Every frame class's render virtual (slot `+0x24`,
+  `0xECF70`) asks the frame for a clip (slot `+0xB8`; a sprite frame
+  (`0x0F5E50`, 1.26a `0x606BD0`) clips when bit `0x8` of `+0xC` is set: its
+  rect and the current clip's intersection). A frame that clips makes it the
+  current clip (the render state's `+0x8..+0x14`, UI units) and the
+  viewport: `DDCToNDCRect` into `.data 0xD478C0` (1.26a `0xACE644`) at
+  `0xED0D7`, then `GxXformSetViewport` `0x1371F0` (1.26a `0x5265E0`;
+  stdcall `(x0, x1, y0, y1, near, far)`, fractions of the window, `ret
+  0x18`; the device's vtable `+0x4C`, 1.26a `+0x48`, whose base setter
+  keeps them at `CGxDevice.viewport`, `+0xE4`; the device is
+  `GxDevice.instance`, `.data 0xD52EB8`, 1.26a `0xACBD40`). After its children it puts the
+  previous clip back the same way (`0xED2A1`). The roots clip, so a root's
+  rect is the viewport its frames are drawn in. A flat sprite camera isn't
+  clipped by its frame: its projection places the model in the frame's
+  rect over the whole viewport (a loading screen's art: `(-width/2,
+  width/2)` over the window). The glue screens' sprite layers
+  (`CGlueMgr.sprite_*`) live as long as the glue manager, across screens.
+- **Drawing a sprite frame.** Slot `+0x2C` draws: CSpriteFrame `0xF73E0`
+  (1.26a `0x60EC00`) runs `CSpriteFrame::SetupCamera` and queues each model
+  instance (`+0x174` count, `+0x178` array) into the scene at `+0x180`;
+  CModelFrame (a MODEL frame, vtable `0xA8B454`) `0xF8200` does the same
+  for its models (`+0x16C`, `+0x170`). Slot `+0x30`
+  (`CSpriteFrame.vtable.Render`) renders them with the projection last set
+  up: `CSpriteFrame::Render` `0xF72F0` (1.26a `0x60EA80`),
+  `CModelFrame::Render` `0xF81B0` (1.26a `0x621700`). Calling SetupCamera
+  and Render again draws the frame again with another camera (and, with
+  GxXformSetViewport, in another part of the window). Alpha:
+  `CFrame.alpha` (`+0xAC`, a byte) goes to what the frame draws through
+  `CFrame.vtable.ApplyAlpha` (`+0xA4`: CSpriteFrame `0xF7260`, through
+  `0x1ACAB0` with property 6; CModelFrame `0xF8150`, through `0x187E30`).
+  A layout's rect: `CLayoutFrame.vtable.GetRect` (`+0x10`, `{bottom, left,
+  top, right}`). The loading screen's art is a CSpriteFrame
+  (`LoadingMeleeBackground`, `Load-Multiplayer-<race>.mdl`), the score
+  screen's three CModelFrames, all filling the screen's frame.
 - **Points.** A point is an object with a vtable: one relative to a frame
   (made by `0x11E3C0`) holds the relative `CLayoutFrame*` at `+4`, the
   relative point at `+8`, x and y at `+0xC`, `+0x10`; one relative to the

@@ -89,5 +89,8 @@ imports! {
     fn timer_start(clock: i32, delay: f64, interval: f64, callback: u32, timer: *mut u32) -> i32;
     fn timer_stop(timer: u32) -> i32;
     fn on_checksum(callback: u32) -> i32;
+    fn version_compare(kind: i32, a: *const u8, a_len: u32, b: *const u8, b_len: u32, order: *mut i32) -> i32;
+    fn version_match(kind: i32, range: *const u8, range_len: u32, version: *const u8, version_len: u32) -> i32;
+    fn check_metadata(text: *const u8, size: u32, reason: *mut u8, reason_size: u32) -> i32;
     fn jass_call(name: *const u8, len: u32, args: *const u32, count: i32, result: *mut u32, text: *mut u8, capacity: u32) -> i32;
 }

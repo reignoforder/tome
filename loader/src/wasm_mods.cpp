@@ -3,6 +3,7 @@
 
 #include "api.h"
 #include "core/intermod.h"
+#include "core/metadata_check.h"
 #include "core/path_guard.h"
 #include "core/text.h"
 #include "core/wasm_abi.h"
@@ -1215,6 +1216,53 @@ int32_t w_timer_stop(wasm_exec_env_t env, uint32_t timer) {
     const int32_t r = api()->timer_stop(impl->mod, timer);
     if (r == TOME_OK) impl->timer_slots.erase(timer);
     return r;
+}
+
+int32_t w_version_compare(wasm_exec_env_t env, int32_t kind, uint32_t a_ptr, uint32_t a_len, uint32_t b_ptr,
+                          uint32_t b_len, uint32_t out) {
+    Impl* impl = impl_of(env);
+    std::string a, b;
+    if (!arg_string(impl, "version_compare", a_ptr, a_len, a) || !arg_string(impl, "version_compare", b_ptr, b_len, b))
+        return TOME_ERR_INVALID_ARGUMENT;
+    if (!out || !wasm::in_bounds(impl->memory(), out, 4)) {
+        TOME_ERROR("[%s] version_compare: the result's place is outside the module's memory", impl->mod->id.c_str());
+        return TOME_ERR_INVALID_ARGUMENT;
+    }
+    int32_t order = 0;
+    const int32_t r = api()->version_compare(kind, a.c_str(), b.c_str(), &order);
+    store(impl, out, static_cast<uint32_t>(order));
+    return r;
+}
+
+int32_t w_version_match(wasm_exec_env_t env, int32_t kind, uint32_t range_ptr, uint32_t range_len,
+                        uint32_t version_ptr, uint32_t version_len) {
+    Impl* impl = impl_of(env);
+    std::string range, version;
+    if (!arg_string(impl, "version_match", range_ptr, range_len, range) ||
+        !arg_string(impl, "version_match", version_ptr, version_len, version))
+        return -1;
+    return api()->version_match(kind, range.c_str(), version.c_str());
+}
+
+int32_t w_check_metadata(wasm_exec_env_t env, uint32_t text, uint32_t size, uint32_t out, uint32_t capacity) {
+    Impl* impl = impl_of(env);
+    const bool reason_ok = capacity == 0 || (out && wasm::in_bounds(impl->memory(), out, capacity));
+    // Straight into the module's buffer: check_metadata calls nothing of the
+    // module's, so its memory stays where it is meanwhile.
+    char* reason = capacity && reason_ok ? reinterpret_cast<char*>(impl->memory().base + out) : nullptr;
+    std::vector<uint8_t> bytes;
+    if (!wasm::read_bytes(impl->memory(), text, size, kMaxMessage, bytes)) {
+        TOME_ERROR("[%s] check_metadata: the text is outside the module's memory or larger than %zu bytes",
+                   impl->mod->id.c_str(), kMaxMessage);
+        // Why, so a module doesn't take it for an invalid tome.mod.json with no reason.
+        copy_text("the text is outside the module's memory or larger than 64 KiB", reason, capacity);
+        return -1;
+    }
+    if (!reason_ok) {
+        TOME_ERROR("[%s] check_metadata: the reason's buffer is outside the module's memory", impl->mod->id.c_str());
+        return -1;
+    }
+    return api()->check_metadata(reinterpret_cast<const char*>(bytes.data()), bytes.size(), reason, capacity);
 }
 
 int32_t w_on_checksum(wasm_exec_env_t env, uint32_t callback) {

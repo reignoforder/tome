@@ -221,6 +221,13 @@ TOME_WASM_IMPORT(on_net_message) int32_t tome_raw_on_net_message(uint32_t callba
 TOME_WASM_IMPORT(timer_start) int32_t tome_raw_timer_start(int32_t clock, double delay, double interval, uint32_t callback, uint32_t* timer);
 TOME_WASM_IMPORT(timer_stop) int32_t tome_raw_timer_stop(uint32_t timer);
 TOME_WASM_IMPORT(on_checksum) int32_t tome_raw_on_checksum(uint32_t callback);
+/* Versions by Tome's rules (tome.h, API version 20): use tome_version_compare and tome_version_match (below). */
+TOME_WASM_IMPORT(version_compare) int32_t tome_raw_version_compare(int32_t kind, const char* a, uint32_t a_len, const char* b, uint32_t b_len, int32_t* order);
+TOME_WASM_IMPORT(version_match) int32_t tome_raw_version_match(int32_t kind, const char* range, uint32_t range_len, const char* version, uint32_t version_len);
+/* Whether a tome.mod.json (up to 64 KiB) would run here: 1, 0 (not for this game, edition, Tome or build),
+ * -1 (invalid); `reason` (may be NULL with size 0) gets why not, NUL-terminated and cut to fit
+ * (tome.h, check_metadata). */
+TOME_WASM_IMPORT(check_metadata) int32_t tome_check_metadata(const void* text, uint32_t size, char* reason, uint32_t reason_size);
 /* One argument or the result of jass_call: the member the native's signature
  * says. Handles are JASS handle ids here (tome_handle_of), not this module's
  * object handles; strings are UTF-8. */
@@ -271,6 +278,17 @@ static inline void tome_log(int32_t level, const char* text) {
 }
 static inline int32_t tome_display_text(const char* text, float seconds) {
     return tome_raw_display_text(text, (uint32_t)tome_strlen(text), seconds);
+}
+
+/* kind: TOME_VERSION_MOD or TOME_VERSION_GAME. *order: -1, 0 or 1; TOME_ERR_INVALID_ARGUMENT if
+ * either isn't a version (tome.h, version_compare). */
+static inline int32_t tome_version_compare(int32_t kind, const char* a, const char* b, int32_t* order) {
+    return tome_raw_version_compare(kind, a, (uint32_t)tome_strlen(a), b, (uint32_t)tome_strlen(b), order);
+}
+
+/* 1 if `version` is in `range`, 0 if not, -1 if either can't be parsed (tome.h, version_match). */
+static inline int32_t tome_version_match(int32_t kind, const char* range, const char* version) {
+    return tome_raw_version_match(kind, range, (uint32_t)tome_strlen(range), version, (uint32_t)tome_strlen(version));
 }
 /* The game build ("1.27b") and file version; valid until the next call. */
 const tome_wasm_game_info* tome_game_info(void);

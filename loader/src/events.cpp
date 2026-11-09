@@ -66,7 +66,7 @@ using RegList = std::vector<RegPtr>;
 
 // The highest tome_event: g_handlers has a slot for each, and on_event refuses
 // anything above it. Raise it with every new event.
-constexpr int kEventCount = TOME_EVENT_NIGHT;
+constexpr int kEventCount = TOME_EVENT_MODS_CHANGED;
 
 SRWLOCK g_lock = SRWLOCK_INIT;  // registration may happen on any thread
 std::shared_ptr<const RegList> g_handlers[kEventCount + 1];  // copy-on-write, by event
@@ -195,6 +195,7 @@ const char* event_name(int32_t event) {
     case TOME_EVENT_PLAYER_RESOURCE: return "(player resource)";
     case TOME_EVENT_DAY: return "(day)";
     case TOME_EVENT_NIGHT: return "(night)";
+    case TOME_EVENT_MODS_CHANGED: return "(mods changed)";
     default: return nullptr;
     }
 }
@@ -1440,6 +1441,10 @@ void dispatch_for_test(tome_event_info info) {
         timers_api::on_game_step(test_game_time);
     }
     if (info.event == TOME_EVENT_GAME_END) timers_api::on_game_end();
+}
+
+void fire_mods_changed() {
+    fire(TOME_EVENT_MODS_CHANGED);
 }
 
 tome_event_info default_info_for_test(int32_t event) {

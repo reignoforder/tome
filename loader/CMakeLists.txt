@@ -145,6 +145,8 @@ add_library(tome_core STATIC
     src/core/main_menu_fdf.cpp
     src/core/mappings.cpp
     src/core/metadata.cpp
+    src/core/metadata_check.cpp
+    src/core/mod_list.cpp
     src/core/mod_menu_model.cpp
     src/core/mod_state.cpp
     src/core/movie_decoder.cpp

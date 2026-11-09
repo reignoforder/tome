@@ -450,18 +450,24 @@ centered, the command card at the right edge, wall between, and slots in the
 top bar each side of the clock), and the portrait, info panel, life and mana
 text, clock and inventory cover move to the middle. The world view then fills
 the window at its own shape. Clicks land where things are drawn (checked: a
-peasant selected by clicking it, a command card button at 97% of the width).
-The menus and the loading screen keep the game's look: their full-screen
-models (panels, backgrounds) are stretched across the window as the game
-draws them, and the buttons and text on them are in proportion. Checked at
-1280 x 720 on the main menu, Single Player, Options, Custom Game, the loading
-screen and in a game. **Still open:**
+peasant selected by clicking it, a command card button at 97% of the width),
+and the cursor is drawn at the pointer: until Nov 2026 its frame (a
+full-screen sprite) was stretched like the menus' art, so it was drawn a
+third further from the left edge than the pointer at 16:9.
+The menus fill the window as in 1.29 (Nov 2026): the border on the window's
+edges, the left panels on its left and the right panels (behind the buttons)
+on its right, each in proportion, with the 3D background filling the
+window. Before, those panels (models drawn for 4:3) were stretched across
+the window, a third too wide at 16:9, under buttons that weren't. The
+loading screen and the score screen, each one piece of art with frames
+placed on it, are laid out at 4:3 in the middle of the window, with the same
+art stretched, blurred and darkened filling the sides: stretched itself,
+the art left the frames off their places (the loading screen's minimap
+preview off its border). Checked at 1280 x 720 on the main menu, Single
+Player, Campaign, Options (and its Video page), Custom Game, LAN, LAN game
+creation and the lobby, the loading screen, the score screen and in a game.
+**Still open:**
 
-- On the loading screen the minimap preview's border (part of the stretched
-  background) is wider than the preview, which keeps its shape; other menu
-  screens may have the same kind of mismatch where a frame sits on art drawn
-  for it.
-- Not mapped for 1.26a yet: there only the 3D view is fixed.
 - Untested with the enhanced-options mod's HUD scale below 100% (both move
   the console's frames).
 - A minimap camera box that keeps its 4:3 size (unchanged).

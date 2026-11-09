@@ -74,6 +74,10 @@ tome_event_info default_info_for_test(int32_t event);
 using MapScriptHook = void (*)(const std::string* script, const std::vector<std::string_view>& prelude);
 void set_map_script_hook(MapScriptHook hook);
 
+// TOME_EVENT_MODS_CHANGED (the mod manager, once a refresh changed the mod
+// list). Main thread.
+void fire_mods_changed();
+
 // Shows a message in the game's message area. False outside a game.
 bool display_text(const std::string& text, float seconds);
 

@@ -90,6 +90,14 @@ helpers check for you.
   between the players every few seconds and tells them which mod differs
   from whose computer, instead of the game dropping players without saying
   why.
+- **Versions and the installed mods** [20]: compare versions and check
+  ranges by Tome's own rules, the ones `tome.mod.json` is checked with
+  (`version_compare`, `version_match`; mods' semver and game versions),
+  list every installed mod with its version, state and why it isn't running
+  (`list_mods`), hear when that list changes (`TOME_EVENT_MODS_CHANGED`),
+  find the folder mods are installed in (`mods_dir`), and check a release's
+  `tome.mod.json` before installing it, as Tome will check it
+  (`check_metadata`): what an updater or a mod browser needs.
 - **Your mod's time**: Tome times every call into your mod. The Mods menu's
   Details page shows its time a frame and its slowest call, `/tome perf`
   the busiest mods.

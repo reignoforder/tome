@@ -320,8 +320,21 @@ struct BuildMappings {
         uint32_t layout_update_slot;       // CLayoutFrame.vtable.UpdateScreenRect
         uint32_t layout_points_offset;     // CLayoutFrame.points
         uint32_t relative_point_vtable;    // CLayoutFrame.relative_point_vtable
+        uint32_t cursor_frame_vtable;      // CCursorFrame.vtable
+        uint32_t highlight_frame_vtable;   // CHighlightFrame.vtable (0 if not mapped)
+        uint32_t glue_top_left_offset;     // CGlueMgr.sprite_top_left
+        uint32_t glue_top_right_offset;    // CGlueMgr.sprite_top_right
+        uint32_t sprite_setup_camera;      // CSpriteFrame::SetupCamera
+        uint32_t sprite_render_slot;       // CSpriteFrame.vtable.Render
+        uint32_t frame_alpha_offset;       // CFrame.alpha
+        uint32_t frame_apply_alpha_slot;   // CFrame.vtable.ApplyAlpha
+        uint32_t layout_get_rect_slot;     // CLayoutFrame.vtable.GetRect
+        uint32_t set_viewport;             // GxXformSetViewport
+        uint32_t gx_device;                // GxDevice.instance
+        uint32_t device_viewport_offset;   // CGxDevice.viewport
         uint32_t layout_dependents_offset; // CLayoutFrame.dependents
         uint32_t layout_width_offset;      // CLayoutFrame.width
+        uint32_t layout_scale_offset;      // CLayoutFrame.scale
         uint32_t console_offset;           // CGameUI.console
         uint32_t info_panel_offset;        // CGameUI.info_panel
         uint32_t clock_offset;             // CGameUI.time_of_day

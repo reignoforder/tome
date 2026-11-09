@@ -28,11 +28,24 @@
  * in the middle of a 4:3 screen (portrait, info panel, life and mana text,
  * clock, inventory cover) moves to the middle of this one.
  *
- * The menus keep the game's look: their screens are full-screen models (the
- * panels, the background) with frames on them. A full-screen model's flat
- * camera gets the game's 0.8 across (on_ortho), so it's stretched across the
- * window as the game draws it and the frames sit on it as they always did,
- * now in proportion. The loading screen is the same.
+ * The menus fill the window, as in 1.29: their frames go to the window's
+ * edges as the game anchors them, and their panels are the glue manager's
+ * sprite layers, models made for 4:3 that are drawn in proportion at the
+ * side they belong to (the left panels and border on the left, the right
+ * ones on the right; on_ortho), over the 3D background, which fills the
+ * window. The loading and score screens are one piece of art each with
+ * frames placed on it: they're laid out at 4:3 in the middle of the window
+ * (box_screen, box_sprite). A full-screen model that's neither (or not yet:
+ * its first frame) gets the game's 0.8 across its flat camera, stretched
+ * across the window as the game draws it; with the setting off, all are.
+ * Some art is warped, stretched across the window on purpose
+ * (widescreen::kWarpedFrames, and the layer that dims a screen behind a
+ * dialog): its frames sit at the window's edges, off art kept in proportion.
+ * Some is sliced (widescreen::kSlicedFrames, draw_sliced): its left part at
+ * the window's left, its right end at the right, and a part of it repeated
+ * between (Battle.net's button bar, whose buttons hang from the left).
+ * Beside the loading and score screens, the same art is drawn again,
+ * stretched across the window, blurred and darkened (on_sprite_render).
  *
  * The 3D view. With the 2D part the world frame is the window's shape, so
  * its camera is too. Without it (not mapped, or a window narrower than 4:3)
@@ -51,6 +64,7 @@
 #include "patches.h"
 
 #include "core/widescreen.h"
+#include "events.h"
 #include "game_build.h"
 #include "hooks.h"
 #include "log.h"
@@ -60,11 +74,13 @@
 #include "tome/tome.h"
 #include "tome_settings.h"
 
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <string>
 #include <unordered_map>
 #include <utility>
+#include <iterator>
 #include <vector>
 
 // GCC warns that __thiscall is meant for class methods, but it does apply it
@@ -78,7 +94,11 @@ int g_in_world_camera = 0;  // world camera setups running (main thread)
 // Per CSpriteFrame::SetupCamera running, innermost last: what its BEFORE
 // handler found it to be (main thread).
 enum class Sprite { Model, World, Screen };
-std::vector<Sprite> g_sprite_cameras;
+struct SpriteCamera {
+    Sprite kind;
+    char* frame;
+};
+std::vector<SpriteCamera> g_sprite_cameras;
 
 GameUiGetFn g_game_ui_get = nullptr;
 uint32_t g_world_frame_offset = 0;  // CGameUI.world_frame
@@ -139,6 +159,7 @@ struct Ui {
     uintptr_t relative_point = 0;  // CLayoutFrame.relative_point_vtable (absolute)
     uint32_t dependents = 0;    // CLayoutFrame.dependents
     uint32_t width = 0;         // CLayoutFrame.width (height after it)
+    uint32_t scale = 0;         // CLayoutFrame.scale
     uint32_t console = 0, info_panel = 0, clock = 0;  // CGameUI fields
     uint32_t inventory_cover = 0;  // CInfoPanel.inventory_cover
     uint32_t console_upper = 0, portrait_layer = 0, minimap_layer = 0, resource_bar = 0;  // CGameUI fields
@@ -493,10 +514,317 @@ void update_root(void* frame) {
     if (frame) call_slot(static_cast<char*>(frame) + g_ui.frame_layout, g_ui.root_update_slot);
 }
 
+// The loading screen and the score screen are laid out at 4:3 in the middle
+// of the window, in proportion: each is one piece of art (a full-screen
+// model made for 0.8 x 0.6) with frames placed on it, which a stretched art
+// leaves off their places (the loading screen's minimap preview off its
+// border). The screen's frame (CGlueMgr.screen, which its frames hang from)
+// is held by its corners `box_margin` in from the window's sides, and so are
+// its full-screen models drawn flat (the loading and score screens' art sits
+// in the screen's frame, so it's in the box with it). The root
+// stays the window (the mouse, the cursor, and the game's UI, which is made
+// under the loading screen). Latched with the setting when a screen is made.
+//
+// Frames come and go with screens (a screen's models may be freed before
+// the next screen is made), so Tome changes one only while the game uses it:
+// a model while its camera is set up (box_sprite, on_ortho), the screen's
+// frame while it's the current one (box_screen). A frame it boxed is
+// remembered by address and taken for the same one only if its corners
+// still hold it where Tome put them (holds_box). Boxed frames stay boxed and
+// go with their screen; a model is put back if it's drawn when the box is
+// gone (the setting turned off).
+bool g_boxed = false;
+// In a game: the world was drawn since the last SetScreen. Its full-screen
+// models are stretched as before, not put in proportion as menus' panels.
+bool g_in_game = false;
+uint32_t g_screen_loading = 0, g_screen_score = 0, g_glue_screen_offset = 0;
+uint32_t g_glue_top_left = 0, g_glue_top_right = 0;  // CGlueMgr.sprite_top_left, _top_right
+
+float box_margin() {
+    return g_boxed ? widescreen::box_margin(g_conversion_width) : 0.0f;
+}
+
+struct Boxed {
+    char* layout = nullptr;
+    void* relative = nullptr;  // the frame it filled
+    float margin = 0;          // as held now
+};
+std::vector<Boxed> g_boxes;
+constexpr size_t kMaxBoxes = 64;  // the oldest are forgotten (their screens are long gone)
+
+// Whether a (live) frame's corners are where Tome put them for `b`.
+bool holds_box(const Boxed& b) {
+    Anchor top_left, bottom_right;
+    return read_anchor(b.layout, kTopLeft, top_left) && read_anchor(b.layout, kBottomRight, bottom_right) &&
+           top_left.relative == b.relative && bottom_right.relative == b.relative &&
+           top_left.relative_point == kTopLeft && bottom_right.relative_point == kBottomRight &&
+           about(top_left.x, b.margin) && about(bottom_right.x, -b.margin) && top_left.y == 0.0f &&
+           bottom_right.y == 0.0f;
+}
+
+// Holds a (live) frame by its corners, `margin` in from the sides of the
+// frame it filled. A point keeps its offset multiplied by the frame's scale
+// (CLayoutFrame.points), so it's given margin / scale: what it holds, and
+// what holds_box reads back, is the margin.
+void hold(Boxed& b, float margin) {
+    if (about(margin, b.margin)) return;
+    b.margin = margin;
+    const float scale = field<float>(b.layout, g_ui.scale);
+    const float offset = scale > 0.0f ? margin / scale : margin;
+    g_ui.clear_points(b.layout);
+    g_ui.set_point(b.layout, kTopLeft, b.relative, kTopLeft, offset, 0.0f, 1);
+    g_ui.set_point(b.layout, kBottomRight, b.relative, kBottomRight, -offset, 0.0f, 1);
+}
+
+// The box Tome put a live frame (its layout) in, or null.
+Boxed* boxed(char* layout) {
+    for (auto it = g_boxes.begin(); it != g_boxes.end(); ++it) {
+        if (it->layout != layout) continue;
+        if (holds_box(*it)) return &*it;
+        g_boxes.erase(it);  // another frame at the same address
+        return nullptr;
+    }
+    return nullptr;
+}
+
+// Boxes a live frame (its layout) the game made to fill its parent: TOPLEFT
+// and BOTTOMRIGHT on the same frame's, at 0, 0. Null if it isn't one.
+Boxed* box_frame(char* layout) {
+    if (Boxed* b = boxed(layout)) return b;
+    Anchor top_left, bottom_right;
+    if (!read_anchor(layout, kTopLeft, top_left) || !read_anchor(layout, kBottomRight, bottom_right) ||
+        top_left.relative != bottom_right.relative || top_left.relative_point != kTopLeft ||
+        bottom_right.relative_point != kBottomRight || top_left.x != 0.0f || top_left.y != 0.0f ||
+        bottom_right.x != 0.0f || bottom_right.y != 0.0f) {
+        return nullptr;
+    }
+    if (g_boxes.size() >= kMaxBoxes) g_boxes.erase(g_boxes.begin());
+    g_boxes.push_back({layout, top_left.relative, 0.0f});
+    hold(g_boxes.back(), box_margin());
+    return &g_boxes.back();
+}
+
+// Boxes a full-screen model drawn flat (a live sprite frame): in the box it's
+// in proportion.
+void box_sprite(char* frame) {
+    box_frame(frame + g_ui.frame_layout);
+}
+
+// A boxed model being drawn (its camera set up): to the box's margin now, or
+// put back as the game made it when there's no box. The margin its camera
+// moves by (0: not boxed).
+float follow_sprite(char* frame) {
+    Boxed* b = boxed(frame + g_ui.frame_layout);
+    if (!b) return 0.0f;
+    const float margin = box_margin();
+    hold(*b, margin);
+    if (margin > 0.0f) return margin;
+    g_boxes.erase(g_boxes.begin() + (b - g_boxes.data()));
+    return 0.0f;
+}
+
+// The current screen's frame into the box, or to its margin now (the
+// window's size may have changed).
+void box_screen() {
+    void* glue = g_glue_get ? g_glue_get() : nullptr;
+    void* screen = glue ? field<void*>(glue, g_glue_screen_offset) : nullptr;
+    if (!screen) return;
+    char* layout = static_cast<char*>(screen) + g_ui.frame_layout;
+    const float margin = box_margin();
+    if (Boxed* b = boxed(layout)) {
+        hold(*b, margin);
+    } else if (margin > 0.0f) {
+        box_frame(layout);
+    }
+}
+
+// --- warped and sliced art --------------------------------------------------------------
+
+// Menu art that isn't drawn in proportion (core/widescreen.h): warped
+// (widescreen::kWarpedFrames, and the highlight frame that dims a screen
+// behind a dialog) is stretched across the window; sliced
+// (widescreen::kSlicedFrames) is drawn in pieces (draw_sliced, on_ortho).
+// The named frames are looked up once a frame (events::frames): frames come
+// and go with screens.
+using GetFrameByNameFn = void*(__fastcall*)(const char* name, int context);
+GetFrameByNameFn g_frame_by_name = nullptr;
+uintptr_t g_highlight_vtable = 0;  // 0: not mapped
+constexpr size_t kWarpedCount = std::size(widescreen::kWarpedFrames);
+constexpr size_t kSlicedCount = std::size(widescreen::kSlicedFrames);
+struct Named {
+    uint32_t presented = 0;  // the frame they were looked up in
+    bool looked = false;
+    void* warped[kWarpedCount] = {};
+    void* sliced[kSlicedCount] = {};
+};
+Named g_named;
+
+const Named& named() {
+    const uint32_t presented = events::frames();
+    if (!g_named.looked || g_named.presented != presented) {
+        g_named.looked = true;
+        g_named.presented = presented;
+        for (size_t i = 0; i < kWarpedCount; ++i) g_named.warped[i] = g_frame_by_name(widescreen::kWarpedFrames[i], 0);
+        for (size_t i = 0; i < kSlicedCount; ++i) g_named.sliced[i] = g_frame_by_name(widescreen::kSlicedFrames[i].name, 0);
+    }
+    return g_named;
+}
+
+bool warped(char* frame) {
+    if (g_highlight_vtable && field<uintptr_t>(frame, 0) == g_highlight_vtable) return true;
+    for (void* f : named().warped) {
+        if (f == frame) return true;
+    }
+    return false;
+}
+
+const widescreen::SlicedFrame* sliced(char* frame) {
+    const Named& n = named();
+    for (size_t i = 0; i < kSlicedCount; ++i) {
+        if (n.sliced[i] == frame) return &widescreen::kSlicedFrames[i];
+    }
+    return nullptr;
+}
+
+// Beside a boxed screen's art (a full-screen model in the box), the same art
+// is drawn stretched across the window, blurred and darkened, so the
+// window's sides carry its colors instead of black. Before the game renders
+// the model, Tome renders it into each side with a camera that stretches it
+// across the window (on_ortho, g_fill_pass), many times over, shifted and
+// at a fraction of its alpha (the blur); then the game renders it as it
+// does, in the box. One model a frame gets the copy (the score screen has
+// three in the box).
+using GetRectFn = int(__thiscall*)(void* layout, float* rect);
+using SetViewportFn = void(__stdcall*)(float x0, float x1, float y0, float y1, float z0, float z1);
+struct Fill {
+    VoidMethod setup_camera = nullptr;  // CSpriteFrame::SetupCamera
+    uint32_t render = 0;             // CSpriteFrame.vtable.Render
+    uint32_t alpha = 0;              // CFrame.alpha
+    uint32_t apply_alpha = 0;        // CFrame.vtable.ApplyAlpha
+    uint32_t get_rect = 0;           // CLayoutFrame.vtable.GetRect
+    SetViewportFn set_viewport = nullptr;  // GxXformSetViewport
+    char** device = nullptr;               // GxDevice.instance
+    uint32_t viewport = 0;                 // CGxDevice.viewport
+};
+Fill g_fill;
+bool g_fill_pass = false;       // the stretched render is running (main thread)
+// A piece of sliced art being rendered (draw_sliced): the art from
+// g_piece_from to g_piece_to, in the viewport set for it.
+bool g_piece_pass = false;
+float g_piece_from = 0, g_piece_to = widescreen::kBaseWidth;
+float g_fill_dx = 0, g_fill_dy = 0;  // the shift of the copy being rendered (UI units)
+float g_fill_from = 0, g_fill_to = 1;  // the part of the window it's rendered in (the viewport, 0..1)
+// The frame (events::frames) whose copy is drawn: only the first model in
+// the box drawn in a frame (the bottom layer) gets one.
+uint32_t g_fill_presented = 0;
+bool g_fill_done = false;
+// The copy is blurred: rendered kBlurSamples times, shifted across a disc
+// kBlurRadius across (UI units; 0.04 is about 55 pixels of a 720-pixel-high
+// window), averaged, at kFillBrightness of the art's own brightness.
+constexpr int kBlurSamples = 24;
+constexpr float kBlurRadius = 0.04f;
+constexpr float kFillBrightness = 0.4f;
+
+// Whether a live frame's rect is the box: a boxed screen's art.
+bool fills_box(char* layout) {
+    const float margin = box_margin();
+    if (margin == 0.0f) return false;
+    float rect[4] = {0, 0, 0, 0};  // {bottom, left, top, right}
+    reinterpret_cast<GetRectFn>(field<void**>(layout, 0)[g_fill.get_rect / sizeof(void*)])(layout, rect);
+    return about(rect[1], margin) && about(rect[3], margin + widescreen::kBaseWidth) && about(rect[0], 0.0f) &&
+           about(rect[2], 0.6f);
+}
+
+// BEFORE CSpriteFrame::Render and CModelFrame::Render(this): the stretched,
+// darkened copy of a boxed screen's art, rendered first. The game's own
+// render follows with the camera set up again as it was.
+// A sliced full-screen model (on a menu, its camera stretched as the game's)
+// rendered in pieces, each in its part of the window (the viewport) with a
+// camera on its part of the art (on_ortho). True if it was: the game's own
+// render is skipped.
+bool draw_sliced(char* frame) {
+    if (g_boxed) return false;
+    // The width first: at 4:3 or with the setting off, no frame lookups.
+    const float wide = ui_width();
+    if (wide <= widescreen::kBaseWidth) return false;
+    const widescreen::SlicedFrame* s = sliced(frame);
+    if (!s) return false;
+    char* device = *g_fill.device;
+    if (!device) return false;
+    float viewport[6];
+    std::memcpy(viewport, device + g_fill.viewport, sizeof viewport);
+    g_piece_pass = true;
+    for (const widescreen::ArtPiece& piece : widescreen::slice_art(wide, s->cut, s->tile)) {
+        g_piece_from = piece.art_from;
+        g_piece_to = piece.art_to;
+        g_fill.set_viewport(piece.at_from / wide, piece.at_to / wide, viewport[2], viewport[3], viewport[4], viewport[5]);
+        g_fill.setup_camera(frame);
+        call_slot(frame, g_fill.render);
+    }
+    g_piece_pass = false;
+    g_fill.set_viewport(viewport[0], viewport[1], viewport[2], viewport[3], viewport[4], viewport[5]);
+    g_fill.setup_camera(frame);
+    return true;
+}
+
+void TOME_CALL on_sprite_render(tome_mod*, tome_hook_call* call, void*) {
+    if (g_fill_pass || g_piece_pass || call->arg_count < 1 || !call->args[0]) return;
+    char* frame = reinterpret_cast<char*>(call->args[0]);
+    if (draw_sliced(frame)) {
+        call->skip_original = 1;
+        return;
+    }
+    const uint32_t presented = events::frames();
+    if (g_fill_done && presented == g_fill_presented) return;
+    if (!fills_box(frame + g_ui.frame_layout)) return;
+    g_fill_done = true;
+    g_fill_presented = presented;
+    const uint8_t alpha = field<uint8_t>(frame, g_fill.alpha);
+    // Only in the window's sides, outside the box: the viewport is set to
+    // each side in turn, and the camera to that side's part of the
+    // stretched picture (on_ortho), so nothing in the box is drawn over (the
+    // score screen draws some of its art before its layers in the box).
+    // Each copy is shifted to a point of a disc and blended over the ones
+    // before, so the result is kFillBrightness times their plain average
+    // (widescreen::blur_samples).
+    char* device = *g_fill.device;
+    if (!device) return;
+    float viewport[6];
+    std::memcpy(viewport, device + g_fill.viewport, sizeof viewport);
+    const float side = box_margin() / g_conversion_width;  // a side's width, 0..1
+    const float sides[2][2] = {{0.0f, side}, {1.0f - side, 1.0f}};
+    static const std::vector<widescreen::BlurSample> samples =
+        widescreen::blur_samples(kBlurSamples, kBlurRadius, kFillBrightness);
+    g_fill_pass = true;
+    for (const auto& part : sides) {
+        g_fill_from = part[0];
+        g_fill_to = part[1];
+        g_fill.set_viewport(part[0], part[1], viewport[2], viewport[3], viewport[4], viewport[5]);
+        for (const widescreen::BlurSample& sample : samples) {
+            g_fill_dx = sample.dx;
+            g_fill_dy = sample.dy;
+            g_fill.setup_camera(frame);
+            const uint8_t pass_alpha = static_cast<uint8_t>(std::lround(sample.alpha * alpha));
+            std::memcpy(frame + g_fill.alpha, &pass_alpha, 1);
+            call_slot(frame, g_fill.apply_alpha);
+            call_slot(frame, g_fill.render);
+        }
+    }
+    g_fill.set_viewport(viewport[0], viewport[1], viewport[2], viewport[3], viewport[4], viewport[5]);
+    g_fill_from = 0.0f;
+    g_fill_to = 1.0f;
+    g_fill_dx = g_fill_dy = 0.0f;
+    std::memcpy(frame + g_fill.alpha, &alpha, 1);
+    call_slot(frame, g_fill.apply_alpha);
+    g_fill_pass = false;
+    g_fill.setup_camera(frame);
+}
+
 // BEFORE and AFTER CGlueMgr::SetScreen(screen, force): the setting is
 // latched for the new screen, and the menus' root and the screen frame the
 // new screen is laid out on (the loading screen's own) take the screen's
-// width again, in case it changed since they last did.
+// width again, in case it changed since they last did. After, the new
+// screen is boxed.
 void TOME_CALL on_set_screen(tome_mod*, tome_hook_call*, void*) {
     g_wide_setting = tome_settings::widescreen();
     refresh_width();
@@ -504,11 +832,31 @@ void TOME_CALL on_set_screen(tome_mod*, tome_hook_call*, void*) {
     update_root(g_current_screen());
 }
 
+void TOME_CALL on_set_screen_before(tome_mod* mod, tome_hook_call* call, void* user) {
+    if (call->arg_count >= 1) {
+        const uint32_t screen = call->args[0];
+        g_boxed = screen == g_screen_loading || screen == g_screen_score;
+    }
+    g_in_game = false;
+    g_fill_done = false;
+    on_set_screen(mod, call, user);
+}
+
+void TOME_CALL on_set_screen_after(tome_mod* mod, tome_hook_call* call, void* user) {
+    on_set_screen(mod, call, user);
+    box_screen();
+}
+
 // --- the 3D view -------------------------------------------------------------------
 
 // BEFORE and AFTER WorldView::SetupCamera(this, delta, rect).
 void TOME_CALL on_world_camera_enter(tome_mod*, tome_hook_call*, void*) {
     ++g_in_world_camera;
+    // The world is drawn only in a game: the loading screen is gone, and
+    // nothing calls SetScreen until the score screen. Its box goes with it,
+    // so the game's own full-screen models aren't taken for its art.
+    g_boxed = false;
+    g_in_game = true;
     if (g_wide_ui) follow_ui();
 }
 
@@ -564,9 +912,15 @@ bool fills_screen(const char* layout, int depth) {
 
 // A model made for the whole screen: a sprite frame that fills it, or whose
 // every point is on a frame that does, at x 0 (the loading screen's bar,
-// held by its bottom-left corner only).
+// held by its bottom-left corner only). Not the cursor: its frame fills the
+// screen too, but its model is drawn at the pointer, which is in the
+// window's units like the rest of the UI. Stretched, it was drawn wide / 0.8
+// times as far from the left edge as the pointer (a third at 16:9), so
+// clicks landed left of it.
+uintptr_t g_cursor_vtable = 0;
 bool fills_parent(tome_hook_call* call) {
     if (!g_points || call->arg_count < 1 || !call->args[0]) return false;
+    if (*reinterpret_cast<const uintptr_t*>(call->args[0]) == g_cursor_vtable) return false;
     const char* layout = reinterpret_cast<const char*>(call->args[0]) + g_frame_layout;
     if (fills_screen(layout, 0)) return true;
     int points = 0;
@@ -589,13 +943,13 @@ void TOME_CALL on_sprite_camera_enter(tome_mod*, tome_hook_call* call, void*) {
     const Sprite kind = is_world_frame(call)        ? Sprite::World
                         : fills_parent(call)          ? Sprite::Screen
                                                       : Sprite::Model;
-    g_sprite_cameras.push_back(kind);
+    g_sprite_cameras.push_back({kind, reinterpret_cast<char*>(call->args[0])});
     if (kind == Sprite::World) ++g_in_world_camera;
 }
 
 void TOME_CALL on_sprite_camera_leave(tome_mod*, tome_hook_call*, void*) {
     if (g_sprite_cameras.empty()) return;
-    const Sprite kind = g_sprite_cameras.back();
+    const Sprite kind = g_sprite_cameras.back().kind;
     g_sprite_cameras.pop_back();
     if (kind == Sprite::World && g_in_world_camera > 0) --g_in_world_camera;
 }
@@ -608,11 +962,64 @@ void TOME_CALL on_sprite_camera_leave(tome_mod*, tome_hook_call*, void*) {
 // draws it at 4:3 in any window, so the frames on it (a menu's buttons,
 // the loading screen's) sit on its art as they always did.
 void TOME_CALL on_ortho(tome_mod*, tome_hook_call* call, void*) {
-    if (g_sprite_cameras.empty() || g_sprite_cameras.back() != Sprite::Screen || call->arg_count < 3) return;
+    if (g_sprite_cameras.empty() || call->arg_count < 5) return;  // up to top (the fill's shift)
+    // The fill behind a boxed screen's art: its camera, 0.8 across around
+    // the same middle, stretches the model across the window.
+    // A piece of sliced art: the camera's left edge (the art's 0, the
+    // model stretched as the game draws it) moved to the piece's start, and
+    // as wide as the piece.
+    if (g_piece_pass) {
+        const float left = tome_hook_arg_float(call, 1);
+        tome_hook_set_arg_float(call, 1, left + g_piece_from);
+        tome_hook_set_arg_float(call, 2, left + g_piece_to);
+        return;
+    }
+    if (g_fill_pass) {
+        const float middle = (tome_hook_arg_float(call, 1) + tome_hook_arg_float(call, 2)) / 2 + g_fill_dx;
+        const float left = middle - widescreen::kBaseWidth / 2;  // the picture over the whole window
+        tome_hook_set_arg_float(call, 1, left + g_fill_from * widescreen::kBaseWidth);  // its part in the viewport
+        tome_hook_set_arg_float(call, 2, left + g_fill_to * widescreen::kBaseWidth);
+        tome_hook_set_arg_float(call, 3, tome_hook_arg_float(call, 3) + g_fill_dy);
+        tome_hook_set_arg_float(call, 4, tome_hook_arg_float(call, 4) + g_fill_dy);
+        return;
+    }
+    // A boxed full-screen model: it's placed from the root's left edge, its
+    // camera from its frame's, so the camera moves right by the box's margin.
+    if (const float margin = follow_sprite(g_sprite_cameras.back().frame); margin > 0.0f) {
+        tome_hook_set_arg_float(call, 1, tome_hook_arg_float(call, 1) + margin);
+        tome_hook_set_arg_float(call, 2, tome_hook_arg_float(call, 2) + margin);
+        return;
+    }
+    if (g_sprite_cameras.back().kind != Sprite::Screen) return;
     const float wide = ui_width();
     const float left = tome_hook_arg_float(call, 1), right = tome_hook_arg_float(call, 2);
     if (wide <= widescreen::kBaseWidth || !about(left, -wide / 2) || !about(right, wide / 2)) return;
+    // Warped art: stretched across the window.
+    if (warped(g_sprite_cameras.back().frame)) {
+        tome_hook_set_arg_float(call, 2, widescreen::kBaseWidth - wide / 2);
+        return;
+    }
+    // The menus' panels: the glue manager's sprite layers, each a model made
+    // for 0.8 x 0.6 and drawn as it is (the camera leaves it at the left),
+    // in proportion: the top-left layer (the left panels, the left side of
+    // the border) on the window's left, the top-right one (the right panels
+    // and border, behind the screen's buttons, which the game anchors to the
+    // right) on its right. Another such model on a menu goes to the middle.
+    // Not in a game: what's full-screen there is stretched across the window.
+    if (!g_boxed && !g_in_game) {
+        char* glue = static_cast<char*>(g_glue_get ? g_glue_get() : nullptr);
+        char* frame = g_sprite_cameras.back().frame;
+        if (glue && frame == field<char*>(glue, g_glue_top_left)) return;
+        const float shift = glue && frame == field<char*>(glue, g_glue_top_right) ? wide - widescreen::kBaseWidth
+                                                                                     : (wide - widescreen::kBaseWidth) / 2;
+        tome_hook_set_arg_float(call, 1, left - shift);
+        tome_hook_set_arg_float(call, 2, right - shift);
+        return;
+    }
     tome_hook_set_arg_float(call, 2, widescreen::kBaseWidth - wide / 2);
+    // On a menu screen it goes into the box from the next frame: drawn flat
+    // in a frame 0.8 wide, it's in proportion there (box_screen).
+    if (box_margin() > 0.0f) box_sprite(g_sprite_cameras.back().frame);
 }
 
 // AFTER C44Matrix::Perspective(this, fov, aspect, near, far).
@@ -653,8 +1060,12 @@ const char* const kUiSymbols[] = {
     "NDCToDDCWidth",
     "CreateSimpleFrame", "CLayoutFrame::SetPoint", "CLayoutFrame::SetWidth", "CLayoutFrame::SetHeight",
     "CLayoutFrame::ClearAllPoints", "CFrame.layout", "CLayoutFrame.points", "CLayoutFrame.relative_point_vtable",
+    "CCursorFrame.vtable", "CGlueMgr.screen",
+    "CGlueMgr.sprite_top_left", "CGlueMgr.sprite_top_right", "CSpriteFrame::Render", "CModelFrame::Render",
+    "CSpriteFrame.vtable.Render", "CFrame.alpha", "CFrame.vtable.ApplyAlpha", "CLayoutFrame.vtable.GetRect",
+    "GxXformSetViewport", "GxDevice.instance", "CGxDevice.viewport",
     "CLayoutFrame.dependents",
-    "CLayoutFrame.width", "CGameUI.console", "CGameUI.info_panel", "CGameUI.time_of_day",
+    "CLayoutFrame.width", "CLayoutFrame.scale", "CGameUI.console", "CGameUI.info_panel", "CGameUI.time_of_day",
     "CInfoPanel.inventory_cover", "CGameUI.console_upper", "CGameUI.portrait_layer", "CGameUI.minimap_layer",
     "CGameUI.resource_bar", "CSimpleFrame.shown", "CSimpleFrame.show_flag", "CSimpleFrame.vtable.Hide",
     "CSimpleFrame.vtable.Show",
@@ -705,8 +1116,21 @@ bool point_conversions(uintptr_t base, const BuildMappings& build, std::string& 
     return true;
 }
 
+// The window's new size (main thread). The menus' root and the current
+// screen take its width now: they keep the one they were laid out for until
+// told, and a menu laid out for the old width under conversions for the new
+// one has its edge frames short of the window's edge and its full-screen
+// models taken for something else (on_ortho checks their camera against the
+// width): leaving fullscreen on Battle.net drew the right panel at its 4:3
+// place, its edge a bar down the middle.
 void on_size() {
+    const float before = g_conversion_width;
     refresh_width();
+    if (g_conversion_width != before) {
+        update_root(g_glue_get());
+        update_root(g_current_screen());
+    }
+    box_screen();
 }
 
 // The 2D part; false (with the reason in `missing`) if a symbol isn't mapped.
@@ -728,6 +1152,7 @@ bool install_wide_ui(uintptr_t base, const BuildMappings& build, std::string& mi
     g_ui.relative_point = base + w.relative_point_vtable;
     g_ui.dependents = w.layout_dependents_offset;
     g_ui.width = w.layout_width_offset;
+    g_ui.scale = w.layout_scale_offset;
     g_ui.console = w.console_offset;
     g_ui.info_panel = w.info_panel_offset;
     g_ui.clock = w.clock_offset;
@@ -746,12 +1171,34 @@ bool install_wide_ui(uintptr_t base, const BuildMappings& build, std::string& mi
     if (!set_screen) return false;
     hooks::Target* ortho = find_target("C44Matrix::Ortho", missing);
     if (!ortho) return false;
+    hooks::Target* sprite_render = find_target("CSpriteFrame::Render", missing);
+    if (!sprite_render) return false;
+    hooks::Target* model_render = find_target("CModelFrame::Render", missing);
+    if (!model_render) return false;
     if (!point_conversions(base, build, missing)) return false;
+    add_handler(sprite_render, TOME_HOOK_BEFORE, on_sprite_render);
+    add_handler(model_render, TOME_HOOK_BEFORE, on_sprite_render);
+    g_screen_loading = build.game.screen_loading;
+    g_glue_screen_offset = build.game.glue_screen_offset;
+    g_glue_top_left = w.glue_top_left_offset;
+    g_glue_top_right = w.glue_top_right_offset;
+    g_screen_score = build.game.screen_score_screen;
+    g_fill.setup_camera = reinterpret_cast<VoidMethod>(base + w.sprite_setup_camera);
+    g_fill.render = w.sprite_render_slot;
+    g_fill.alpha = w.frame_alpha_offset;
+    g_fill.apply_alpha = w.frame_apply_alpha_slot;
+    g_fill.get_rect = w.layout_get_rect_slot;
+    g_fill.set_viewport = reinterpret_cast<SetViewportFn>(base + w.set_viewport);
+    g_fill.device = reinterpret_cast<char**>(base + w.gx_device);
+    g_fill.viewport = w.device_viewport_offset;
     add_handler(ortho, TOME_HOOK_BEFORE, on_ortho);
     g_frame_layout = g_ui.frame_layout;
+    g_cursor_vtable = base + w.cursor_frame_vtable;
+    g_highlight_vtable = w.highlight_frame_vtable ? base + w.highlight_frame_vtable : 0;
+    g_frame_by_name = reinterpret_cast<GetFrameByNameFn>(base + build.ui.get_frame_by_name);
     g_points = g_ui.points;
-    add_handler(set_screen, TOME_HOOK_BEFORE, on_set_screen);
-    add_handler(set_screen, TOME_HOOK_AFTER, on_set_screen);
+    add_handler(set_screen, TOME_HOOK_BEFORE, on_set_screen_before);
+    add_handler(set_screen, TOME_HOOK_AFTER, on_set_screen_after);
     g_current_screen = reinterpret_cast<GetCurrentFn>(base + w.screen_get_current);
     g_glue_get = reinterpret_cast<GlueGetFn>(base + build.game.glue_get);
     g_wide_setting = tome_settings::widescreen();

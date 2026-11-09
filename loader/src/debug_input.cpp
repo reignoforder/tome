@@ -170,6 +170,15 @@ void act(HWND window, const Step& step) {
         ShowWindowAsync(window, step.kind == Kind::Minimize ? SW_MINIMIZE : SW_RESTORE);
         if (step.kind == Kind::Restore) SetForegroundWindow(window);
         break;
+    case Kind::Resize: {
+        TOME_INFO("Debug resize to %ux%u", step.width, step.height);
+        RECT r = {0, 0, static_cast<LONG>(step.width), static_cast<LONG>(step.height)};
+        AdjustWindowRectEx(&r, static_cast<DWORD>(GetWindowLongW(window, GWL_STYLE)), FALSE,
+                           static_cast<DWORD>(GetWindowLongW(window, GWL_EXSTYLE)));
+        SetWindowPos(window, nullptr, 0, 0, r.right - r.left, r.bottom - r.top,
+                     SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
+        break;
+    }
     case Kind::Text:
         TOME_INFO("Debug text \"%s\"", step.text.c_str());
         for (unsigned char c : step.text) PostMessageW(window, WM_CHAR, c, 1);

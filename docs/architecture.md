@@ -435,6 +435,45 @@ waiting for a Tome release: `tome.mod.json` `"mappings"` names a folder
   Its dependents are bounced too.
 - Crashes: see "Crash isolation and safe mode".
 
+### The mod list and versions for mods (API version 20)
+
+For mods that manage other mods (an updater, a mod browser). `list_mods`
+hands out the rows of the mod menu's list: id, name, version, folder,
+files' folder, state (`tome_mod_state`, from `ModStatus::state`), the
+reason it isn't running, whether the player wants it, package, sync,
+restart pending, `provides`. The end of each refresh copies `status_` into
+an immutable snapshot (`core/mod_list.*`, unit-tested: the `tome_mod_info`
+structs and the strings they point to, struct sizes older and newer than
+Tome's) under a lock of its own, never held while taking another, so
+`list_mods` works from any thread and from callbacks that run under the
+mod manager's lock (a mod's enable). A mod's handle keeps the snapshot it
+was last given (`tome_mod::listed_mods`): its strings stay valid until it
+asks again, while refreshes make new ones. When a snapshot differs from the
+last in what mods see, `locked()` posts `TOME_EVENT_MODS_CHANGED` to the
+main thread once the lock is released (handlers may list or toggle mods).
+The first refresh at startup runs on the bootstrap thread before the
+dispatcher exists, and its mods are enabled before its snapshot is made
+(`list_mods` gives them nothing in `tome_mod_enable`): bootstrap posts its
+event once the dispatcher is installed. `mods_dir` is `tome/mods`; a mod installs
+by moving a finished folder or `.tome` in, and the watcher does the rest,
+approval included.
+
+`check_metadata` runs what discovery and the resolver run on an installed
+mod over a release's `tome.mod.json` (`core/metadata_check.*`,
+unit-tested, in the JSON fuzz target): the parse, `compatible()` (the
+resolver's game, edition and Tome check, shared) and `unmet_requires`
+(shared with discovery) against the running build's mappings. Not
+`depends`: that needs the installed set, which the mod has from
+`list_mods`.
+
+`version_compare` and `version_match` are `core/version.*`'s own parser
+and matcher (`compare_versions`, `match_version`): the rules Tome checks
+`tome.mod.json` with, so a mod that picks a release to install agrees with
+the resolver that will run it. Both kinds: semver (`depends`, `tome`) and
+game versions (`game`, with the known names like `1.27b`). Also WebAssembly
+imports, like `check_metadata`; `list_mods` and `mods_dir` aren't
+(pointers, paths). The Rust crate wraps them in `sdk/rust/tome/src/mods.rs`.
+
 ## Packages
 
 `.tome` files: one file per mod for distribution; folders stay the way to
@@ -1123,11 +1162,39 @@ reason to make a fix a patch rather than ship it as a mod.
     with its own `ConsoleUI.fdf` (no such tiles after 30 frames) keeps its
     console and middle as it made them. Points are read only if they're
     relative to a frame (`CLayoutFrame.relative_point_vtable`; one relative
-    to the screen holds x where the frame would be). In the
-    menus and the loading screen, full-screen models (a sprite frame whose
+    to the screen holds x where the frame would be). The menus fill the
+    window as in 1.29: their frames go to the window's edges as the game
+    anchors them, and their panels, the glue manager's sprite layers (models
+    made for 4:3), are drawn in proportion on their side: BEFORE
+    `C44Matrix::Ortho`, the top-left layer's flat camera is left as it is
+    (the model at the window's left), the top-right one's moves so the model
+    ends at the window's right (`CGlueMgr.sprite_top_left`,
+    `sprite_top_right`), and another full-screen model on a menu (Battle.net's
+    center panel) goes to the middle. The loading and score screens (one
+    piece of art each, with frames placed on it) are laid out at 4:3 in the
+    middle: the screen's frame (`CGlueMgr.screen`) and its full-screen models
+    drawn flat are held by their corners in a box 0.8 wide (a model boxed
+    itself gets its camera moved by the box's margin: it's placed from the
+    root's left edge, its camera from its frame's). Behind the art, the
+    window's sides show the same art stretched and darkened: BEFORE
+    `CSpriteFrame::Render` and `CModelFrame::Render`, the first model in a
+    frame whose rect is the box (`CLayoutFrame.vtable.GetRect`) is rendered
+    into each side (`GxXformSetViewport`, put back from `CGxDevice.viewport`)
+    with a camera that stretches it over the window, 24 times, shifted
+    across a disc and at alphas that average the copies at 40% brightness
+    (`CFrame.alpha`, `CFrame.vtable.ApplyAlpha`): a blur. Then it's set up
+    again for the game's own render in the box. The root stays the
+    window: the mouse, the cursor, and the game's UI (made under the loading
+    screen). Frames are changed only
+    while the game uses them (a model while its camera is set up, the
+    screen's frame while it's current), since a screen's models may be freed
+    before the next screen is made. The box is latched with the setting in
+    BEFORE `CGlueMgr::SetScreen`. Until boxed (their first frame), full-screen models (a sprite frame whose
     corners are its parent's, up to the root; `fills_parent`) get the game's
     0.8 across their flat camera (BEFORE `C44Matrix::Ortho`), so they're
-    stretched as the game draws them and the frames on them line up. Roots
+    stretched as the game draws them and the frames on them line up. The
+    cursor's frame (`CCursorFrame.vtable`) fills the screen too but is left
+    alone: its model is drawn at the pointer. Roots
     take the screen's width again before and after `CGlueMgr::SetScreen` and,
     in a game, after the setting changes (`CLayoutFrame.vtable.UpdateScreenRect`).
   - The 3D view. With the 2D part the world frame is the window's shape and

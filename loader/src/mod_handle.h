@@ -5,6 +5,7 @@
 // manager so the guard and the hook engine can use it on their own.
 
 #include "core/hooks.h"
+#include "core/mod_list.h"
 #include "core/profile.h"
 #include "unwind.h"
 
@@ -54,6 +55,10 @@ struct tome_mod {
     std::atomic<unsigned long> starting_on{0};
     std::string fault;        // the first crash, for the log and the mod's status
     std::string fault_calls;  // where it was called from (likely), as logged
+
+    // The mod list list_mods last filled in for it: its strings stay valid
+    // until the next one. Under `lock`.
+    std::shared_ptr<const tome::mod_list::Snapshot> listed_mods;
 
     // Guards revokers, hook_gates and fault: hook() may be called from any
     // thread, and a crash may happen on any thread.

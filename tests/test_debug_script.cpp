@@ -114,3 +114,15 @@ TEST(debug_script_empty) {
     CHECK(parse(";", bad).empty());
     CHECK(bad.empty());
 }
+
+TEST(debug_script_resize) {
+    std::vector<std::string> bad;
+    auto steps = parse("resize:1280x720;resize:800x600@50;resize:0x600;resize:1280;resize:1280x;resize:axb", bad);
+    CHECK_EQ(steps.size(), size_t(2));
+    if (steps.size() != 2) return;
+    CHECK(steps[0].kind == Kind::Resize);
+    CHECK_EQ(steps[0].width, uint32_t(1280));
+    CHECK_EQ(steps[0].height, uint32_t(720));
+    CHECK_EQ(steps[1].at_ms, uint32_t(50));
+    CHECK_EQ(bad.size(), size_t(4));
+}

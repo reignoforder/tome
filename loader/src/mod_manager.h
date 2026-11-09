@@ -6,6 +6,7 @@
 #include "core/hooks.h"
 #include "core/keys.h"
 #include "core/metadata.h"
+#include "core/mod_list.h"
 #include "core/mod_state.h"
 #include "core/mod_status.h"
 #include "core/resolver.h"
@@ -63,6 +64,9 @@ public:
     // Re-reads mods/ and tome/state.json, resolves, then enables, disables,
     // loads and reloads mods to match. Safe to call repeatedly from any thread.
     void refresh();
+    // Bootstrap found no game window, so no dispatcher: TOME_EVENT_MODS_CHANGED
+    // fires on the thread that changed the list (main_thread::post runs it there).
+    void fire_events_without_dispatcher() { events_without_dispatcher_ = true; }
 
     // True if any file refresh() reads (state.json, a tome.mod.json or a mod
     // DLL) changed since the previous call. Only reads file timestamps, so the
@@ -80,6 +84,16 @@ public:
 
     std::vector<ModStatus> status() const;
     const Paths& paths() const { return paths_; }
+
+    // The mods as list_mods gives them (tome.h, API version 20): status()
+    // as of the last refresh, without the lock (mods ask from callbacks that
+    // run under it). Null before the first refresh. Any thread.
+    std::shared_ptr<const mod_list::Snapshot> mod_list() const;
+    // mods_dir() for the API (UTF-8), set by init().
+    const std::string& mods_dir_utf8() const { return mods_dir_utf8_; }
+    // What "game", "edition" and "tome" are checked against (resolve();
+    // check_metadata), set by init().
+    ResolveEnvironment environment() const { return {tome_version_, game_version_, build_.edition}; }
 
     // Saves the mod's enabled flag to tome/state.json and applies it now.
     // Disabling a mod also disables the enabled mods that depend on it
@@ -136,6 +150,9 @@ private:
         std::wstring dir;     // where its files are: the folder, or the package unpacked in tome/packages
         bool package = false;
         bool valid = false;
+        // tome.mod.json was read and is valid metadata (meta holds it), even
+        // if the mod is invalid for another reason (a missing DLL, ...).
+        bool meta_ok = false;
         ModMetadata meta;
         std::vector<std::string> errors;
         std::vector<std::string> warnings;
@@ -209,6 +226,7 @@ private:
         FileStamp stamp;  // of tome.mod.json; zero: read it again
         std::string sha256;  // of the bytes parsed (tome.sig signs it); "" if unread
         ModMetadata meta;
+        bool meta_ok = false;  // parse_metadata accepted it (valid may still be false: "requires")
         bool valid = false;
         std::vector<std::string> errors;
         std::vector<std::string> warnings;
@@ -252,8 +270,11 @@ private:
     // Hands the mapping files of the valid mods that are on and allowed to
     // mod_mappings (refresh); a locked mod keeps the table it runs with.
     void publish_mappings(const mod_state::State& state, const std::vector<Installed>& installed) const;
-    // Runs fn under the lock, then tells the mods about settings that changed meanwhile.
+    // Runs fn under the lock, then tells the mods about settings that
+    // changed meanwhile, and posts TOME_EVENT_MODS_CHANGED if the mod list did.
     void locked(const std::function<void()>& fn);
+    // Makes mod_list() match status_; under lock_ (refresh_locked).
+    void publish_mod_list();
     std::vector<std::string> set_enabled_locked(const std::string& id, bool enabled);
     std::vector<std::string> reload_locked(const std::string& id);
     // `invalid` (optional) is set when state.json exists but can't be
@@ -387,6 +408,13 @@ private:
     std::map<std::string, FileStamp> settings_stamps_;    // by mod id: that file as Tome last read or wrote it
     std::vector<std::pair<std::string, std::vector<std::string>>> settings_changed_;  // for notify_settings
     SettingsSink settings_sink_ = nullptr;
+    // list_mods' snapshot (mod_list()): its own lock, never held while
+    // taking another one.
+    mutable SRWLOCK mod_list_lock_ = SRWLOCK_INIT;
+    std::shared_ptr<const mod_list::Snapshot> mod_list_;
+    bool mod_list_changed_ = false;  // under lock_: publish_mod_list changed it, locked() tells the mods
+    std::atomic<bool> events_without_dispatcher_{false};  // fire_events_without_dispatcher
+    std::string mods_dir_utf8_;
 };
 
 ModManager& mod_manager();

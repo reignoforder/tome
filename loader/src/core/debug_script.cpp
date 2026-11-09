@@ -70,6 +70,14 @@ bool parse_step(std::string_view item, Step& step) {
         }
         return true;
     }
+    std::string_view resize = "resize:";
+    if (head.substr(0, resize.size()) == resize) {
+        step.kind = Kind::Resize;
+        std::string_view size = head.substr(resize.size());
+        size_t x = size.find('x');
+        return x != std::string_view::npos && parse_number(size.substr(0, x), 5, step.width) &&
+               parse_number(size.substr(x + 1), 5, step.height) && step.width > 0 && step.height > 0;
+    }
     std::string_view frames = "frames:";
     if (head.substr(0, frames.size()) == frames) {
         step.kind = Kind::Frames;
