@@ -22,6 +22,8 @@ extern const Patch kMovieFrameLength;
 extern const Patch kExecuteFuncGuard;
 extern const Patch kGlobalStringGuard;
 extern const Patch kLanMapGuard;
+extern const Patch kJassTokenGuard;
+extern const Patch kCommandCardGuard;
 
 const Patch* const kAll[] = {
     &kMemhackGuard,
@@ -37,6 +39,8 @@ const Patch* const kAll[] = {
     &kExecuteFuncGuard,
     &kGlobalStringGuard,
     &kLanMapGuard,
+    &kJassTokenGuard,
+    &kCommandCardGuard,
 };
 
 namespace {

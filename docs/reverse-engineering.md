@@ -327,9 +327,9 @@ exploit by forcing a cross-type shadow's `desc+0x10` to the global's type-id.
   that many harmless shadows before the one that matters.
 - `JassScanner::nextToken` `0x9249D0` (AFTER, the `endfunction` token
   `0x115`): writes the saved descriptors back, newest first. It stores each
-  character of a token at `[[this+8]+n]` with no bound: a ~4000-character
-  string literal writes past that heap buffer (access violation at
-  `0x924AE4`, seen in game; docs/known-bugs.md, "Long string literal").
+  character of a token at `[[this+8]+n]` with a length check that never
+  fires: a string literal over 2100 characters writes past that heap buffer
+  (access violation at `0x924AE4` with ~4000, seen in game; next section).
 - `Jass::compile` `0x9146F0` (BEFORE and AFTER): drops the list. A script
   that stops inside a function never reaches its `endfunction`, and the next
   compile's first one would write into the old compile's freed symbols. This
@@ -355,6 +355,41 @@ before the loading screen (the guard logs each restore twice). The map scan in `
 (`jass::scan_shadow_exploit`) logs the same pattern at map load, including
 locals that shadow a `common.j` or `Blizzard.j` global. See
 `docs/known-bugs.md` and `docs/architecture.md`, "Patches".
+
+### The scanner's token buffers and a stopped parse
+
+The scanner (`JassScanner`, constructor `0x9246A0`, `thiscall(files, a1,
+a2, a3, capacity)`, `ret 0x14`; 1.26a `0x460570`) is a flex-style DFA.
+`capacity` (`JassScanner.capacity`, `+0xC`; `Jass::compile` passes `0x834`,
+2100) sizes two heap buffers of `capacity + 1` bytes: `[this+0x98]` the
+text read so far (the current token at its start, NUL-terminated after
+`nextToken`, its length at `+0xC4`) and `[this+8]` the DFA state after each
+character. It reads characters through its vtable (`+0` the next character
+or -1, `+4` wrap at the end: nonzero, no more input), so a test can make one
+on a buffer of its own and call `nextToken` (`tests/game`,
+`game_jass_token_guard_stops_long_tokens`).
+
+`nextToken`'s character loop (`0x924A68`) checks `esi`, the token's length,
+against the capacity: `cmp esi, [edi+0xC]; jl next; cmp [edi+0x1C], 0; jne
+0x924BF1`, and `0x924BF1` returns -2. But `nextToken` sets `[edi+0x1C]` to 0
+when it starts (`0x9249F3`), so the loop goes on and writes each further
+character at `[[edi+0x98]+esi]` (`0x924AA5`) and its state at
+`[[edi+8]+esi+1]` (`0x924AE4`): a heap overrun from `war3map.j`. 1.26a has
+the same code (`0x45FFD0`, exit `0x460166`). jass-token-guard makes the `jne`
+(`JassScanner::nextToken.overflow_check`, `0x924A6D`; 1.26a `0x45FFD5`) a
+`jmp`.
+
+The parser (`JassParser::parse`, `0x922A50`, `thiscall(context)`, `ret 4`;
+1.26a `0x464460`) takes -2 from the scanner (`0x922B96`, `0x922C17`) as
+fatal and returns 1 (`0x924250`). Its caller `0x913C30` builds the parser
+on its stack (constructor `0x91E9A0`, which sets `+0x38` but not `+0x34`)
+and after a failed parse destroys the root node at `+0x34`
+(`JassParser.root`, set only when the whole script parsed, `0x923F3B`)
+if it isn't null: `[[root]](root, 0)` at `0x913D52`. After a stopped parse
+that is stack garbage, and the game crashed (a breakpoint in `0xCC` fill,
+seen in game). jass-token-guard zeroes it in a BEFORE handler on the parser;
+the failed compile then sends a `-loadfile` map back to the main menu (the
+compile runs three times on the way, each logged).
 
 `0x9121D0` is a specialized ident-node ctor, *not* the general var-ref: it
 reads a string-id counter off a singleton's `+0xB8`, which earlier misled a
@@ -622,6 +657,28 @@ command)`, `ret 8`. Abilities without a cooldown return 0; those with one
 bit `0x200` of `+0x20` is set and `0x400` isn't, and keep the cooldown's
 length at `+0xB0`. Checked in game: Divine Shield showed 35 to 0, Dust of
 Appearance 20 to 0.
+
+**Button positions.** A `CCommandButtonData`'s column and row are at `+0x59C`
+and `+0x5A0` (`CCommandButtonData.x`, `.y`). `0x3ACAF0`, which
+`CCommandCard::AddButton` runs on a command's existing data before it
+stores the new values, resets both to 0, so a coordinate it drops ends up
+0 (a Patrol button at (9, 9) shows at (0, 0)). The card places a button with `CCommandCard::PlaceButton`
+(`0x3AA430`, `thiscall(data)`, `ret 4`; one caller, `0x3AAED6`, which skips
+the call for a button it doesn't show): it indexes the grid with them
+unchecked (the row at `[+0x154] + 16 * y`, the cell's button at `[row+8] +
+4 * x`), moves to the next free cell while the cell's button has a nonzero
+`+0x94`, then fills it (`0x3AA2F0`). The setters on 1.27b store a
+coordinate only if it's at most 3 (x) or 2 (y), unsigned:
+`CCommandCard::AddButton` `0x3CA1A0` (`thiscall`, nine arguments, `ret
+0x24`; x and y the sixth and seventh; adds or updates a command's data in
+the card's table at `+0x160`; reached from abilities through `0x377260` ->
+`0x372A40`, and from `0x36B6D0`), `CGameUI::SetCommandButtonPos` `0x36B470`
+(`thiscall(a, b, {x, y}*)`, `ret 0xC`, from `0x375F20`; for a button on the
+card, `0x3B5F20` gives the `CCommandButton`, data at `+0x190`, otherwise
+`0x3B60F0` gives the data), and `0x373A90`/`0x373AB0`/`0x373AD0`/`0x373AF0`
+(one coordinate each, no callers found). 1.26a's (`0x2F19E0`, `0x2F1A00`,
+`0x2F4710`) store any value, and its `PlaceButton` (`0x36D3E0`) reads past
+the grid. command-card-guard: `docs/architecture.md`, "Patches".
 
 ### Frame scale and the in-game UI's layout
 

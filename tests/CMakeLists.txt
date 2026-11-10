@@ -6,6 +6,7 @@ add_executable(tome_tests
     test_background_mute.cpp
     test_blp.cpp
     test_chat.cpp
+    test_command_card.cpp
     test_command_line.cpp
     test_context_restore.cpp
     test_crash_report.cpp

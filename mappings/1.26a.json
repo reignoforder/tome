@@ -54,6 +54,24 @@
       "bytes": "8b c1 8b 4c 24 04 c7 00 ?? ?? ?? ?? 33 d2 89 50 14 89 48 04 8b 4c 24 08 89 48 0c 8b 89 b8 00 00 00 89 48 08 33 c9 89 48 10 8b 4c 24 0c 56",
       "doc": "1.26a: the variable descriptor constructor for every kind (0x29 local, 0x2A global), which 1.27b splits; a local declaration writes sym+0x18 = this as 1.27b's JassLocalVarDesc::ctor does (the memhack gateway). The compiler calls it with 0x29 at 0x4648DE (the local-only wrapper at 0x464260 has no callers). ret 0x14."
     },
+    "JassScanner::nextToken.overflow_check": {
+      "kind": "data", "rva": "0x0045ffd5",
+      "doc": "1.26a: cmp dword [esi+0x1C], 0 / jne 0x460166 (83 7e 1c 00 0f 85 87 01 00 00), as on 1.27b; 0x460166 returns -2 (the parser's check at 0x464586)."
+    },
+    "JassScanner.capacity": { "kind": "offset", "value": "0xc", "doc": "1.26a: as on 1.27b (0x834 pushed at 0x4588B9, in 0x458870, which Jass::compile calls)." },
+    "JassScanner::ctor": {
+      "kind": "function", "rva": "0x00460570", "conv": "thiscall",
+      "sig": "void*(void* this, void* files, void* a1, void* a2, void* a3, int capacity)",
+      "bytes": "8b 44 24 10 8b 54 24 0c 53 56 57 8b f1 8b 4c 24 14 33 db 53",
+      "doc": "1.26a: as on 1.27b; called with 0x834 from 0x458870 (0x4588CC), which Jass::compile calls. ret 0x14."
+    },
+    "JassParser::parse": {
+      "kind": "function", "rva": "0x00464460", "conv": "thiscall",
+      "sig": "int(void* this, void* context)",
+      "bytes": "6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 51 53 55 56 57 a1",
+      "doc": "1.26a: as on 1.27b; its caller 0x458510 (constructor 0x460790) destroys JassParser.root after a failed parse too. ret 4."
+    },
+    "JassParser.root": { "kind": "offset", "value": "0x34", "doc": "1.26a: as on 1.27b." },
     "Native.CreateTrigger": {
       "kind": "function", "rva": "0x003d11f0", "conv": "cdecl",
       "sig": "uint32_t(void)",
@@ -926,6 +944,14 @@
     "CCommandButton.data": { "kind": "offset", "value": "0x190" },
     "CCommandButtonData.ability": { "kind": "offset", "value": "0x6d4" },
     "CCommandButtonData.command": { "kind": "offset", "value": "0x8" },
+    "CCommandButtonData.x": { "kind": "offset", "value": "0x59c", "doc": "1.26a: as on 1.27b, but its setters (0x2F19E0, and 0x2F4710, 1.27b's 0x36B470) store any value." },
+    "CCommandButtonData.y": { "kind": "offset", "value": "0x5a0", "doc": "1.26a: as on 1.27b; its setters (0x2F1A00, 0x2F4710) store any value." },
+    "CCommandCard::PlaceButton": {
+      "kind": "function", "rva": "0x0036d3e0", "conv": "thiscall",
+      "sig": "void(void* this, void* data)",
+      "bytes": "51 8b 54 24 08 53 8b 9a 9c 05 00 00 55 8b aa a0 05 00 00",
+      "doc": "1.26a: as on 1.27b (one caller, 0x372E59; fills the cell with 0x36D2A0). ret 4. A position outside the grid reads past it: the crash 1.27a fixed in the setters."
+    },
     "CGameUI.esc_menu": { "kind": "offset", "value": "0x228" },
     "CEscMenu::Reset": {
       "kind": "function", "rva": "0x00368a70", "conv": "thiscall",

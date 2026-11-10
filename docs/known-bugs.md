@@ -212,18 +212,33 @@ not refused, that `Preload("e2e save: ..\Gold")` is kept and the
 
 #### Long string literal overruns the JASS compiler's buffer
 
-**Seen on 1.27b (Nov 2026, in game), not fixed.** The JASS scanner
-(`JassScanner::nextToken`, game.dll `0x9249D0`) stores each character of a
-token in a heap buffer at `[this+8]` with no bound. A `war3map.j` with a
-string literal of ~4000 characters writes past that buffer while the map
-loads (access violation writing at `0x924AE4`; the e2e map with such a
-literal crashed this way). That is a heap overrun from map data, before any
-native runs. A string of the same length built by concatenation at run time
-is fine (4009 characters checked), so it is the scanner's token buffer, not
-JASS strings in general. Possible fix: Tome already hooks `nextToken` (memhack
-guard). It could check the token buffer's size, or refuse a map whose
-`war3map.j` has a literal over the limit before it compiles. The buffer's
-size is still to be read from the scanner's constructor (`0x9246A0`).
+**Seen on 1.27b (Nov 2026, in game). Fixed in Tome (jass-token-guard).** The
+JASS scanner (`JassScanner::nextToken`, game.dll `0x9249D0`, a flex-style
+DFA) keeps the token it reads in two heap buffers of `capacity + 1` bytes
+(the text at `[this+0x98]` and each character's state at `[this+8]`; the
+constructor `0x9246A0` gets the capacity from `Jass::compile`: 2100). Its
+character loop compares the token's length with the capacity, but then
+takes the error exit (return -2) only if `[this+0x1C]` is set, which the
+function clears when it starts, so the check never fires. A `war3map.j`
+with a string literal (or comment, or name) over 2100 characters writes past
+both buffers while the map loads: ~4000 characters crashed the game (access
+violation writing at `0x924AE4`), shorter overruns corrupt the heap
+silently. A string of the same length built by concatenation at run time is
+fine (4009 characters checked): it's the scanner's buffers, not JASS strings.
+1.26a has the same code (`0x45FF30`).
+
+The fix makes the check's `jne` a `jmp` to the same exit: a token that
+fills the buffers ends the compile as the parser's fatal errors do. That
+path crashed on its own: the parser's constructor (`0x91E9A0`) doesn't set
+the parse's root node (`JassParser.root`, `+0x34`), only a finished parse
+does, and after a failed one `0x913D44` calls a destructor through whatever
+it holds. The patch zeroes it before each parse. With both, a map with a
+3000-character literal goes back to the main menu (checked in game, 1.27b
+and 1.26a), as a map whose script doesn't compile does, and `tome.log` says
+why. `tests/game` runs the real scanner on such a literal: without the patch
+it writes past capacity + 1, with it nothing. Maps whose literal is between
+2101 characters and the length that crashed may have loaded before (with a
+corrupted heap); they don't load now.
 
 ### BLP texture loader reads past the file (`CBLPFile::Open`)
 
@@ -404,9 +419,19 @@ with `Buttonpos` values in `CustomKeys.txt` of (-1, 0), (-5, -5), (9, 0),
   a row, the cells at `+8`, 4 bytes each), so a bad position reads outside
   the grid: the crash Blizzard fixed in 1.27a.
 
-Not fixed in Tome yet. A fix would bring back hiding on 1.27b (let the two
-pairs through the setters and skip placing such a button) and, on 1.26a,
-ignore other bad positions.
+**Fixed in Tome (command-card-guard).** `CCommandCard::PlaceButton`
+(`0x3AA430`; 1.26a `0x36D3E0`) skips a button whose position is outside the
+grid, which is how the card leaves out a button it doesn't show. On 1.27b
+the setters that `CommandFunc.txt`, `CustomKeys.txt` and abilities' buttons
+go through (`0x3CA1A0`, both paths of `0x36B470`) keep the two hiding
+positions, as 1.28 does; `0x373A90`-`0x373AF0`, single-coordinate setters
+with the same checks, have no callers. On 1.26a every bad position is left
+off the card (1.28 would put it at its default; 1.26a's setters keep no
+default). Checked in game on both builds with `CustomKeys.txt` (Attack at
+(0, -11), Move at (INT_MIN, INT_MIN): both hidden; Patrol at (9, 9): at
+(0, 0) on 1.27b, as without the patch, left out on 1.26a). Only the local player's card changes:
+nothing goes over the network. Whether a hidden button's hotkey still works
+wasn't checked.
 
 ## Stretched picture on widescreen
 
@@ -640,22 +665,22 @@ MIDI device).
    closes the exploit for players who download maps from others.
 2. **Measure the memhack on this build** with a test map, to settle
    whether 1.27b still lets scripts write memory.
-3. **Port the 1.28 command card fix:** not a crash on 1.27b, but hiding
-   buttons at (0, -11) and (INT_MIN, INT_MIN) is broken; 1.26a still crashes
-   on bad positions (see "Command card button positions"). (Path traversal
-   in `PreloadGenEnd` and every other native that takes a file path is
-   already handled by the path-sanitizer patch, above.)
+3. ~~**Port the 1.28 command card fix**~~ Done (command-card-guard; see
+   "Command card button positions"). (Path traversal in `PreloadGenEnd` and
+   every other native that takes a file path is already handled by the
+   path-sanitizer patch, above.)
 4. **Raise the hashtable and game cache limits** as 1.29.1 did, if a
    mod needs them (it changes game behaviour, so every player needs
    the same mod).
 
-## Further hardening (surveyed Nov 2026, not yet done)
+## Further hardening (surveyed Nov 2026)
 
 A survey of the game's remaining attack surface for malicious maps,
 downloaded files, and (for private/Battle.net servers) the network. Roughly
 most-valuable first. Each needs reverse engineering on 1.27b before it can be
-built; none is implemented yet. The three built-in guards above (memhack,
-path, BLP) plus the path-length limits are what exists today.
+built; items marked done have been. The built-in guards above (memhack,
+path, BLP, the JASS token and command card guards) plus the path-length
+limits are what exists today.
 
 ### Parsers of untrusted bytes with no guard yet
 
@@ -666,11 +691,20 @@ path, BLP) plus the path-length limits are what exists today.
    refuses `\..\`, `\..` and `..\` in it itself), so the "inside the game
    folder" worry is milder than feared, and the
    path-sanitizer's `..`/rooted/device/length checks keep a write inside those
-   folders. Still worth doing for defence in depth: refuse writes to script or
-   executable extensions (`.j`, `.ai`, `.pld` aside from the intended preload,
-   `.bat`, `.vbs`, `.exe`, `.dll`), and never let a relative name reach
-   `tome\` or `TOME_HOME`. Also test 8.3 short names (`GAME~1.DLL`) and
-   trailing-dot/space tricks against the guard.
+   folders. **Done (Nov 2026) for defence in depth:** the writes also refuse
+   a name a program or script would have (`path_guard::is_executable_name`:
+   `.exe`, `.dll`, `.bat`, `.cmd`, `.vbs`, `.js`, `.ps1`, `.lnk`, `.reg`,
+   Miles' `.mix`/`.asi`/`.flt`/`.m3d`, ..., after the trailing dots and spaces
+   Windows drops, so `x.bat. ` too), and a component of only dots and spaces
+   with two dots or more counts as `..`. 8.3 short names are no way around
+   either: `GAME~1.DLL` has the extension; a long name whose short name
+   would have one (`x.exe1` is also `X~1.EXE`, `x.mixer` `X~1.MIX`: an
+   extension is cut to three characters there) is refused too; and a short
+   name can only name something inside the folder the write is rooted in,
+   which already keeps it out of `tome\` (unit tests, and one write in the
+   e2e map). Game scripts
+   (`.j`, `.ai`, `.pld`) aren't refused: `Preloader` runs a file of any name,
+   and maps write `.pld` files on purpose.
 2. **TGA image guard.** Browsing the Custom Game list parses each map's
    minimap and preview images before a game ever starts. A `CBLPFile`-style
    guard for TGA (and a check of the JPEG stream inside a JPEG BLP, which the
@@ -711,9 +745,9 @@ path, BLP) plus the path-length limits are what exists today.
    a function with parameters and a string native in a global's initial
    value crash, and are fixed (execute-func-guard, global-string-guard); the
    other reports don't crash on 1.27b ("JASS natives that crash or
-   misbehave"). Still open: the JASS scanner's long string literal overrun
-   (above) and the command card positions (not a crash on 1.27b; "Command
-   card button positions").
+   misbehave"). The JASS scanner's long string literal overrun (above) and
+   the command card positions are fixed too (jass-token-guard,
+   command-card-guard).
 9. **Other typecasts.** Confirm the memhack guard is the only JASS→memory
    gateway left: check the hashtable `Save*Handle`/`Load*Handle` + `Convert*`
    tricks to see whether loading into a mismatched handle type is refused on

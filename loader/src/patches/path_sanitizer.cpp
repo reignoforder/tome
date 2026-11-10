@@ -20,7 +20,11 @@
  * The fix refuses such a name, and one longer than path_guard::kMaxPathLen,
  * which the game would truncate (for PreloadGenEnd, one too long to fit after
  * the game's folder, which can crash the game); a plain relative name (the
- * natives' intended use, subdirectories included) is untouched. Preload's
+ * natives' intended use, subdirectories included) is untouched. The writes
+ * also refuse a name a program or script would have (path_guard::
+ * is_executable_name: .exe, .dll, .bat, .vbs, .lnk, Miles' .mix, ...), which
+ * no map needs and no game file is: defence in depth, as they already land
+ * in the game's data folders. Preload's
  * argument is never refused: maps use it as a data channel (PreloadGenEnd
  * writes it out word for word, any length and any characters). The game only
  * opens the files Preload lists in PreloadStart, PreloadEnd, PreloadEndEx and
@@ -167,14 +171,15 @@ size_t g_custom_map_data_max = path_guard::kMaxPathLen;
 // (log::Throttle), and print at most kLogChars of the name with control
 // characters replaced, so a map can neither flood tome.log nor forge lines
 // in it. The first refusal of each native for each reason is logged too,
-// whatever came before it (at most 2 * kCount lines), so one is never lost
+// whatever came before it (at most kReasons * kCount lines), so one is never lost
 // behind other refusals.
 constexpr size_t kLogChars = 160;
-enum Reason { kTooLong, kEscapes, kReasons };
+enum Reason { kTooLong, kEscapes, kExecutable, kReasons };
 bool g_logged[kCount][kReasons] = {};
 
 // True if a path argument (an RCString*) of kSpecs[i] escapes the data
-// folder or is too long, and the call must be skipped. A null string passes
+// folder or is too long, or (a write's) names a program or script, and the
+// call must be skipped. A null string passes
 // through: the engine handles it, and there's nothing to sanitize.
 bool escapes(size_t i, uint32_t jass_string) {
     const Spec& spec = kSpecs[i];
@@ -185,12 +190,11 @@ bool escapes(size_t i, uint32_t jass_string) {
                        : spec.in_custom_map_data ? g_custom_map_data_max
                                                  : path_guard::kMaxPathLen;
     const bool too_long = text.size() > max;
-    if (!too_long && (spec.access == Access::Data ? !path_guard::is_unsafe_any_length(text)
-                                                  : !path_guard::is_unsafe(text))) {
-        return false;
-    }
+    const bool unsafe = spec.access == Access::Data ? path_guard::is_unsafe_any_length(text) : path_guard::is_unsafe(text);
+    const bool executable = spec.access == Access::Write && path_guard::is_executable_name(text);
+    if (!too_long && !unsafe && !executable) return false;
     const unsigned long total = spec.access == Access::Data ? ++g_kept_total : ++g_refused_total;
-    const Reason reason = too_long ? kTooLong : kEscapes;
+    const Reason reason = too_long ? kTooLong : unsafe ? kEscapes : kExecutable;
     const bool first_of_kind = !g_logged[i][reason];
     g_logged[i][reason] = true;
     if (first_of_kind || log::Throttle::logs(total)) {
@@ -207,7 +211,11 @@ bool escapes(size_t i, uint32_t jass_string) {
                       spec.name, shown, path[n] ? "..." : "", total);
         } else {
             TOME_WARN("path-sanitizer: refused %s(\"%s%s\") -- %s (total %lu)", spec.name, shown,
-                      path[n] ? "..." : "", reason == kTooLong ? "too long" : "escapes the data folder", total);
+                      path[n] ? "..." : "",
+                      reason == kTooLong  ? "too long"
+                      : reason == kEscapes ? "escapes the data folder"
+                                           : "names a program or script",
+                      total);
         }
     }
     return true;
@@ -384,7 +392,8 @@ bool install_path_sanitizer(uintptr_t game_base, const BuildMappings& build, con
     hooks::add(bind, before);
     report = "sanitizes paths of " + std::to_string(kCount) + " file natives (PreloadGenEnd names up to " +
              std::to_string(g_custom_map_data_max) + " characters" +
-             (prefix ? "" : "; the game folder's length is unknown") + "; guards the preload list)";
+             (prefix ? "" : "; the game folder's length is unknown") +
+             "; no program or script names written; guards the preload list)";
     return true;
 }
 

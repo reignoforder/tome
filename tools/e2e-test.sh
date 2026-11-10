@@ -393,12 +393,12 @@ check "Assets at startup: $ASSET_FILES files from 3 mods \(0 overridden" "mods' 
 check "Asset probe .*: [0-9]+ bytes, fnv1a $PROBE_HASH" "the game reads the mod's texture instead of its own"
 check "Bootstrap complete" "bootstrap finished" 15
 if [[ "$GAME_VERSION" == 1.27b ]]; then
-    check "Patches: [0-9]+ applied, 0 skipped: memhack-guard applied.*path-sanitizer applied.*blp-guard applied.*d3d-reset-lights applied.*gl-context-restore applied.*background-mute applied.*widescreen applied.*ambient-sound applied.*lan-map-guard applied" "every built-in patch applied"
+    check "Patches: [0-9]+ applied, 0 skipped: memhack-guard applied.*path-sanitizer applied.*blp-guard applied.*d3d-reset-lights applied.*gl-context-restore applied.*background-mute applied.*widescreen applied.*ambient-sound applied.*lan-map-guard applied.*jass-token-guard applied.*command-card-guard applied \\(.*keeps the hiding positions" "every built-in patch applied"
 else
     # Another build may leave a patch out: for want of its symbols
     # (mappings/<version>.json), or its variant for that build says why.
     for patch in memhack-guard path-sanitizer blp-guard d3d-reset-lights gl-context-restore background-mute widescreen \
-        ambient-sound lan-map-guard; do
+        ambient-sound lan-map-guard jass-token-guard command-card-guard; do
         check "Patches: .*$patch (applied|skipped \(${GAME_VERSION//./\\.} has no mapping for|skipped \(not for ${GAME_VERSION//./\\.}: )" \
             "$patch applied (or not for this build)"
     done
@@ -467,6 +467,8 @@ if ((${#MAP_ARG[@]})); then
         check "path-sanitizer: refused $native\(\"\.\.\\\\" "$native refused a name outside the data folder"
     done
     check "path-sanitizer: refused AddSpecialEffect\(\"C:" "AddSpecialEffect refused an absolute path"
+    check "path-sanitizer: refused PreloadGenEnd\(\"TomeE2E-escape\.bat\. \"\) -- names a program or script" \
+        "PreloadGenEnd refused a program's name"
     check_absent "path-sanitizer: refused AddSpecialEffect\(\"\"" "an empty model name isn't refused"
     check "BlzLoadTOCFile: refused" "BlzLoadTOCFile refused a TOC outside the data folder"
     check "path-sanitizer: refused PreloadGenEnd\(\"longpath\\\\a+\.\.\.\"\) -- too long" \
@@ -488,10 +490,10 @@ if ((${#MAP_ARG[@]})); then
     check "execute-func-guard: refused ExecuteFunc\(\"ClearTextMessagesBJ\"\)" "and on a Blizzard.j one"
     check_absent "\[map\] TomeLogInteger\(979[0-9]\)" "the refused function didn't run"
     check "\[map\] TomeLogInteger\(9702\)" "the script carried on after the refused ExecuteFunc calls"
-    if compgen -G "$GAME/../TomeE2E-escape*" >/dev/null; then
-        fail "a file was written outside the game folder"
+    if compgen -G "$GAME/../TomeE2E-escape*" >/dev/null || compgen -G "$GAME/CustomMapData/TomeE2E-escape*" >/dev/null; then
+        fail "a file was written outside the game folder, or a refused one inside it"
     else
-        pass "nothing was written outside the game folder"
+        pass "nothing was written outside the game folder, nor a refused name inside it"
     fi
     echo "game events (-loadfile)"
     check "\[hello\] map load: .+ \(Maps\\\\TomeE2E\\\\e2e\.w3m\)" "map load event with the map's name and path"
@@ -814,7 +816,7 @@ if [[ -f "$BUILD/packages/hello.tome" ]]; then
     repack "$BUILD/packages/hello.tome" "$WORK/hello-pkg.tome"
     mv -f "$WORK/hello-pkg.tome" "$MODS/hello-pkg.tome"
     check "Unpacked hello-pkg\.tome" "a .tome is unpacked" 10
-    check "hello +error: the folder hello has the same id and is used instead" "a folder wins over a package with its id" 10
+    check "hello +([^ ]+ +)?error: the folder hello has the same id and is used instead" "a folder wins over a package with its id" 10
     # Without the folder, the package's copy runs.
     before=$(count "\[hello\] loaded \(Tome")
     mv "$MODS/hello" "$WORK/hello-folder"

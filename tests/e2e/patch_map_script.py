@@ -239,6 +239,8 @@ function TomeE2EPaths takes nothing returns nothing
     call PreloadGenClear()
     call Preload("e2e")
     call PreloadGenEnd("..\\\\TomeE2E-escape.txt")
+    // A name a program or script would have is refused too, inside the folder.
+    call PreloadGenEnd("TomeE2E-escape.bat. ")
     call SaveGame("..\\\\..\\\\TomeE2E-escape.w3z")
     if not CopySaveGame("TomeE2E.w3z", "..\\\\..\\\\TomeE2E-escape.w3z") then
         call TomeLogInteger(9602)

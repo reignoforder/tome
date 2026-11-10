@@ -150,3 +150,80 @@ TEST(path_guard_host_map_paths) {
     CHECK(is_unsafe("Maps\\conin$.w3x"));
     CHECK(is_unsafe("\\\\host\\share\\x.w3x"));
 }
+
+TEST(path_guard_executable_names) {
+    using tome::path_guard::is_executable_name;
+    // What maps write: preload files, caches, saves, text.
+    CHECK(!is_executable_name("run.txt"));
+    CHECK(!is_executable_name("MyCampaign.w3v"));
+    CHECK(!is_executable_name("e2e.w3z"));
+    CHECK(!is_executable_name("Logs\\run.pld"));
+    CHECK(!is_executable_name("save.j"));    // game scripts aren't refused (Preloader runs any name)
+    CHECK(!is_executable_name("noextension"));
+    CHECK(!is_executable_name("folder.exe\\file.txt"));  // only the last component counts
+    CHECK(!is_executable_name("x.html"));   // its short name is X~1.HTM
+    CHECK(!is_executable_name("x.json"));
+    CHECK(!is_executable_name("x.w3mod"));
+    CHECK(!is_executable_name(""));
+    // Programs, scripts, shortcuts, Miles plugins; any case.
+    CHECK(is_executable_name("x.exe"));
+    CHECK(is_executable_name("Logs\\startup.BAT"));
+    CHECK(is_executable_name("a/b/run.Cmd"));
+    CHECK(is_executable_name("evil.dll"));
+    CHECK(is_executable_name("x.vbs"));
+    CHECK(is_executable_name("x.ps1"));
+    CHECK(is_executable_name("x.lnk"));
+    CHECK(is_executable_name("tome.mix"));
+    CHECK(is_executable_name("x.asi"));
+    CHECK(is_executable_name("x.settingcontent-ms"));
+    CHECK(is_executable_name("x.chm"));
+    CHECK(is_executable_name("x.library-ms"));
+    CHECK(is_executable_name("x.msix"));
+    CHECK(is_executable_name(".exe"));
+    // Windows drops trailing dots and spaces: still the program's name.
+    CHECK(is_executable_name("x.bat."));
+    CHECK(is_executable_name("x.bat "));
+    CHECK(is_executable_name("x.bat. . ."));
+    CHECK(is_executable_name("x.exe\\"));  // a separator at the end
+    // A "." component after the name: Windows drops it ("x.exe\\." is x.exe).
+    CHECK(is_executable_name("x.exe\\."));
+    CHECK(is_executable_name("Logs/run.bat/. "));
+    CHECK(is_executable_name("x.dll\\.\\."));
+    CHECK(!is_executable_name("x.txt\\."));
+    CHECK(!is_executable_name("a.exe\\b\\."));  // names b
+    CHECK(!is_executable_name("."));
+    CHECK(is_executable_name("blizzard.ax"));  // a DirectShow filter
+    // 8.3 short names: the extension is the program's all the same.
+    CHECK(is_executable_name("GAME~1.DLL"));
+    CHECK(is_executable_name("PROGRA~1\\X~1.EXE"));
+    CHECK(!is_executable_name("SAVEGA~1.W3Z"));
+    // A long name whose short name has a program's extension: an extension
+    // longer than three characters is cut to three in it, spaces dropped.
+    CHECK(is_executable_name("x.exe1"));      // X~1.EXE
+    CHECK(is_executable_name("run.batx"));    // RUN~1.BAT
+    CHECK(is_executable_name("x.mixer"));     // X~1.MIX ("*.mix" finds it)
+    CHECK(is_executable_name("x.Comment"));   // X~1.COM
+    CHECK(is_executable_name("x.e xe"));      // X~1.EXE
+    CHECK(is_executable_name("x.ex e."));     // trailing dot dropped first
+    CHECK(!is_executable_name("x.ex+"));      // X~1.EX_
+}
+
+// The other tricks against the path checks themselves: a short name of a
+// folder is just a name inside the data folder; trailing dots and spaces
+// don't hide a "..", a device or a stream.
+TEST(path_guard_short_names_and_trailing_dots) {
+    CHECK(!is_unsafe("CUSTOM~1\\run.txt"));
+    CHECK(is_unsafe("..\\GAME~1.DLL"));
+    CHECK(is_unsafe("x.txt::$DATA"));
+    CHECK(is_unsafe("nul. ."));
+    CHECK(is_unsafe("a\\..\\..\\b"));
+    // Components of dots and spaces Windows' trimming could make "..".
+    CHECK(is_unsafe(".. \\x.txt"));
+    CHECK(is_unsafe("a\\..  \\b"));
+    CHECK(is_unsafe("a\\. .\\b"));
+    CHECK(is_unsafe("a\\...\\b"));
+    CHECK(is_unsafe("x\\.. "));
+    // One dot is the folder itself; dots next to a name are a name.
+    CHECK(!is_unsafe("a\\. \\b.txt"));
+    CHECK(!is_unsafe("..foo\\bar..\\x.txt"));
+}

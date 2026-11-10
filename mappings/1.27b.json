@@ -44,7 +44,7 @@
       "sig": "int(void* this)",
       "bytes": "55 8b ec 83 ec 0c 53 56 57 8b f9 c7 45 fc 00 00",
       "size": "0x5c8",
-      "doc": "Memhack fix: reads the next token; returns its type code in eax (endfunction is 0x115; keywords get codes ~0x120-0x12d; identifiers tail-call the scanner's intern+classify, 0x9253E0). The token text is left in [this+0x98] (len [this+0xC4]). The memhack-guard patch hooks this (AFTER) to restore shadowed globals at the endfunction token. See docs/reverse-engineering.md, JASS compiler. Stores each character of a token at [[this+8]+n] with no bound: a ~4000-character string literal in war3map.j writes past that heap buffer while the map loads (access violation at 0x924AE4, seen in game; docs/known-bugs.md, Long string literal)."
+      "doc": "Memhack fix: reads the next token; returns its type code in eax (endfunction is 0x115; keywords get codes ~0x120-0x12d; identifiers tail-call the scanner's intern+classify, 0x9253E0). The token text is left in [this+0x98] (len [this+0xC4]). The memhack-guard patch hooks this (AFTER) to restore shadowed globals at the endfunction token. See docs/reverse-engineering.md, JASS compiler. Stores each character of a token at [[this+8]+n] and [[this+0x98]+n] with a length check that never fires (JassScanner::nextToken.overflow_check): a string literal over 2100 characters in war3map.j writes past those heap buffers while the map loads (access violation at 0x924AE4 with ~4000, seen in game; docs/known-bugs.md, Long string literal). jass-token-guard makes the check fire."
     },
     "Jass::compile": {
       "kind": "function", "rva": "0x009146f0", "conv": "fastcall",
@@ -58,6 +58,30 @@
       "sig": "void(void* this, void* a0, void* typeNode, void* sym, void* a3)",
       "bytes": "55 8b ec 8b 45 08 8b 55 10 56 8b f1 8b 4d 0c c7 06 ?? ?? ?? ?? c7 46 14 00 00 00 00 89 46 0c c7 46 04 29",
       "doc": "Memhack fix: builds a local variable's type descriptor (desc+0x4=kind 0x29 local-var, desc+0x10=type-id from typeNode+0x10) and at 0x91DD5E writes sym+0x18=this descriptor, overwriting the symbol's current (possibly global) descriptor with no save and no endfunction restore. sym=3rd stack arg, typeNode=2nd. The memhack gateway. See docs/reverse-engineering.md, JASS compiler."
+    },
+    "JassScanner::nextToken.overflow_check": {
+      "kind": "data", "rva": "0x00924a6d",
+      "doc": "In JassScanner::nextToken's character loop, the token length check: cmp dword [edi+0x1C], 0 / jne 0x924BF1 (83 7f 1c 00 0f 85 7a 01 00 00), reached once the token's length (esi) is JassScanner.capacity. 0x924BF1 returns -2, which the parser (0x922B96, 0x922C17) takes as a fatal error: the compile stops. [edi+0x1C] is cleared when nextToken starts, so the check never takes the exit and a longer token runs past the scanner's two buffers (a heap overrun from war3map.j; docs/known-bugs.md, Long string literal). jass-token-guard makes the jne a jmp."
+    },
+    "JassScanner.capacity": {
+      "kind": "offset", "value": "0xc",
+      "doc": "int: the longest token the scanner's buffers hold (+0x98, the input and token text, and +0x8, the state of each character, each capacity + 1 bytes, from the constructor 0x9246A0, last argument). Jass::compile makes the scanner with 0x834 (2100)."
+    },
+    "JassScanner::ctor": {
+      "kind": "function", "rva": "0x009246a0", "conv": "thiscall",
+      "sig": "void*(void* this, void* files, void* a1, void* a2, void* a3, int capacity)",
+      "bytes": "55 8b ec 8b 45 14 56 57 8b f9 6a 00 68 94 01 00 00 68 ?? ?? ?? ??",
+      "doc": "The JASS scanner's constructor (the base: the vtable, +0 = read a character or -1, +4 = wrap at the end, is set by the caller's derived class). Allocates the two token buffers of capacity + 1 bytes (+0x98 the text, +0x8 the states) and stores capacity at JassScanner.capacity; files (the compile's (name, text) list) at +0xA0/+0x9C/+0xA4. Jass::compile's one call (0x914745) passes 0x834. ret 0x14. tests/game builds one on a test buffer."
+    },
+    "JassParser::parse": {
+      "kind": "function", "rva": "0x00922a50", "conv": "thiscall",
+      "sig": "int(void* this, void* context)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 08 53 56 57 a1",
+      "doc": "The JASS parser (yacc-style tables; the scanner at [this+0x44], the look-ahead token at +0x28): 0 when the script parsed, else nonzero. JassParser::parse's caller 0x913C30 builds the parser on its stack (constructor 0x91E9A0, which leaves JassParser.root unset), and after a failed parse destroys whatever JassParser.root holds (0x913D44: if nonzero, its vtable +0 with 0). The scanner's -2 makes it return 1 (0x922B99 -> 0x924250). ret 4. jass-token-guard zeroes JassParser.root before it runs."
+    },
+    "JassParser.root": {
+      "kind": "offset", "value": "0x34",
+      "doc": "The parsed script's root node, set only once the whole script is parsed (0x923F3B). The parser's constructor doesn't clear it, so after a parse stopped early (the scanner's -2) it holds stack garbage, and 0x913D44 calls a destructor through it: a crash (seen in game with a 3000-character string literal and jass-token-guard's length check)."
     },
     "Native.CreateTrigger": {
       "kind": "function", "rva": "0x001fc7e0", "conv": "cdecl", "sig": "uint32_t(void)",
@@ -1003,6 +1027,26 @@
     "CCommandButton.data": { "kind": "offset", "value": "0x190", "doc": "The button's CCommandButtonData (what it does), NULL on an empty button. The cooldown sweep sprite is at +0x19C (made on first use, 0x3AD950)." },
     "CCommandButtonData.ability": { "kind": "offset", "value": "0x6d4", "doc": "CAbility*: the ability behind the button (an item's for an inventory slot), or NULL. Raw: check it through its reference (+0xC/+0x10, ObjectLookup, ObjectRecord.dead) as 0x3B62D0 does." },
     "CCommandButtonData.command": { "kind": "offset", "value": "0x8", "doc": "uint32_t: what the button tells its ability, passed to CAbility.vtable.GetCooldownRemaining." },
+    "CCommandButtonData.x": { "kind": "offset", "value": "0x59c", "doc": "uint32_t: the button's column on the command card, 0-3 (Buttonpos, Researchpos, ...). The setters on 1.27b (0x3CA29B, 0x36B490, 0x36B4D4, 0x373A96, 0x373AB6) store it only if it's at most 3 (unsigned); CCommandCard::PlaceButton indexes the grid with it unchecked." },
+    "CCommandButtonData.y": { "kind": "offset", "value": "0x5a0", "doc": "uint32_t: the button's row, 0-2; stored only if it's at most 2 (unsigned) on 1.27b (0x3CA2A9, 0x36B4A4, 0x36B4E2, 0x373AD6, 0x373AF6)." },
+    "CCommandCard::PlaceButton": {
+      "kind": "function", "rva": "0x003aa430", "conv": "thiscall",
+      "sig": "void(void* this, void* data)",
+      "bytes": "55 8b ec 83 ec 08 8b c1 8b 4d 08 53 56 57 8b 91 9c 05 00 00",
+      "doc": "Puts a button's data on the card (CGameUI.command_card): reads CCommandButtonData.x and .y, indexes the grid with them unchecked (rows at +0x154, 16 bytes each, the cells through +8), moves to the next free cell if that one is taken (+0x94 of the cell's button), and fills it (0x3AA2F0). Its one caller (0x3AAED6) skips it for buttons it doesn't show. ret 4. command-card-guard skips it for a position outside the grid (docs/known-bugs.md, Command card button positions)."
+    },
+    "CCommandCard::AddButton.pos_check": {
+      "kind": "data", "rva": "0x003ca298",
+      "doc": "In 0x3CA1A0 (thiscall on the card, ret 0x24: adds or updates the CCommandButtonData of a command in the card's table at +0x160; data in ecx here, x and y its stack arguments 6 and 7 at [ebp+0x1C] and [ebp+0x20]), the 28 bytes that store them: mov eax,[ebp+1C] / cmp eax,3 / ja / mov [ecx+59C],eax / mov eax,[ebp+20] / cmp eax,2 / ja / mov [ecx+5A0],eax. Abilities' buttons and CommandFunc.txt's Buttonpos come here (0x377260 -> 0x372A40; 0x36B6D0). command-card-guard replaces it with a call that also keeps (0,-11) and (INT_MIN,INT_MIN)."
+    },
+    "CGameUI::SetCommandButtonPos.pos_check_button": {
+      "kind": "data", "rva": "0x0036b48b",
+      "doc": "In 0x36B470 (thiscall on CGameUI, ret 0xC; the third argument points to {x, y}; called from 0x375F20), the path for a button on the card (0x3B5F20; eax the CCommandButton, its data at +0x190): the 43 bytes from mov edx,[ebp+10] to the final pop ebp (8b 55 10 8b 32 83 fe 03 77 0c ...), which store x and y with the same checks as 0x3CA1A0. command-card-guard replaces them like CCommandCard::AddButton.pos_check, keeping the pop esi."
+    },
+    "CGameUI::SetCommandButtonPos.pos_check_data": {
+      "kind": "data", "rva": "0x0036b4cf",
+      "doc": "In 0x36B470, the path for a command's data not on the card (0x3B60F0 returns it in eax): the 30 bytes from mov edx,[ebp+10] up to 0x36B4ED (8b 55 10 8b 0a 83 f9 03 77 06 ...). Patched by command-card-guard."
+    },
     "CGameUI.esc_menu": { "kind": "offset", "value": "0x228", "doc": "The CEscMenu (vtable 0xABDF34), made once per game." },
     "CEscMenu::Reset": {
       "kind": "function", "rva": "0x003cdd10", "conv": "thiscall", "sig": "void(CEscMenu* this)",

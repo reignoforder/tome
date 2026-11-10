@@ -7,6 +7,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 #include <string_view>
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
@@ -22,6 +23,15 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     }
     if (tome::zip::safe_name(input)) check_safe_name(input);
     tome::path_guard::toc_is_unsafe(input);
+    // A program's name stays one with what Windows drops after it: trailing
+    // dots and spaces, a "." component.
+    if (tome::path_guard::is_executable_name(input) && size < 4096) {
+        for (const char* tail : {". ", "\\.", "/. "}) {
+            std::string padded(input);
+            padded += tail;
+            if (!tome::path_guard::is_executable_name(padded)) __builtin_trap();
+        }
+    }
     if (tome::ui::is_valid_mod_fdf_path(input)) {
         std::string archive = tome::ui::mod_fdf_archive_path("mod", input);
         tome::ui::toc_for(archive);

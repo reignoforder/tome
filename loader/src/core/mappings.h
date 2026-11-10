@@ -362,6 +362,25 @@ struct BuildMappings {
         uint32_t gamma_restore;   // Movie.gamma_restore (patched by movie-display-reset)
     } movie;
 
+    // Optional: jass-token-guard's (patches/jass_token_guard.cpp). The hooked
+    // JassScanner::nextToken and JassParser::parse are found by name, not
+    // stored here.
+    struct {
+        uint32_t overflow_check;   // JassScanner::nextToken.overflow_check (patched)
+        uint32_t capacity_offset;  // JassScanner.capacity
+        uint32_t root_offset;      // JassParser.root
+    } scanner;
+
+    // Optional: command-card-guard's (patches/command_card_guard.cpp). The
+    // hooked CCommandCard::PlaceButton is found by name, not stored here.
+    struct {
+        uint32_t x_offset;         // CCommandButtonData.x
+        uint32_t y_offset;         // CCommandButtonData.y
+        uint32_t add_check;        // CCommandCard::AddButton.pos_check (patched; 0 on 1.26a)
+        uint32_t move_check_button; // CGameUI::SetCommandButtonPos.pos_check_button (patched; 0 on 1.26a)
+        uint32_t move_check_data;   // CGameUI::SetCommandButtonPos.pos_check_data (patched; 0 on 1.26a)
+    } command_card;
+
     // Optional: game objects for mods (objects.cpp, API version 16). Each
     // property, handle lookup and jass_call works when its own symbols are
     // mapped (non-zero), and reports TOME_ERR_UNAVAILABLE otherwise.

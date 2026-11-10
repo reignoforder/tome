@@ -700,6 +700,16 @@ bool bind_build(const mappings::Build& build, BuildMappings& out, std::vector<st
     bind_optional("Movie.cinematic_mode", Kind::Data, movie.cinematic_mode);
     bind_optional("Movie.gamma_call", Kind::Data, movie.gamma_call);
     bind_optional("Movie.gamma_restore", Kind::Data, movie.gamma_restore);
+    auto& scanner = out.scanner;  // jass-token-guard's symbols (patches/jass_token_guard.cpp)
+    bind_optional("JassScanner::nextToken.overflow_check", Kind::Data, scanner.overflow_check);
+    bind_optional("JassScanner.capacity", Kind::Offset, scanner.capacity_offset);
+    bind_optional("JassParser.root", Kind::Offset, scanner.root_offset);
+    auto& card = out.command_card;  // command-card-guard's symbols (patches/command_card_guard.cpp)
+    bind_optional("CCommandButtonData.x", Kind::Offset, card.x_offset);
+    bind_optional("CCommandButtonData.y", Kind::Offset, card.y_offset);
+    bind_optional("CCommandCard::AddButton.pos_check", Kind::Data, card.add_check);
+    bind_optional("CGameUI::SetCommandButtonPos.pos_check_button", Kind::Data, card.move_check_button);
+    bind_optional("CGameUI::SetCommandButtonPos.pos_check_data", Kind::Data, card.move_check_data);
     auto& objects = out.objects;  // game objects for mods (objects.cpp)
     bind_optional("HandleManager.count", Kind::Offset, objects.handle_count_offset);
     bind_optional("HandleManager.free_count", Kind::Offset, objects.handle_free_count_offset);

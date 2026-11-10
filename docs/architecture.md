@@ -1273,11 +1273,15 @@ reason to make a fix a patch rather than ship it as a mod.
   reads each path through `RCString::GetText` (bound by the patch itself),
   and either calls the real native or, for a name that
   `path_guard::is_unsafe` rejects (absolute, drive or NTFS stream `:`,
-  UNC/rooted, any `..` component, a reserved DOS device name, a name over
-  `kMaxPathLen` (259, `MAX_PATH` less its NUL: the game would truncate a
-  longer one, and one of ~4000 characters crashes `PreloadGenEnd`); empty,
-  for the writes), skips the call and returns 0 (nothing / false / 0 / a null
-  handle). `Preload` is never refused (maps use its argument as data, which
+  UNC/rooted, any `..` component or one of only dots and spaces with two
+  dots or more, which Windows' trimming could make `..`, a reserved DOS
+  device name, a name over `kMaxPathLen` (259, `MAX_PATH` less its NUL: the
+  game would truncate a longer one, and one of ~4000 characters crashes
+  `PreloadGenEnd`); for the writes also an empty name and one a program or
+  script would have, `path_guard::is_executable_name`: `.exe`, `.dll`,
+  `.bat`, `.vbs`, `.lnk`, Miles' `.mix`/`.asi`, ..., after the trailing dots
+  and spaces Windows drops), skips the call and returns 0 (nothing / false /
+  0 / a null handle). `Preload` is never refused (maps use its argument as data, which
   `PreloadGenEnd` writes out); an argument that isn't a safe path instead
   makes it refuse the natives that open the preload list's files
   (`PreloadStart`, `PreloadEnd`, `PreloadEndEx`, `PreloadRefresh`) until
@@ -1330,6 +1334,41 @@ reason to make a fix a patch rather than ship it as a mod.
   the client can't join with that map. Logged like the path sanitizer's
   refusals (the first 20, then every 1000th). Reserves the function.
   `tests/game` calls the real check through the guard.
+- **jass-token-guard** (`patches/jass_token_guard.cpp`, `docs/known-bugs.md`,
+  "Long string literal"): the JASS scanner keeps a token in two heap buffers
+  of `JassScanner.capacity` + 1 bytes (2100 + 1), and its length check never
+  fires (its exit also wants a flag `nextToken` clears when it starts), so a
+  string, comment or name over 2100 characters in `war3map.j` writes past
+  them. The check's `jne` (`JassScanner::nextToken.overflow_check`) becomes
+  a `jmp` to the same exit, the scanner's own error return (-2), which stops
+  the parse; the target is read from the instruction and its bytes checked
+  first. That error path crashed by itself: the parser's constructor leaves
+  `JassParser.root` unset and the caller destroys it after a failed parse, so
+  a BEFORE handler on `JassParser::parse` zeroes it. The map's script then
+  doesn't compile and the game goes back to the menu, as for any script
+  that doesn't compile. An AFTER handler on `nextToken` logs the -2. Reserves
+  both functions (memhack-guard also reserves `nextToken`). `tests/game` runs
+  the real scanner on a 3000-character string with its buffers swapped for
+  larger ones: past capacity + 1 without the patch, nothing with it.
+- **command-card-guard** (`patches/command_card_guard.cpp`,
+  `core/command_card.*`, `docs/known-bugs.md`, "Command card button
+  positions"): 1.28's fix. `CCommandCard::PlaceButton` indexes the 4x3 grid
+  with a button's `CCommandButtonData.x`/`.y` unchecked; a BEFORE handler
+  skips it (the button isn't shown) for a position outside the grid. On
+  1.26a, whose setters store any value, that is every bad position (a crash
+  before; logged, the first 20 and then every 1000th); on 1.27b, whose
+  setters drop a coordinate outside the grid, it's the two positions maps
+  hide buttons with, (0, -11) and (INT_MIN, INT_MIN), which the patch makes
+  the setters keep: their store sequences
+  (`CCommandCard::AddButton.pos_check`,
+  `CGameUI::SetCommandButtonPos.pos_check_button` and `.pos_check_data`) are
+  rewritten into a `call [ptr]` (`ff 15`, reaching `tome.mix` at any distance)
+  to a C function that stores what `command_card::stored` says, with NOPs
+  after it. All three sites are compared with the expected bytes before any
+  is written; on a mismatch none is (the report says so) and PlaceButton's
+  check still applies. Reserves `PlaceButton`. Checked in game on both builds
+  with `CustomKeys.txt` (Option.customkeys) moving Attack to (0, -11) and Move
+  to (INT_MIN, INT_MIN): both hidden.
 
 ## Multiplayer handshake
 
@@ -1769,8 +1808,11 @@ manager and patch functions use them instead of patching code:
   `natives.cpp`) asks `tome_native_route` and either jumps to Tome's own
   native with the engine's stack frame or returns a mod's guarded result.
 - `patch_bytes` fails ("code patches don't apply under Shade"), so the
-  patches built on it (blp-guard, movie-display-reset) report that they're
-  off until they're ported to hooks. `patch_pointer` works on data (vtables)
+  patches built on it (blp-guard, movie-display-reset, jass-token-guard,
+  command-card-guard's setter rewrites) report that they're off until
+  they're ported to hooks (jass-token-guard fails as a whole and takes its
+  handlers off again; command-card-guard's PlaceButton check, a hook, still
+  applies). `patch_pointer` works on data (vtables)
   but refuses an address in a module's executable section: a pointer there
   is an instruction's operand, compiled in, so widescreen's UI part (which
   repoints operands of the coordinate conversions) reports that it's off

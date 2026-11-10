@@ -69,6 +69,22 @@ API version 20.
   host (checked in a LAN game).
 - **lan-map-guard** (built-in patch): refuses a host's map path that would
   make the client open a file outside `Maps\` or a device.
+- **jass-token-guard** (built-in patch): a string, comment or name over 2100
+  characters in a map's script no longer writes past the JASS compiler's
+  buffers (a crash at ~4000 characters, silent heap corruption below): the
+  compile stops and the map goes back to the menu, as a map whose script
+  doesn't compile does. 1.27b and 1.26a.
+- **command-card-guard** (built-in patch, 1.28's fix): maps can hide command
+  buttons again with the positions (0, -11) and (INT_MIN, INT_MIN) on 1.27b,
+  and on 1.26a a button at a position outside the card is left off it
+  instead of read past the grid (a crash).
+- **path-sanitizer**: the natives that write a file also refuse a name a
+  program or script would have (`.exe`, `.dll`, `.bat`, `.vbs`, `.lnk`,
+  `.mix`, `.ax`, ..., also with the trailing dots and spaces or the `\.`
+  component Windows drops, or under the 8.3 short name Windows may give it:
+  `x.exe1` is also `X~1.EXE`), and a
+  path component of only dots and spaces with two dots or more counts as
+  `..`.
 - **Stop on Memory Corruption** (Tome > Settings, off by default): Windows'
   heap termination on corruption, from the next start.
 - **Widescreen: the menus' panels in proportion.** They were stretched
