@@ -183,13 +183,14 @@ public:
     std::vector<std::string> take_notes();
 
     // For mods' lobby messages (lobbymsg.h): whether this client hosts; the
-    // host's net id as a client knows it (set_host, else the only player
-    // who sent a set; -1 if neither); and whether player `id` runs Tome as
-    // far as this side can tell (host: their reply arrived; client: it's
-    // the host and its set arrived). A line to a player without Tome would
-    // show in their chat.
+    // host's net id as the game says it (set_host: NetGetPlayerNumber; -1
+    // if the build doesn't map it, since "the only player who sent a set"
+    // could be any player); and whether player `id` runs Tome as far as
+    // this side can tell (host: their reply arrived; client: it's that host
+    // and its set arrived). A line to a player without Tome would show in
+    // their chat.
     bool hosting() const { return host_; }
-    int host_id() const;
+    int host_id() const { return host_ ? -1 : host_id_; }
     bool runs_tome(int id) const;
 
     // A client gives up waiting for the host's set after this many seconds.

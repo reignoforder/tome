@@ -252,7 +252,7 @@ impl Tome {
             11 | 12 => version_end!(publish),
             13..=19 => version_end!(map_script_shadows),
             20 => version_end!(check_metadata),
-            _ => version_end!(lobby_start),
+            _ => version_end!(lobby_show),
         };
         self.api.api_version >= version && self.api.size as usize >= end
     }

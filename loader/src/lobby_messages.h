@@ -28,5 +28,7 @@ bool start_allowed(std::vector<std::string>& reasons);
 
 // The lobby closed (or another opened): messages in progress are dropped.
 void on_lobby_closed();
+// A player left the lobby: their message in progress is dropped.
+void on_player_left(int id);
 
 } // namespace tome::lobby_messages

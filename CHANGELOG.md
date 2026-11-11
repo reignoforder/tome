@@ -32,13 +32,15 @@ API version 21.
   to its copies in a LAN or Battle.net game's lobby, before the game starts
   (`lobby_send`, `on_lobby_message`: up to 1 KiB, hidden lobby chat lines
   like the handshake's, only to players whose Tome answered, so nobody sees
-  them), list who's there (`lobby_players`: host, Tome or not), and have a
+  them), list who's there (`lobby_players`: host, Tome or not), show a line in
+  the lobby's chat (`lobby_show`), and have a
   say in the start: `on_lobby_start` runs when the host presses Start, once
   the handshake passes, and a mod's refusal can't be overridden by pressing
   Start again; `lobby_start` presses it for the mod (for a mod that first
   makes sure of something with every player: the Geomancer mod sends each
   player the seed of a map to generate and starts once they all have it).
-  Not for WebAssembly mods yet.
+  WebAssembly mods get `lobby_show` and `lobby_start`; the rest is for
+  DLL mods for now.
 
 - **Built-in patches can be turned off**: each has a switch in Tome >
   Settings ("Patch: <name>", on by default, from the next start), and

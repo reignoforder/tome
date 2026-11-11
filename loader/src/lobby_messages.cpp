@@ -13,6 +13,7 @@
 
 #include <windows.h>
 
+#include <cstdio>
 #include <cstring>
 #include <deque>
 #include <map>
@@ -53,7 +54,8 @@ uint64_t g_next_token = 1;
 lobbymsg::Reassembler g_reassembler;
 std::map<std::string, uint32_t> g_next_id;               // per mod id
 std::map<std::string, std::deque<ULONGLONG>> g_sent_at;  // per mod id: send times in the last second
-std::set<std::string> g_warned;                          // "<mod>\n<subject>" warned once
+std::set<std::string> g_warned;                          // "<mod>\n<subject>" warned once (g_warned_lock)
+SRWLOCK g_warned_lock = SRWLOCK_INIT;  // on_lobby_start may warn from any thread
 handshake::LogBudget g_bad_log(10);  // other players' malformed lines
 bool g_in_start = false;             // inside the on_lobby_start callbacks
 
@@ -62,6 +64,7 @@ const char* id_of(const tome_mod* mod) {
 }
 
 bool warn_once(const tome_mod* mod, const char* subject) {
+    ExclusiveLock hold(g_warned_lock);
     return g_warned.insert(std::string(id_of(mod)) + "\n" + subject).second;
 }
 
@@ -136,6 +139,7 @@ tome_result TOME_CALL api_lobby_send(tome_mod* mod, int32_t to, const void* data
 
 tome_result TOME_CALL api_on_lobby_message(tome_mod* mod, tome_lobby_message_fn fn, void* user) {
     if (!mod || !fn) return TOME_ERR_INVALID_ARGUMENT;
+    if (!required(mod, "on_lobby_message")) return TOME_ERR_UNAVAILABLE;
     uint64_t token;
     {
         ExclusiveLock hold(g_lock);
@@ -201,6 +205,23 @@ tome_result TOME_CALL api_lobby_start(tome_mod* mod) {
     return handshake::lobby_press_start() ? TOME_OK : TOME_ERR_UNAVAILABLE;
 }
 
+tome_result TOME_CALL api_lobby_show(tome_mod* mod, const char* text) {
+    if (!frames::on_main_thread()) {
+        TOME_ERROR("[%s] lobby_show called off the game's main thread; ignored", id_of(mod));
+        return TOME_ERR_WRONG_THREAD;
+    }
+    if (!mod || !text) return TOME_ERR_INVALID_ARGUMENT;
+    // One line, at most what the chat area keeps of one (a mod can't push
+    // the lobby's own lines out with one huge note).
+    size_t n = strnlen(text, 512);
+    while (n > 0 && text[n] != '\0' && (static_cast<unsigned char>(text[n]) & 0xC0) == 0x80) --n;  // whole characters
+    std::string line(text, n);
+    for (char& c : line) {
+        if (c == '\r' || c == '\n') c = ' ';
+    }
+    return handshake::lobby_show(line) ? TOME_OK : TOME_ERR_UNAVAILABLE;
+}
+
 void deliver(int sender, bool from_host, const lobbymsg::Message& message) {
     std::vector<Listener> due;
     {
@@ -234,6 +255,7 @@ void fill_api(tome_api& api) {
     api.lobby_players = api_lobby_players;
     api.on_lobby_start = api_on_lobby_start;
     api.lobby_start = api_lobby_start;
+    api.lobby_show = api_lobby_show;
 }
 
 bool receive(int from, bool from_host, const std::string& text) {
@@ -269,9 +291,14 @@ bool start_allowed(std::vector<std::string>& reasons) {
     for (const StartHook& h : hooks) {
         if (!h.mod->sync_required) continue;
         char reason[kMaxReason] = {};
-        int32_t verdict = TOME_START_ALLOW;
-        guard::run(h.mod, "lobby start callback", h.mod->id.c_str(),
-                   [&] { verdict = h.fn(h.mod, reason, kMaxReason, h.user); });
+        // A callback that fails refuses: the mod may be the one making
+        // sure every player is ready, and a game started without it desyncs.
+        int32_t verdict = TOME_START_REFUSE;
+        if (!guard::run(h.mod, "lobby start callback", h.mod->id.c_str(),
+                        [&] { verdict = h.fn(h.mod, reason, kMaxReason, h.user); })) {
+            verdict = TOME_START_REFUSE;
+            std::snprintf(reason, kMaxReason, "%s failed while the game was starting", h.mod->id.c_str());
+        }
         if (verdict == TOME_START_ALLOW) continue;
         allowed = false;
         reason[kMaxReason - 1] = '\0';
@@ -280,6 +307,10 @@ bool start_allowed(std::vector<std::string>& reasons) {
     }
     g_in_start = false;
     return allowed;
+}
+
+void on_player_left(int id) {
+    g_reassembler.forget(id);
 }
 
 void on_lobby_closed() {

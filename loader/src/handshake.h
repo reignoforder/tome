@@ -61,6 +61,10 @@ bool lobby_members(std::vector<LobbyMember>& out, bool& hosting);
 // a readable lobby. Main thread.
 bool lobby_send_line(int to, const std::string& text);
 
+// Shows a line in this computer's lobby chat as it is. False outside a
+// readable lobby. Main thread.
+bool lobby_show(const std::string& text);
+
 // The host's Start, pressed in code: CGameChatroom::StartGame through its
 // hooks, so every check runs. False unless this computer hosts a readable
 // lobby. Main thread.

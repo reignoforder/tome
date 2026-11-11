@@ -123,10 +123,14 @@ impl Tome {
             reason_size: u32,
             user: *mut c_void,
         ) -> i32 {
-            let mut verdict = sys::TOME_START_ALLOW as i32;
+            // A panic refuses (as a crash does in Tome).
+            let mut verdict = sys::TOME_START_REFUSE as i32;
             guard(|| {
-                if let StartVerdict::Refuse(text) = unsafe { (*(user as *const F))() } {
-                    verdict = sys::TOME_START_REFUSE as i32;
+                let answer = unsafe { (*(user as *const F))() };
+                if answer == StartVerdict::Allow {
+                    verdict = sys::TOME_START_ALLOW as i32;
+                }
+                if let StartVerdict::Refuse(text) = answer {
                     if !reason.is_null() && reason_size > 0 {
                         let mut n = text.len().min(reason_size as usize - 1);
                         while !text.is_char_boundary(n) {
@@ -144,6 +148,14 @@ impl Tome {
         self.require(21)?;
         let f_on = self.raw().0.on_lobby_start.ok_or(Error::UNAVAILABLE)?;
         rt::register(f, None, |user| unsafe { f_on(self.ptr(), Some(call::<F>), user) })
+    }
+
+    /// Shows `text` in this computer's lobby chat (this player only).
+    pub fn lobby_show(self, text: &str) -> Result<()> {
+        self.require(21)?;
+        let f = self.raw().0.lobby_show.ok_or(Error::UNAVAILABLE)?;
+        let text = crate::util::cstr(text)?;
+        check(unsafe { f(self.ptr(), text.as_ptr()) })
     }
 
     /// Presses the host's Start for this mod: the checks run again

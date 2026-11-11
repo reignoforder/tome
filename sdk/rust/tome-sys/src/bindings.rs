@@ -1278,10 +1278,13 @@ pub struct tome_api {
     >,
     pub lobby_start:
         ::core::option::Option<unsafe extern "C" fn(mod_: *mut tome_mod) -> tome_result>,
+    pub lobby_show: ::core::option::Option<
+        unsafe extern "C" fn(mod_: *mut tome_mod, text: *const ::core::ffi::c_char) -> tome_result,
+    >,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of tome_api"][::core::mem::size_of::<tome_api>() - 328usize];
+    ["Size of tome_api"][::core::mem::size_of::<tome_api>() - 332usize];
     ["Alignment of tome_api"][::core::mem::align_of::<tome_api>() - 4usize];
     ["Offset of field: tome_api::size"][::core::mem::offset_of!(tome_api, size) - 0usize];
     ["Offset of field: tome_api::api_version"]
@@ -1431,6 +1434,8 @@ const _: () = {
         [::core::mem::offset_of!(tome_api, on_lobby_start) - 320usize];
     ["Offset of field: tome_api::lobby_start"]
         [::core::mem::offset_of!(tome_api, lobby_start) - 324usize];
+    ["Offset of field: tome_api::lobby_show"]
+        [::core::mem::offset_of!(tome_api, lobby_show) - 328usize];
 };
 pub type tome_mod_load_fn = ::core::option::Option<
     unsafe extern "C" fn(api: *const tome_api, mod_: *mut tome_mod) -> ::core::ffi::c_int,

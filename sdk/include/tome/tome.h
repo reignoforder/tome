@@ -41,8 +41,8 @@ extern "C" {
  * 19: timers (timer_start, timer_stop) and desync checks (on_checksum).
  * 20: versions and the installed mods (version_compare, version_match, list_mods, mods_dir,
  * check_metadata, TOME_EVENT_MODS_CHANGED).
- * 21: messages in a game's lobby (lobby_send, on_lobby_message, lobby_players) and a say in
- * when it starts (on_lobby_start, lobby_start). */
+ * 21: messages in a game's lobby (lobby_send, on_lobby_message, lobby_players, lobby_show) and
+ * a say in when it starts (on_lobby_start, lobby_start). */
 #define TOME_API_VERSION 21
 
 #define TOME_CALL __cdecl
@@ -1581,18 +1581,25 @@ typedef struct tome_api {
      * (every player has the same required mods), only on the host and only
      * for a "sync": "required" mod: any mod's TOME_START_REFUSE keeps the
      * game from starting. Pressing Start again doesn't get past a mod's
-     * refusal (it does past the handshake's: StartOverride). Any thread;
-     * `fn` runs on the main thread. */
+     * refusal (it does past the handshake's: StartOverride), and a callback
+     * that fails (crashes) refuses too. Any thread; `fn` runs on the main
+     * thread. */
     tome_result (TOME_CALL *on_lobby_start)(tome_mod* mod, tome_lobby_start_fn fn, void* user);
 
     /* The host's Start, pressed by a mod: the same checks run (the
      * handshake's, then every mod's on_lobby_start callback, this one's
      * too, which should now allow), then the game starts as if the host
-     * had pressed it. TOME_ERR_UNAVAILABLE off the host's lobby, for a mod
+     * had pressed it. A mod's press never overrides the handshake's
+     * refusal the way the host's second press does. TOME_ERR_UNAVAILABLE off the host's lobby, for a mod
      * that isn't "sync": "required", or from inside an on_lobby_start
      * callback; TOME_OK if the checks ran (whether or not they let the
      * game start). Main thread. */
     tome_result (TOME_CALL *lobby_start)(tome_mod* mod);
+
+    /* Shows a line (UTF-8, the game's |c color codes allowed) in this
+     * computer's lobby chat, for this player only. TOME_ERR_UNAVAILABLE
+     * outside a game's lobby. Main thread. */
+    tome_result (TOME_CALL *lobby_show)(tome_mod* mod, const char* text);
 } tome_api;
 
 /*
@@ -1786,7 +1793,7 @@ static inline int tome_has_mod_list(const tome_api* api) {
 
 /* True if the running Tome has the lobby functions (version 21). */
 static inline int tome_has_lobby(const tome_api* api) {
-    return api->api_version >= 21 && api->size >= offsetof(tome_api, lobby_start) + sizeof(api->lobby_start);
+    return api->api_version >= 21 && api->size >= offsetof(tome_api, lobby_show) + sizeof(api->lobby_show);
 }
 
 static inline int32_t tome_list_mods(const tome_api* api, tome_mod* mod, tome_mod_info* out, int32_t max) {

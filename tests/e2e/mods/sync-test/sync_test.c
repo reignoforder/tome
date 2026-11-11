@@ -116,7 +116,8 @@ static int32_t TOME_CALL on_lobby_start(tome_mod* mod, char* reason, uint32_t re
     g_held = 1;
     g_press = 1;
     strncpy(reason, "sync-test: holding the start once", reason_size - 1);
-    tome_logf(api, mod, TOME_LOG_INFO, "lobby: holding the start once");
+    tome_logf(api, mod, TOME_LOG_INFO, "lobby: holding the start once (note shown: %d)",
+              (int)api->lobby_show(mod, "sync-test: a note in the lobby"));
     return TOME_START_REFUSE;
 }
 

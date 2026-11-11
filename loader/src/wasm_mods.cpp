@@ -1265,6 +1265,17 @@ int32_t w_check_metadata(wasm_exec_env_t env, uint32_t text, uint32_t size, uint
     return api()->check_metadata(reinterpret_cast<const char*>(bytes.data()), bytes.size(), reason, capacity);
 }
 
+int32_t w_lobby_show(wasm_exec_env_t env, uint32_t ptr, uint32_t len) {
+    Impl* impl = impl_of(env);
+    std::string text;
+    if (!arg_string(impl, "lobby_show", ptr, len, text)) return TOME_ERR_INVALID_ARGUMENT;
+    return api()->lobby_show(impl->mod, text.c_str());
+}
+
+int32_t w_lobby_start(wasm_exec_env_t env) {
+    return api()->lobby_start(impl_of(env)->mod);
+}
+
 int32_t w_on_checksum(wasm_exec_env_t env, uint32_t callback) {
     Impl* impl = impl_of(env);
     if (callback == 0) return api()->on_checksum(impl->mod, nullptr, nullptr);

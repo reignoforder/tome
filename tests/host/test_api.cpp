@@ -789,6 +789,8 @@ TEST(host_objects_outside_a_game) {
     CHECK_EQ(api->on_lobby_start(mod, nullptr, nullptr), TOME_ERR_INVALID_ARGUMENT);
     CHECK_EQ(api->lobby_start(nullptr), TOME_ERR_INVALID_ARGUMENT);
     CHECK_EQ(api->lobby_start(mod), TOME_ERR_UNAVAILABLE);
+    CHECK_EQ(api->lobby_show(mod, nullptr), TOME_ERR_INVALID_ARGUMENT);
+    CHECK_EQ(api->lobby_show(mod, "hello"), TOME_ERR_UNAVAILABLE);
 }
 
 // Versions and the installed mods (API version 20): the mod list as the

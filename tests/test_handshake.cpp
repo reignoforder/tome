@@ -168,7 +168,12 @@ TEST(handshake_lobby_tome_peers) {
     CHECK(!client.runs_tome(1));
 
     deliver(client, 1, lines_to(host.take_outgoing(), 2));
-    CHECK_EQ(client.host_id(), 1);  // the only sender
+    // The only sender, but the game didn't say it hosts: not trusted as the
+    // host (any player could have sent a set first).
+    CHECK_EQ(client.host_id(), -1);
+    CHECK(!client.runs_tome(1));
+    client.set_host(1);
+    CHECK_EQ(client.host_id(), 1);
     CHECK(client.runs_tome(1));
     CHECK(!client.runs_tome(3));
     deliver(host, 2, lines_to(client.take_outgoing(), 1));

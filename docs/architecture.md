@@ -1594,7 +1594,7 @@ reaches the same mod on every player's computer, the sender's included.
 ## Lobby messages
 
 API version 21 (`lobby_send`, `on_lobby_message`, `lobby_players`,
-`on_lobby_start`, `lobby_start`; `loader/src/lobby_messages.cpp`, the wire
+`lobby_show`, `on_lobby_start`, `lobby_start`; `loader/src/lobby_messages.cpp`, the wire
 format in `core/lobbymsg.*`, unit-tested and fuzzed). For required mods that
 must agree on something with every player before the game starts (the
 Geomancer mod: the seed of the map every player generates).
@@ -1628,9 +1628,18 @@ Geomancer mod: the seed of the map every player generates).
 - **Limits:** 16 messages a second per mod (each to each recipient), the
   log budget per sender for malformed lines (`LogBudget(10)`), one message
   in progress per sender, dropped when the lobby closes.
+- **Trust:** `from_host` and who a client may send to come from the host
+  the game names (NetGetPlayerNumber); without that mapping a client knows
+  no host for mods (`Lobby::host_id` -1), so it sends nothing. A mod's
+  `lobby_start` never overrides or arms the handshake's override (the
+  host's second press), and an `on_lobby_start` callback that fails refuses.
+  `lobby_players` reads the list the half-second poll keeps; a player who
+  leaves drops their message in progress.
 - **Tests:** `tests/test_lobbymsg.cpp`, `fuzz/fuzz_lobbymsg.cpp`,
   `handshake_lobby_tome_peers` (who runs Tome), host tests for the
-  arguments outside a lobby. The two-instance LAN game isn't extended yet.
+  arguments outside a lobby, and the two-instance LAN game
+  (`tools/e2e-multiplayer.sh`: sync-test's hello and welcome, its note,
+  its hold on the start and its own press).
 ## Timers
 
 API version 19 (`timer_start`, `timer_stop`; `loader/src/timers.cpp`, the
