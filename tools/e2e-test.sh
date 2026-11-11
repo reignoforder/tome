@@ -1136,7 +1136,9 @@ touch "$HOME_DIR/tome/safe"
 # keeps the mouse path to Tome's buttons tested. until: clicks the toggle
 # again while the panel is still lowering (it drops clicks then).
 SAVED_MAP_ARG=("${MAP_ARG[@]}")
-MAP_ARG=(-tomesafe)
+# Built-in patches turned off, one by its setting, one for this start only.
+printf '{"harden_heap": true, "patch.background-mute": false}\n' >"$HOME_DIR/tome/settings.json"
+MAP_ARG=(-tomesafe -TomeNoPatch=ambient-sound,no-such-patch)
 # Three starts before this one stopped short of the main menu: a crash loop
 # turns safe mode on too.
 STARTS=3 TOME_DEBUG_CLICKS="wait:Screen ready: main menu;0.874,0.84;until:Mod menu opened;settle;\
@@ -1146,6 +1148,9 @@ check "Safe mode \(-tomesafe, tome/safe, the last 3 starts didn't reach the main
     "-tomesafe, tome/safe and a crash loop turn safe mode on" 30
 check "Startup check: the last 3 start\(s\) didn't reach the main menu" "the crash loop is logged"
 check "Assets at startup: no mod assets" "no mod assets mounted"
+check "Patches: .*, 2 turned off: .*background-mute off \(turned off in Tome > Settings\).*ambient-sound off \(turned off by -tomenopatch\)" \
+    "patches turned off in the settings and by -tomenopatch aren't applied"
+check "[]] -tomenopatch: no built-in patch \"no-such-patch\"" "an unknown -tomenopatch name is logged"
 check "hello +1\.0\.0 +disabled: safe mode" "mods are listed as disabled by safe mode" 15
 check_absent "\[hello\] loaded" "no mod DLL loaded"
 check "Mod menu: enabling hello" "the mod menu enables a mod despite safe mode" 15

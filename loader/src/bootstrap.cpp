@@ -308,7 +308,13 @@ DWORD bootstrap() {
         } else if (g_events_ok) {
             TOME_ERROR("Multiplayer handshake unavailable: %s", g_handshake_report.c_str());
         }
-        if (g_patches_ok) TOME_INFO("Patches: %s", g_patches_report.c_str());
+        // A warning when the player turned some off: fixes, often for
+        // vulnerabilities, aren't in force.
+        if (g_patches_ok && patches::count(patches::State::Off)) {
+            TOME_WARN("Patches: %s", g_patches_report.c_str());
+        } else if (g_patches_ok) {
+            TOME_INFO("Patches: %s", g_patches_report.c_str());
+        }
         if (g_objects_ok) {
             TOME_INFO("Game objects: %s", g_objects_report.c_str());
         } else if (!g_objects_report.empty()) {
@@ -346,7 +352,7 @@ DWORD bootstrap() {
     mods_ready::set();
     overlay::log_probe();
 
-    tome_settings::init(g_paths);
+    tome_settings::init();
     harden_heap();
     HWND window = find_game_window(60000);
     if (window && main_thread::install(window)) {
@@ -408,6 +414,9 @@ void start_bootstrap(HMODULE self) {
         g_safe_mode = safe_mode_reason(g_paths);
         mod_manager().set_safe_mode(g_safe_mode);
     }
+    // Which built-in patches the player turned off: -tomenopatch counts even
+    // without Tome's folders (no settings file then).
+    tome_settings::load(g_paths_ok ? &g_paths : nullptr);
     HMODULE game = GetModuleHandleW(L"game.dll");
     g_game_loaded_at_attach = game != nullptr;
 
@@ -421,9 +430,11 @@ void start_bootstrap(HMODULE self) {
         if (g_early_verified) {
             g_early_hooks_ok = natives::install_hooks(reinterpret_cast<uintptr_t>(game), *g_early_build,
                                                       g_early_hooks_report);
-            // Built-in fixes (always on, independent of events and of Tome's
-            // folders): applied to whichever ones fit this build. See patches.h.
-            g_patches_ok = patches::install(reinterpret_cast<uintptr_t>(game), *g_early_build, g_patches_report);
+            // Built-in fixes (independent of events and of Tome's folders):
+            // applied to whichever ones fit this build, but those the player
+            // turned off. See patches.h.
+            g_patches_ok = patches::install(reinterpret_cast<uintptr_t>(game), *g_early_build, g_patches_report,
+                                            tome_settings::patch_off);
             // After the patches: they set up the hook engine (and may wrap natives, which jass_call then calls).
             g_objects_ok = objects::install(reinterpret_cast<uintptr_t>(game), *g_early_build, g_objects_report);
             g_sound_wait_ok = mods_ready::install_sound_wait(g_sound_wait_report);

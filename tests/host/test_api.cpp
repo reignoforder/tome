@@ -17,6 +17,7 @@
 #include "patches.h"
 #include "mod_handle.h"  // tome_mod
 #include "restart.h"
+#include "core/tome_settings.h"
 #include "tome_settings.h"
 
 #include <windows.h>
@@ -265,7 +266,8 @@ TEST(host_tome_settings_read_and_written) {
     Home home;
     Session session;
     CHECK(session.start(home));
-    tome::tome_settings::init(home.paths());
+    tome::tome_settings::load(&home.paths());
+    tome::tome_settings::init();
     CHECK_LOG("Tome settings: widescreen on");
     CHECK(tome::tome_settings::widescreen());
 
@@ -285,7 +287,8 @@ TEST(host_tome_settings_read_and_written) {
 
     // Read back at the next start, unknown keys kept.
     CHECK(home.write(L"tome\\settings.json", "{\"widescreen\": false, \"later\": 1}"));
-    tome::tome_settings::init(home.paths());
+    tome::tome_settings::load(&home.paths());
+    tome::tome_settings::init();
     CHECK_LOG("Tome settings: widescreen off");
     CHECK(tome::tome_settings::set("widescreen", tome::json::Value::boolean(true), error));
     CHECK(home.read(L"tome\\settings.json", text));
@@ -298,17 +301,20 @@ TEST(host_tome_settings_harden_heap_at_start) {
     Home home;
     Session session;
     CHECK(session.start(home));
-    tome::tome_settings::init(home.paths());
+    tome::tome_settings::load(&home.paths());
+    tome::tome_settings::init();
     CHECK_LOG("stop on memory corruption off");
     CHECK(!tome::tome_settings::harden_heap_at_start());
     std::string error;
     CHECK(tome::tome_settings::set("harden_heap", tome::json::Value::boolean(true), error));
     CHECK(!tome::tome_settings::harden_heap_at_start());  // from the next start
-    tome::tome_settings::init(home.paths());
+    tome::tome_settings::load(&home.paths());
+    tome::tome_settings::init();
     CHECK_LOG("stop on memory corruption on");
     CHECK(tome::tome_settings::harden_heap_at_start());
     CHECK(tome::tome_settings::set("harden_heap", tome::json::Value::boolean(false), error));
-    tome::tome_settings::init(home.paths());
+    tome::tome_settings::load(&home.paths());
+    tome::tome_settings::init();
     CHECK(!tome::tome_settings::harden_heap_at_start());
 }
 
@@ -317,13 +323,16 @@ TEST(host_tome_settings_invalid_file_uses_defaults) {
     Session session;
     CHECK(session.start(home));
     CHECK(home.write(L"tome\\settings.json", "[1, 2]"));
-    tome::tome_settings::init(home.paths());
+    tome::tome_settings::load(&home.paths());
+    tome::tome_settings::init();
     CHECK_LOG("tome/settings.json is invalid (not an object); using the defaults");
     CHECK(home.write(L"tome\\settings.json", "{oops"));
-    tome::tome_settings::init(home.paths());
+    tome::tome_settings::load(&home.paths());
+    tome::tome_settings::init();
     CHECK_LOG("tome/settings.json is invalid (");
     CHECK(home.write(L"tome\\settings.json", "{\"widescreen\": \"yes please\"}"));
-    tome::tome_settings::init(home.paths());
+    tome::tome_settings::load(&home.paths());
+    tome::tome_settings::init();
     CHECK_LOG("tome/settings.json: ");
     CHECK(tome::tome_settings::widescreen());
 }
@@ -455,6 +464,66 @@ TEST(host_patches_skipped_without_their_symbols) {
         std::string::npos) {
         test::fail(__FILE__, __LINE__, report);
     }
+}
+
+// A patch the player turned off isn't applied (nor its functions reserved),
+// on any build; the others still are.
+TEST(host_patches_turned_off) {
+    Home home;
+    Session session;
+    CHECK(session.start(home));
+    RestoreHookBuild restore{session.game.base(), session.game.build().known->data};
+    std::string report;
+    tome::patches::install(session.game.base(), *session.game.build().known, report, [](std::string_view name) {
+        return name == "memhack-guard" ? std::string("turned off by -tomenopatch") : std::string();
+    });
+    if (report.find("memhack-guard off (turned off by -tomenopatch)") == std::string::npos ||
+        report.find(", 1 turned off") == std::string::npos ||
+        report.find("lan-map-guard applied") == std::string::npos) {
+        test::fail(__FILE__, __LINE__, report);
+    }
+    CHECK_EQ(tome::patches::count(tome::patches::State::Off), 1);
+    // What install did is kept: the handshake and the mod menu read it.
+    tome::patches::Outcome off = tome::patches::outcome("memhack-guard");
+    CHECK(off.state == tome::patches::State::Off);
+    CHECK_EQ(off.reason, std::string("turned off by -tomenopatch"));
+    CHECK(tome::patches::outcome("lan-map-guard").state == tome::patches::State::Applied);
+    CHECK(tome::patches::outcome("no-such-patch").state == tome::patches::State::NotInstalled);
+    tome::settings::Schema menu = tome::tome_settings::menu_schema();
+    const tome::settings::Setting* row = menu.find("patch.memhack-guard");
+    CHECK(row && row->description.rfind("Not in force now: turned off by -tomenopatch. Closes", 0) == 0);
+    row = menu.find("patch.lan-map-guard");
+    CHECK(row && row->description.rfind("In force. Refuses", 0) == 0);
+}
+
+// Each patch has a setting, on until the player turns it off; patch_off
+// says so from the next load (DllMain's, before the patches install).
+TEST(host_tome_settings_patch_switches) {
+    Home home;
+    Session session;
+    CHECK(session.start(home));
+    CHECK(home.write(L"tome\\settings.json", "{\"patch.blp-guard\": false}"));
+    tome::tome_settings::load(&home.paths());
+    tome::tome_settings::init();
+    CHECK_EQ(tome::tome_settings::patch_off("blp-guard"), std::string("turned off in Tome > Settings"));
+    CHECK(tome::tome_settings::patch_off("memhack-guard").empty());
+    const tome::settings::Schema& schema = tome::tome_settings::schema_with_patches();
+    // One per patch but widescreen, whose own setting governs it.
+    CHECK_EQ(schema.settings.size(), tome::tome_settings::schema().settings.size() + tome::patches::all().size() - 1);
+    for (const tome::patches::Patch* p : tome::patches::all()) {
+        CHECK(!schema.find(tome::tome_settings::patch_key(p->name)) == (std::string_view(p->name) == "widescreen"));
+    }
+    const tome::json::Value* on = tome::tome_settings::values().find("patch.memhack-guard");
+    CHECK(on && on->is_bool() && on->as_bool());
+
+    std::string error;
+    CHECK(tome::tome_settings::set("patch.blp-guard", tome::json::Value::boolean(true), error));
+    CHECK_LOG("Tome setting patch.blp-guard: On (from the next start)");
+    CHECK(tome::tome_settings::set("patch.memhack-guard", tome::json::Value::boolean(false), error));
+    tome::tome_settings::load(&home.paths());
+    CHECK(tome::tome_settings::patch_off("blp-guard").empty());
+    CHECK(!tome::tome_settings::patch_off("memhack-guard").empty());
+    CHECK(tome::tome_settings::set("patch.memhack-guard", tome::json::Value::boolean(true), error));
 }
 
 // A patch's variant for a build: the one naming it, else the default; none

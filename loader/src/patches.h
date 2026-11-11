@@ -2,9 +2,12 @@
 #pragma once
 
 // Built-in patches: Tome's own fixes for game bugs and vulnerabilities,
-// compiled into tome.mix and applied once at startup. Unlike mods they can't
-// be listed, toggled or removed, so a fix for something like the JASS
-// "memhack" typecast is always in force.
+// compiled into tome.mix and applied once at startup. Unlike mods they
+// aren't discovered or removed, and mods can't turn them off, so a fix for
+// something like the JASS "memhack" typecast is in force unless the player
+// turns it off: each has a setting (Tome > Settings, "patch.<name>"), and
+// -tomenopatch=<name>[,<name>...] (or =all) skips them for one start
+// (core/tome_settings.h).
 //
 // Each patch names the mapped symbols it needs. The patch manager skips a
 // patch unless the running build maps every symbol it needs -- the same
@@ -20,6 +23,7 @@
 #include <cstdint>
 #include <span>
 #include <string>
+#include <string_view>
 
 namespace tome::patches {
 
@@ -69,16 +73,50 @@ struct Patch {
     // it couldn't be applied -- the game then runs with this one patch
     // absent, the others still in force.
     bool (*install)(uintptr_t base, const BuildMappings& build, const Variant& variant, std::string& report);
+    // Whether the patch changes what map scripts do (refuses or stops JASS
+    // code the unpatched game runs), so every player of a game needs it in
+    // the same state or the game desyncs: the multiplayer handshake counts
+    // each one not in force here like a required mod (handshake.cpp).
+    bool sync = false;
 };
 
 // The variant of `patch` for the build named `build`, or null if none is
 // for it (no variant names it and there's no default).
 const Variant* variant_for(const Patch& patch, const std::string& build);
 
-// Applies every registered patch that fits the running build. Call after the
-// build is identified and verified. Always returns true: a patch that doesn't
-// fit or fails is logged and skipped. `report` summarizes what was applied.
-bool install(uintptr_t base, const BuildMappings& build, std::string& report);
+// Every registered patch, in the order they're applied.
+std::span<const Patch* const> all();
+
+// Why the player turned patch `name` off, or "" to apply it
+// (tome_settings::patch_off_reason).
+using OffReason = std::string (*)(std::string_view name);
+
+// Applies every registered patch that fits the running build, but those
+// `off` turns off (null: none). Call after the build is identified and
+// verified. Always returns true: a patch that doesn't fit, is off or fails
+// is logged and skipped. `report` summarizes what was applied.
+bool install(uintptr_t base, const BuildMappings& build, std::string& report, OffReason off = nullptr);
+
+// What install did with a patch this start.
+enum class State {
+    NotInstalled,  // install didn't run (game.dll not loaded at attach, build not verified)
+    Applied,
+    Skipped,       // not for this build, not mapped or not needed here
+    Off,           // the player turned it off
+    Failed,
+};
+
+struct Outcome {
+    State state = State::NotInstalled;
+    std::string reason;  // why it's skipped, off or failed; what install said if applied
+};
+
+// Patch `name`'s outcome (NotInstalled for a name no patch has). Written
+// only by install, in DllMain, before anything reads it.
+Outcome outcome(std::string_view name);
+
+// How many patches install left in `state` this start.
+int count(State state);
 
 // `needed` for a fix of a Wine bug: true under Wine, else false with
 // "not needed outside Wine".

@@ -71,6 +71,16 @@ void sort(ModSet& set) {
               set.end());
 }
 
+constexpr std::string_view kPatchId = "patch:";
+
+bool is_patch(const SyncMod& mod) {
+    return starts_with(mod.id, kPatchId);
+}
+
+SyncMod patch_not_in_force(std::string_view name) {
+    return {std::string(kPatchId) + std::string(name), "off", "0"};
+}
+
 std::string describe(const SyncMod& mod) {
     return mod.id + " " + mod.version + " #" + mod.hash;
 }
@@ -239,6 +249,8 @@ void Lobby::update(bool host, const ModSet& local, const std::vector<LobbyPlayer
 
     if (changed) {
         for (const auto& [id, set] : claims_) send(id, LineKind::Reply, local_);
+        // A host we told unasked (below) hears of the change too.
+        if (volunteered_ && !claims_.count(host_id_)) send(host_id_, LineKind::Reply, local_);
         // Our player saw how the old set compared: say how the new one does.
         if (host_id_ >= 0) {
             if (auto it = claims_.find(host_id_); it != claims_.end()) note_claim(it->first, it->second, true);
@@ -251,9 +263,21 @@ void Lobby::update(bool host, const ModSet& local, const std::vector<LobbyPlayer
     const bool host_sent = host_id_ >= 0 ? claims_.count(host_id_) != 0 : !claims_.empty();
     if (!host_sent && !local_.empty() && !warned_no_host_ && now - joined_at_ >= kHostWait) {
         warned_no_host_ = true;
-        note("The host" + (host_id_ >= 0 ? " (" + name_of(host_id_) + ")" : std::string()) +
-             " didn't send its required mods (it may not run Tome). Yours (" + describe(local_) +
-             ") run only for you, and the game may desync.");
+        if (host_id_ >= 0) {
+            // A host without required mods stays quiet, yet differs from
+            // ours (a built-in patch off here, or a mod): send it our set
+            // unasked, so a host with Tome sees the difference and won't
+            // start without a second press. A host without Tome shows the
+            // line, which says what we run.
+            volunteered_ = true;
+            send(host_id_, LineKind::Reply, local_);
+            note("The host (" + name_of(host_id_) + ") didn't send its required mods (it has none, or doesn't run "
+                 "Tome). Yours (" + describe(local_) + ") went to it to check; without Tome it can't, and the game "
+                 "may desync.");
+        } else {
+            note("The host didn't send its required mods (it may not run Tome). Yours (" + describe(local_) +
+                 ") aren't checked against the host's, and the game may desync.");
+        }
     }
 }
 
@@ -269,11 +293,17 @@ void Lobby::receive(int from, std::string_view text) {
         peer.answered = true;
         peer.set = set;
         Difference d = compare(local_, set);
+        std::string text;
         if (d.empty()) {
-            if (!local_.empty()) note(name_of(from) + " has the same required mods.");
+            if (!local_.empty()) text = name_of(from) + " has the same required mods.";
         } else {
-            note(name_of(from) + ": " + explain(d, "host") + ". The game can't start until they match.");
+            text = name_of(from) + ": " + explain(d, "host") +
+                   ". The game can't start until they match (or the host presses Start twice).";
         }
+        // Once per outcome: a client that sent its set unasked sends it
+        // again in answer to ours.
+        if (!text.empty() && text != peer.noted) note(text);
+        peer.noted = std::move(text);
         return;
     }
 
@@ -310,21 +340,40 @@ void Lobby::note_claim(int from, const ModSet& set, bool first) {
                          : "Your required mods match the host's (" + describe(set) + ").");
     } else {
         note("Your required mods differ from the host's: " + explain(d, "host") +
-             ". The host can't start the game until they match.");
+             ". The host can't start the game until they match, unless it starts anyway.");
     }
 }
 
-bool Lobby::can_start(std::vector<std::string>& problems) const {
+bool Lobby::can_start(std::vector<std::string>& problems, bool* only_patches) const {
     problems.clear();
+    bool patches = true;
+    auto all_patches = [](const std::vector<SyncMod>& mods) { return std::all_of(mods.begin(), mods.end(), is_patch); };
     for (const auto& [id, peer] : peers_) {
         if (peer.answered) {
             Difference d = compare(local_, peer.set);
-            if (!d.empty()) problems.push_back(name_of(id) + ": " + explain(d, "host"));
+            if (d.empty()) continue;
+            problems.push_back(name_of(id) + ": " + explain(d, "host"));
+            patches = patches && all_patches(d.missing) && all_patches(d.extra) && d.changed.empty();
         } else if (!local_.empty()) {
             problems.push_back(name_of(id) + " hasn't sent their mods (no Tome, or not yet)");
+            // Without their set, a player without Tome (no patches) differs
+            // only in patches when the host's whole set is patches.
+            patches = patches && all_patches(local_);
         }
     }
+    if (only_patches) *only_patches = !problems.empty() && patches;
     return problems.empty();
+}
+
+bool StartOverride::press(const std::vector<std::string>& problems, double now) {
+    if (armed_ && problems == refused_ && now - at_ <= kWindow) {
+        armed_ = false;
+        return true;
+    }
+    armed_ = true;
+    at_ = now;
+    refused_ = problems;
+    return false;
 }
 
 std::vector<Outgoing> Lobby::take_outgoing() {

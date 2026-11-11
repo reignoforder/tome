@@ -26,7 +26,7 @@
  * in game). So JassParser::parse (BEFORE) clears it first: a stopped parse
  * then destroys nothing, and the map's script just doesn't compile.
  *
- * Built in as a patch, not a mod, so it's always in force (patches.h).
+ * Built in as a patch, not a mod, so mods can't turn it off (patches.h).
  */
 #include "patches.h"
 
@@ -171,6 +171,7 @@ extern const Patch kJassTokenGuard = {
     kReserve,   // (memhack-guard reserves it too)
     nullptr,    // needed everywhere
     install_jass_token_guard,
+    true,  // sync: changes what map scripts do
 };
 
 } // namespace tome::patches

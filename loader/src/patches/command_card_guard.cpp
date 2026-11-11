@@ -26,7 +26,7 @@
  *     CGameUI::SetCommandButtonPos. 0x373A90 to 0x373AF0, single-coordinate
  *     setters with the same checks, have no callers and are left alone.
  *
- * Built in as a patch, not a mod, so it's always in force (patches.h). The
+ * Built in as a patch, not a mod, so mods can't turn it off (patches.h). The
  * card only changes what this player sees; nothing goes over the network.
  */
 #include "patches.h"

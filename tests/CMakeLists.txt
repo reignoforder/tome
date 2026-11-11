@@ -46,6 +46,7 @@ add_executable(tome_tests
     test_text.cpp
     test_timers.cpp
     test_tome_hpp.cpp
+    test_tome_settings.cpp
     test_objects.cpp
     test_units.cpp
     test_update_check.cpp

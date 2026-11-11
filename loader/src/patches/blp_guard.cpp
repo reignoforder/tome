@@ -22,7 +22,7 @@
  * validator (core/blp.*) over them; if the file is unsafe to decode, overwrite
  * the result with 0 (failure), so the caller never runs the mip/JPEG decode.
  *
- * Built in as a patch, not a mod, so it's always in force (patches.h). The
+ * Built in as a patch, not a mod, so mods can't turn it off (patches.h). The
  * hook is reserved: unlike the path sanitizer (whose threat is maps, which a
  * mod can't help), a mod that removed or shadowed this hook would reopen the
  * hole for every texture, so the mod-facing API refuses CBLPFile::Open.

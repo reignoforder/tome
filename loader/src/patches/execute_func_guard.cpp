@@ -164,6 +164,7 @@ extern const Patch kExecuteFuncGuard = {
     nullptr,  // reserves nothing (see the path sanitizer)
     nullptr,
     install,
+    true,  // sync: changes what map scripts do
 };
 
 } // namespace tome::patches

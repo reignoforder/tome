@@ -96,6 +96,7 @@ extern const Patch kGlobalStringGuard = {
     nullptr,  // reserves nothing: mods' own handlers on CreateJassString run before the check
     nullptr,
     install,
+    true,  // sync: changes what map scripts do
 };
 
 } // namespace tome::patches

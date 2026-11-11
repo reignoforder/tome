@@ -12,6 +12,7 @@
 #include "desync.h"
 #include "core/desync.h"
 #include "net_messages.h"
+#include "patches.h"
 #include "units.h"
 
 #include <windows.h>
@@ -88,11 +89,17 @@ void set_text_field(void* object, uint32_t offset, std::string_view text) {
     out[n] = '\0';
 }
 
-// The required mods running here, as the handshake compares them.
+// The required mods running here, and the patches that change what map
+// scripts do but aren't in force, as the handshake compares them.
 ModSet local_set() {
     ModSet set;
     for (const ModStatus& s : mod_manager().status()) {
         if (s.running && s.sync == "required") set.push_back({s.id, s.version, s.sync_hash});
+    }
+    for (const patches::Patch* p : patches::all()) {
+        if (p->sync && patches::outcome(p->name).state != patches::State::Applied) {
+            set.push_back(patch_not_in_force(p->name));
+        }
     }
     sort(set);
     return set;
@@ -286,6 +293,13 @@ void TOME_CALL before_chat_received(tome_mod*, tome_hook_call* call, void*) {
     flush(room);
 }
 
+// A second press of Start overrides a refusal (core/handshake.h). One for
+// every lobby: a refusal in another room has other problems, which don't match.
+StartOverride g_override;
+
+constexpr const char* kOverrideHint = "Press Start again within 10 seconds to start anyway.";
+static_assert(StartOverride::kWindow == 10.0, "kOverrideHint names the window");
+
 void TOME_CALL before_start_game(tome_mod*, tome_hook_call* call, void*) {
     void* room = reinterpret_cast<void*>(static_cast<uintptr_t>(call->args[0]));
     if (!frames::is_class(room, "CGameChatroom") || !g_is_host(net_index(room))) return;
@@ -294,24 +308,43 @@ void TOME_CALL before_start_game(tome_mod*, tome_hook_call* call, void*) {
         // The lobby couldn't be read (no local player id): nothing was
         // checked, so a host with required mods doesn't start blind.
         if (local_set().empty()) return;
+        if (g_override.press({"the lobby couldn't be read"}, now_seconds())) {
+            TOME_WARN("Handshake: starting anyway (the host pressed Start again); the lobby couldn't be read");
+            show(room, "|cffff4040Starting without the check: the game may desync.|r");
+            return;
+        }
         call->skip_original = 1;
         TOME_WARN("Handshake: not starting, Tome couldn't read the lobby's players");
         show(room, "|cffff4040The game can't start: Tome couldn't check the players' required mods.|r");
-        show(room, "To start without the check, leave the lobby and turn your required mods off in the Mods menu.");
+        show(room, kOverrideHint);
         return;
     }
     std::vector<std::string> problems;
-    if (g_lobby->can_start(problems)) {
+    bool only_patches = false;
+    if (g_lobby->can_start(problems, &only_patches)) {
+        g_override.reset();
         TOME_INFO("Handshake: starting; every player's required mods match");
         return;
     }
+    if (g_override.press(problems, now_seconds())) {
+        TOME_WARN("Handshake: starting anyway (the host pressed Start again); the players' %s differ",
+                  only_patches ? "built-in patches" : "required mods");
+        for (const std::string& p : problems) TOME_WARN("Handshake:   %s", p.c_str());
+        show(room, only_patches ? "|cffffcc00Starting anyway: a map that uses what those patches close may desync.|r"
+                                : "|cffff4040Starting anyway: the game may desync.|r");
+        return;
+    }
     call->skip_original = 1;
-    TOME_WARN("Handshake: not starting, the players' required mods differ");
-    show(room, "|cffff4040The game can't start: every player needs the same required mods.|r");
+    TOME_WARN("Handshake: not starting, the players' %s differ", only_patches ? "built-in patches" : "required mods");
+    show(room, only_patches
+                   ? "|cffffcc00The game can't start yet: players differ in Tome's built-in patches (only maps that "
+                     "use the exploits they close can desync).|r"
+                   : "|cffff4040The game can't start: every player needs the same required mods.|r");
     for (const std::string& p : problems) {
         TOME_WARN("Handshake:   %s", p.c_str());
         show(room, p);
     }
+    show(room, kOverrideHint);
 }
 
 // --- games ---------------------------------------------------------------------------

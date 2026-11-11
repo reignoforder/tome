@@ -4,6 +4,7 @@
 #include "game_build.h"
 #include "hooks.h"
 
+#include <iterator>
 #include <string>
 
 namespace tome::patches {
@@ -64,7 +65,14 @@ const char* first_missing(const char* const* symbols, const mappings::Build& bui
 // The variant of a patch that lists none: needs nothing more, changes nothing.
 const Variant kPlain{};
 
+// What install did with each patch of kAll, in its order.
+Outcome g_outcomes[std::size(kAll)];
+
 } // namespace
+
+std::span<const Patch* const> all() {
+    return kAll;
+}
 
 const Variant* variant_for(const Patch& patch, const std::string& build) {
     if (patch.variants.empty()) return &kPlain;
@@ -85,7 +93,20 @@ bool only_under_wine(std::string& report) {
     return false;
 }
 
-bool install(uintptr_t base, const BuildMappings& build, std::string& report) {
+Outcome outcome(std::string_view name) {
+    for (size_t i = 0; i < std::size(kAll); ++i) {
+        if (name == kAll[i]->name) return g_outcomes[i];
+    }
+    return {};
+}
+
+int count(State state) {
+    int n = 0;
+    for (const Outcome& o : g_outcomes) n += o.state == state;
+    return n;
+}
+
+bool install(uintptr_t base, const BuildMappings& build, std::string& report, OffReason off) {
     // init is idempotent and events::install may have run it already; call it
     // so patches don't depend on events being installed first.
     hooks::init(base, build.data);
@@ -93,28 +114,38 @@ bool install(uintptr_t base, const BuildMappings& build, std::string& report) {
     // Detail is collected into `report` rather than logged here: this runs in
     // DllMain, before the bootstrap thread opens tome.log, so a log line now
     // would be dropped. Bootstrap logs the report once the file is open.
-    int applied = 0, skipped = 0, failed = 0;
+    int applied = 0, skipped = 0, turned_off = 0, failed = 0;
     std::string detail;
     auto note = [&](const std::string& clause) { detail += (detail.empty() ? "" : "; ") + clause; };
-    for (const Patch* p : kAll) {
+    for (size_t i = 0; i < std::size(kAll); ++i) {
+        const Patch* p = kAll[i];
+        Outcome& out = g_outcomes[i];
+        auto skip = [&](std::string why) {
+            note(std::string(p->name) + " skipped (" + why + ")");
+            out = {State::Skipped, std::move(why)};
+            ++skipped;
+        };
+        // Before the other checks: the player's choice holds on every build.
+        if (std::string why = off ? off(p->name) : std::string(); !why.empty()) {
+            note(std::string(p->name) + " off (" + why + ")");
+            out = {State::Off, std::move(why)};
+            ++turned_off;
+            continue;
+        }
         const Variant* variant = variant_for(*p, name);
         if (!variant || variant->skip) {
-            note(std::string(p->name) + " skipped (not for " + name + (variant ? std::string(": ") + variant->skip : "") +
-                 ")");
-            ++skipped;
+            skip("not for " + name + (variant ? std::string(": ") + variant->skip : ""));
             continue;
         }
         const char* missing = first_missing(p->symbols, *build.data);
         if (!missing) missing = first_missing(variant->symbols, *build.data);
         if (missing) {
-            note(std::string(p->name) + " skipped (" + name + " has no mapping for " + missing + ")");
-            ++skipped;
+            skip(name + " has no mapping for " + missing);
             continue;
         }
         std::string r;
         if (p->needed && !p->needed(r)) {
-            note(std::string(p->name) + " skipped (" + r + ")");
-            ++skipped;
+            skip(r);
             continue;
         }
         if (p->install(base, build, *variant, r)) {
@@ -123,13 +154,16 @@ bool install(uintptr_t base, const BuildMappings& build, std::string& report) {
                 for (const char* const* s = list; s && *s; ++s) hooks::reserve(*s);
             }
             note(std::string(p->name) + " applied" + (r.empty() ? "" : " (" + r + ")"));
+            out = {State::Applied, r};
             ++applied;
         } else {
             note(std::string(p->name) + " FAILED (" + r + ")");
+            out = {State::Failed, r};
             ++failed;
         }
     }
     report = std::to_string(applied) + " applied, " + std::to_string(skipped) + " skipped";
+    if (turned_off) report += ", " + std::to_string(turned_off) + " turned off";
     if (failed) report += ", " + std::to_string(failed) + " failed";
     if (!detail.empty()) report += ": " + detail;
     return true;

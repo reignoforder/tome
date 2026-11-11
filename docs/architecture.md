@@ -26,7 +26,7 @@ loader/
     log_view.*            /tome logs: tome.log lines as chat lines
     handshake.*           multiplayer handshake: mod-set lines, comparison, lobby state, game report
     game_lock.*           which required mods a multiplayer game locks, and the notes
-    command_line.*        splits the command line like argv (for -tomesafe)
+    command_line.*        splits the command line like argv (for -tomesafe, -tomenopatch)
     hooks.*               argument layouts from mapping signatures; hook chain order and run
     x86.*                 instruction length decoder; moves a function's first instructions
     pe.*                  lays out a PE file like the loader (for the test)
@@ -62,7 +62,7 @@ loader/
     mappings.*            loads the embedded mapping files, finds the build
     game_build.*, sha256.*  build identification
     patch.*               call-site and pointer patching, verified before writing
-    patches.*             built-in patches (always-on fixes); the registry and version gating
+    patches.*             built-in patches (fixes, on unless the player turns one off); the registry and version gating
     patches/              one file per patch (memhack_guard: the JASS typecast fix;
                           path_sanitizer: file-writing native paths;
                           blp_guard: malformed BLP textures;
@@ -997,9 +997,10 @@ before adding any handler. Everything runs on the main thread.
 
 `loader/src/patches.*` and `loader/src/patches/`. Patches are Tome's own
 fixes for game bugs and vulnerabilities, compiled into `tome.mix` and applied
-once at startup. Unlike mods they aren't discovered, listed, toggled or
-removed, so a fix like the JASS "memhack" typecast is always in force — the
-reason to make a fix a patch rather than ship it as a mod.
+once at startup. Unlike mods they aren't discovered or removed, and no mod
+can turn them off, so a fix like the JASS "memhack" typecast is in force
+unless the player turns it off — the reason to make a fix a patch rather than
+ship it as a mod.
 
 - **A patch** is a `patches::Patch`: a name, a one-line summary, its
   `variants` (below), the mapping `symbols` it needs, an optional
@@ -1012,6 +1013,38 @@ reason to make a fix a patch rather than ship it as a mod.
   **hook manager** (`hooks::find_or_install` + `hooks::add`) with no mod and
   no gate, exactly like Tome's event handlers, at the highest BEFORE / lowest
   AFTER priority so it wraps mods' handlers.
+- **The player can.** Each patch has a setting in Tome > Settings,
+  `patch.<name>` (on by default; `core/tome_settings.*` `with_patches`, after
+  Tome's other settings, titled "Patch: <name>" with the patch's summary;
+  none for a patch with a setting of its own name, widescreen),
+  and `-tomenopatch=<name>[,<name>...]` (any case, repeatable, `all` for
+  every patch; `command_line::list_values`) turns patches off for one start.
+  Patches install in DllMain, before the bootstrap thread reads the
+  settings, so DllMain reads `tome/settings.json` and the option first
+  (`tome_settings::load`, no logging; the option even when Tome's folders
+  can't be found), and `patches::install` asks
+  `tome_settings::patch_off` for each patch before anything else: one turned
+  off is noted as `<name> off (turned off in Tome > Settings | turned off by
+  -tomenopatch)`, counted as "turned off", and neither installed nor
+  reserved. `patches::outcome` keeps what install did with each patch
+  (applied, skipped, off, failed, and why); the "Patches:" line is a
+  warning when one is off, and `tome_settings::init` logs any
+  `-tomenopatch` name that isn't a patch. The menu's description of each
+  switch starts with that outcome ("In force." / "Not in force now: ..."),
+  since the switch itself says what the next start does: a change applies
+  from then (patches aren't uninstalled).
+- **Multiplayer.** A patch that changes what map scripts do (`Patch::sync`:
+  memhack-guard, execute-func-guard, global-string-guard, jass-token-guard,
+  path-sanitizer) desyncs a game when players differ on it. Each one not in
+  force joins the handshake's set like a required mod,
+  `patch:<name> off #0` (`handshake::patch_not_in_force`; the `:` keeps it
+  apart from mod ids), so the host refuses to start and the in-game report
+  names the player. A host with such a patch off also waits for an answer
+  from players without Tome, as with a required mod; a client with one off
+  sends its set to a quiet host unasked (below). A player without Tome
+  next to a host with every patch in force isn't detected: nothing in the
+  lobby tells it from a Tome player with nothing to report. Either way the host
+  can start anyway by pressing Start again (below).
 - **Mods can't disable a patch.** A patch lists the functions it `reserve`s
   (and each variant those only it hooks, e.g. memhack-guard's constructor);
   `patches::install` calls `hooks::reserve(name)` for each once the patch is
@@ -1408,7 +1441,11 @@ report on both sides and in a replay; in `make e2e` since 2026-11-02
     wrong somewhere could still check its players and start. A host that
     isn't number 1 logs a warning. On a build without the mapping, the
     client notes when more than one player sent a set instead. A client with
-    required mods that gets no set within 5 s is told the host (by name) may not run Tome;
+    required mods (or a sync patch off) that gets no set within 5 s is told
+    the host (by name) may not run Tome, and, with the host known, sends it
+    its set unasked: a host without required mods and with every patch in
+    force sends nothing, yet must see a client that differs. It then
+    answers with its own set ("none"), and counts the difference at Start;
   - `CGameChatroom::OnChatReceived` (before) hides lines that decode as
     Tome's and passes them on; anything else, "[Tome] ..." typed by a person
     included, shows as usual. Notes go into the lobby's chat area
@@ -1417,7 +1454,11 @@ report on both sides and in a replay; in `make e2e` since 2026-11-02
     player's set differs or hasn't arrived (with required mods of its own),
     listing each player and what differs (missing, extra, different version
     or hash). If the lobby couldn't be read at all, a host with required
-    mods refuses too.
+    mods refuses too. The host can override either: a second press of
+    Start within 10 s, with the same problems, starts anyway, with a
+    warning in the log and the lobby (`handshake::StartOverride`). When
+    only built-in patches differ (`is_patch`), the lines say so: they only
+    desync maps that use what the patches close.
 - **Games:** on the first game tick (not in replays, `NetIsReplay`), each
   player with required mods sends one SyncStoredInteger action per mod
   (game cache `TomeMods`, mission `1`, key `id version #hash`, value the
@@ -1930,8 +1971,8 @@ fake's `FakeShadeSetVersion`), and `host_shade_*built_code*` and
 ## Settings
 
 - **Tome's own** (`core/tome_settings.cpp`, Tome > Settings): Widescreen,
-  Check for Updates, Install Updates Automatically, and Stop on Memory
-  Corruption (`harden_heap`, off by default): read once at startup, it calls
+  Check for Updates, Install Updates Automatically, a switch per built-in
+  patch (Patches, above), and Stop on Memory Corruption (`harden_heap`, off by default): read once at startup, it calls
   `HeapSetInformation(HeapEnableTerminationOnCorruption)` (`bootstrap.cpp`,
   `harden_heap`), which `war3.exe` (linked for Windows XP) doesn't get by
   default. Windows can't undo it in a running process, so a change applies
@@ -2441,7 +2482,9 @@ Tome's only connection of its own, and only once the player allows it.
     starts in `tome/startups`): nothing loads, statuses say safe mode, the
     mod menu enables a mod anyway, state.json is unchanged, the main menu
     sets the count back, and no popup offers safe mode (`tome/safe` is
-    there); every other launch starts with no count. The first launch checks
+    there); every other launch starts with no count. The same launch turns
+    a patch off in `tome/settings.json` and one with `-TomeNoPatch=` (with
+    an unknown name, logged): neither is applied. The first launch checks
     that the crash filter went in front of the game's;
   - the asset overlay: a texture override seen through Storm, a TOC and FDF
     from a mod's assets loaded by the map, a `Blizzard.j` override run by

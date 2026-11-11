@@ -6,14 +6,36 @@
 // in the mod menu (Tome > Settings).
 
 #include "core/json.h"
+#include "core/settings.h"
 #include "paths.h"
 
 #include <string>
+#include <string_view>
 
 namespace tome::tome_settings {
 
-// Reads tome/settings.json; a missing or invalid file gives the defaults.
-void init(const Paths& paths);
+// Reads tome/settings.json and the -tomenopatch option without logging:
+// safe in DllMain, where the patches need them (patch_off). A missing or
+// invalid file gives the defaults; so does null `paths` (Tome's folders
+// couldn't be found), the option still counting.
+void load(const Paths* paths);
+
+// Logs what's wrong in the file and the settings in force, as load read
+// them (in DllMain), and reads harden_heap for this start.
+void init();
+
+// Tome's settings with one per built-in patch (core/tome_settings.h,
+// with_patches): what the mod menu shows and set() accepts.
+const settings::Schema& schema_with_patches();
+
+// schema_with_patches with each patch's state this start (in force, or why
+// not: patches::outcome) first in its description: what the mod menu shows,
+// since a setting's value only says what the next start does.
+settings::Schema menu_schema();
+
+// Why built-in patch `name` stays off this start, or "" to apply it
+// (patches::OffReason): its setting, or -tomenopatch, as load read them.
+std::string patch_off(std::string_view name);
 
 // Every setting's value (settings::load_values: the defaults filled in).
 json::Value values();

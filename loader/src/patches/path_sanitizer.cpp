@@ -42,7 +42,7 @@
  * we key off the native's NAME at bind time, this needs only the BindNative
  * mapping and automatically covers any build that has it.
  *
- * Built in as a patch, not a mod, so it's always in force (patches.h). The
+ * Built in as a patch, not a mod, so mods can't turn it off (patches.h). The
  * BindNative hook is deliberately NOT reserved: the threat model is malicious
  * maps, not mods, and a mod is native code that can bypass any API boundary
  * anyway (see hooks::reserve), so reserving BindNative would only cost
@@ -413,6 +413,7 @@ extern const Patch kPathSanitizer = {
     nullptr,    // reserves nothing: mods may still hook BindNative (see file header)
     nullptr,    // needed everywhere
     install_path_sanitizer,
+    true,  // sync: changes what map scripts do
 };
 
 } // namespace tome::patches

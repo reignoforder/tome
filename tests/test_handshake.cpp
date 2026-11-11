@@ -424,3 +424,128 @@ TEST(handshake_log_budget) {
     budget.reset();
     CHECK(budget.take(0) == LogBudget::Verdict::Log);
 }
+
+// A patch that changes what map scripts do, turned off on one side, counts
+// like a required mod only that side has: the host won't start. (A host
+// with nothing required stays quiet; the client then sends its set unasked:
+// handshake_client_volunteers_to_quiet_host.)
+TEST(handshake_patch_not_in_force) {
+    SyncMod off = patch_not_in_force("memhack-guard");
+    CHECK_EQ(describe(off), std::string("patch:memhack-guard off #0"));
+    CHECK(!tome::is_valid_mod_id(off.id));  // no mod can claim it
+    SyncMod back;
+    CHECK(decode_key(encode_key(off), back));
+    CHECK(back == off);
+    Line line;
+    CHECK(decode(encode(LineKind::Reply, {off})[0], line));
+    CHECK_EQ(line.mods.size(), size_t(1));
+    CHECK(line.mods[0] == off);
+
+    Lobby host, client;
+    host.update(true, {off}, {{2, "Bob"}}, 0);
+    client.update(false, {}, {{1, "Alice"}}, 0);
+    deliver(client, 1, lines_to(host.take_outgoing(), 2));
+    deliver(host, 2, lines_to(client.take_outgoing(), 1));
+    std::vector<std::string> problems;
+    CHECK(!host.can_start(problems));
+    CHECK(contains(problems[0], "Bob: missing patch:memhack-guard off #0"));
+    bool only_patches = false;
+    CHECK(!host.can_start(problems, &only_patches));
+    CHECK(only_patches);
+}
+
+// Only patches differ, or a mod too: can_start says which.
+TEST(handshake_only_patches) {
+    SyncMod off = patch_not_in_force("memhack-guard");
+    Lobby host, client;
+    host.update(true, {off}, {{2, "Bob"}, {3, "Carol"}}, 0);
+    std::vector<std::string> problems;
+    bool only_patches = false;
+    // Neither answered yet: the host's set is only patches.
+    CHECK(!host.can_start(problems, &only_patches));
+    CHECK(only_patches);
+    client.update(false, {mod("hello")}, {{1, "Alice"}}, 0);
+    deliver(client, 1, lines_to(host.take_outgoing(), 2));
+    deliver(host, 2, lines_to(client.take_outgoing(), 1));
+    CHECK(!host.can_start(problems, &only_patches));
+    CHECK(!only_patches);  // Bob has an extra mod
+
+    Lobby same;
+    same.update(true, {}, {}, 0);
+    CHECK(same.can_start(problems, &only_patches));
+    CHECK(!only_patches);
+}
+
+// A second press of Start within the window, with the same problems,
+// starts anyway; new problems, or a late press, need another refusal.
+TEST(handshake_start_override) {
+    StartOverride o;
+    const std::vector<std::string> a{"Bob: missing patch:memhack-guard off #0"};
+    const std::vector<std::string> b{"Bob: missing patch:memhack-guard off #0", "Carol hasn't sent their mods"};
+    CHECK(!o.press(a, 0));
+    CHECK(o.press(a, 5));
+    CHECK(!o.press(a, 6));  // used up: refused again
+    CHECK(!o.press(b, 7));  // something changed: refused, with the new problems
+    CHECK(o.press(b, 8));
+    CHECK(!o.press(a, 20));
+    CHECK(!o.press(a, 20 + StartOverride::kWindow + 1));  // too late
+    CHECK(o.press(a, 32));
+    CHECK(!o.press(a, 33));
+    o.reset();
+    CHECK(!o.press(a, 34));
+}
+
+// A host with every patch in force and no required mods sends nothing; a
+// client with a patch off (known host) sends its set unasked, so the host
+// sees the difference and refuses the first press of Start. Each side notes
+// it once.
+TEST(handshake_client_volunteers_to_quiet_host) {
+    SyncMod off = patch_not_in_force("memhack-guard");
+    Lobby host, client;
+    client.set_host(1);
+    host.update(true, {}, {{2, "Bob"}}, 0);
+    client.update(false, {off}, {{1, "Alice"}}, 0);
+    CHECK(host.take_outgoing().empty());
+    CHECK(client.take_outgoing().empty());
+    std::vector<std::string> problems;
+    CHECK(host.can_start(problems));
+
+    client.update(false, {off}, {{1, "Alice"}}, Lobby::kHostWait);
+    std::vector<std::string> notes = client.take_notes();
+    CHECK_EQ(notes.size(), size_t(1));
+    CHECK(contains(notes[0], "The host (Alice) didn't send its required mods"));
+    CHECK(contains(notes[0], "went to it to check"));
+    deliver(host, 2, lines_to(client.take_outgoing(), 1));
+    bool only_patches = false;
+    CHECK(!host.can_start(problems, &only_patches));
+    CHECK(only_patches);
+    CHECK(contains(problems[0], "Bob: extra patch:memhack-guard off #0"));
+    notes = host.take_notes();
+    CHECK_EQ(notes.size(), size_t(1));
+
+    // The host answers with its own (empty) set; the client says how they
+    // differ and answers again, which the host doesn't note twice.
+    host.update(true, {}, {{2, "Bob"}}, 3);
+    deliver(client, 1, lines_to(host.take_outgoing(), 2));
+    notes = client.take_notes();
+    CHECK_EQ(notes.size(), size_t(1));
+    CHECK(contains(notes[0], "differ from the host's"));
+    deliver(host, 2, lines_to(client.take_outgoing(), 1));
+    CHECK(host.take_notes().empty());
+
+    // The patch back on: the host hears it and may start.
+    client.update(false, {}, {{1, "Alice"}}, 8);
+    deliver(host, 2, lines_to(client.take_outgoing(), 1));
+    CHECK(host.can_start(problems));
+
+    // Before the host answered, a change goes to it all the same.
+    Lobby early;
+    early.set_host(1);
+    early.update(false, {off}, {{1, "Alice"}}, 0);
+    early.update(false, {off}, {{1, "Alice"}}, Lobby::kHostWait);
+    CHECK(!lines_to(early.take_outgoing(), 1).empty());
+    early.update(false, {}, {{1, "Alice"}}, 6);
+    std::vector<Outgoing> out = early.take_outgoing();
+    CHECK_EQ(lines_to(out, 1).size(), size_t(1));
+    CHECK(contains(lines_to(out, 1)[0], ": none"));
+}

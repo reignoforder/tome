@@ -28,6 +28,15 @@ API version of each addition in `tome.h` and `sdk/README.md` ("[14]").
 
 API version 20.
 
+- **Built-in patches can be turned off**: each has a switch in Tome >
+  Settings ("Patch: <name>", on by default, from the next start), and
+  `-tomenopatch=<name>[,<name>...]` (or `-tomenopatch=all`) turns patches
+  off for one start. `tome.log` says which are off and why, and so does the
+  switch's description. Mods still can't turn them off. In multiplayer,
+  the patches that change what map scripts do count like required mods:
+  the host is told when players differ on one, and can start anyway by
+  pressing Start again (within 10 s; also for required mods).
+
 - **Mods: versions and the installed mods** (API version 20): `version_compare`
   and `version_match` compare versions and check ranges by Tome's own rules
   (mods' semver and game versions, as `tome.mod.json` is checked; also for

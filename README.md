@@ -95,6 +95,12 @@ Warcraft III folder again.
   with `-tomesafe`). All mods are turned off for that start, so you can
   disable the one causing trouble. If the game crashes three times in a row
   before reaching the main menu, Tome switches to safe mode by itself.
+- **Turn off one of Tome's built-in fixes:** if you suspect one of them
+  (they're listed under "Patches:" in `tome/tome.log`), turn it off in
+  Tome > Settings ("Patch: <name>", from the next start), or for one start
+  with `-tomenopatch=<name>` (several: `-tomenopatch=widescreen,blp-guard`;
+  every one: `-tomenopatch=all`). Some of them close security holes that
+  maps could use: turn those back on afterwards.
 - **A new version won't start:** delete `tome.mix` and rename
   `tome.mix.old` to `tome.mix` to go back to the previous version.
 - **Reporting a problem:** open an issue and attach `tome/tome.log`, plus
