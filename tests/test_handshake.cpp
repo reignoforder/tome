@@ -153,6 +153,38 @@ TEST(handshake_lobby_match) {
     CHECK(client.take_outgoing().empty());
 }
 
+// What mods' lobby messages need from the lobby (lobby_messages.cpp): who
+// hosts and who runs Tome, as each side can tell.
+TEST(handshake_lobby_tome_peers) {
+    ModSet set = {mod("hello")};
+    Lobby host, client;
+    host.update(true, set, {{2, "Bob"}, {3, "Carol"}}, 0);
+    client.update(false, set, {{1, "Alice"}, {3, "Carol"}}, 0);
+    CHECK(host.hosting());
+    CHECK(!client.hosting());
+    CHECK_EQ(host.host_id(), -1);
+    CHECK_EQ(client.host_id(), -1);  // nothing heard yet
+    CHECK(!host.runs_tome(2));
+    CHECK(!client.runs_tome(1));
+
+    deliver(client, 1, lines_to(host.take_outgoing(), 2));
+    CHECK_EQ(client.host_id(), 1);  // the only sender
+    CHECK(client.runs_tome(1));
+    CHECK(!client.runs_tome(3));
+    deliver(host, 2, lines_to(client.take_outgoing(), 1));
+    CHECK(host.runs_tome(2));
+    CHECK(!host.runs_tome(3));  // Carol never answered: no Tome as far as the host knows
+    CHECK(!host.runs_tome(9));
+
+    // A known host (NetGetPlayerNumber) counts even before its set arrives,
+    // but runs Tome only once it has sent one.
+    Lobby other;
+    other.set_host(1);
+    other.update(false, set, {{1, "Alice"}}, 0);
+    CHECK_EQ(other.host_id(), 1);
+    CHECK(!other.runs_tome(1));
+}
+
 TEST(handshake_lobby_mismatch_and_change) {
     Lobby host, client;
     host.update(true, {mod("hello")}, {{2, "Bob"}}, 0);

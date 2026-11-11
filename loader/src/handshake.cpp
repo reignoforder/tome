@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "handshake.h"
 
+#include "lobby_messages.h"
+
 #include "core/game_lock.h"
 #include "core/handshake.h"
 #include "core/netmsg.h"
@@ -205,6 +207,7 @@ LogBudget g_lobby_log(100);
 // The lobby for `room`, a new one if the lobby changed.
 Lobby& lobby_for(void* room) {
     if (!g_lobby || g_lobby_room != room) {
+        if (g_lobby) lobby_messages::on_lobby_closed();
         g_lobby = std::make_unique<Lobby>();
         g_lobby_room = room;
         g_lobby_log.reset();
@@ -216,7 +219,10 @@ Lobby& lobby_for(void* room) {
 void poll_lobby() {
     void* room = current_room();
     if (!room) {
-        if (g_lobby) TOME_INFO("Handshake: lobby closed");
+        if (g_lobby) {
+            TOME_INFO("Handshake: lobby closed");
+            lobby_messages::on_lobby_closed();
+        }
         g_lobby.reset();
         g_lobby_room = nullptr;
         return;
@@ -274,7 +280,17 @@ void TOME_CALL before_chat_received(tome_mod*, tome_hook_call* call, void*) {
     const auto& n = g_build->net;
     std::string text = text_field(event, n.lobby_event_text_offset);
     Line line;
-    if (!decode(text, line)) return;  // people's lines, "[Tome] ..." typed by hand included
+    if (!decode(text, line)) {
+        // A mod's message ("[Tome] Msg ..."), or people's lines ("[Tome] ..."
+        // typed by hand included), which show.
+        if (!frames::is_class(room, "CGameChatroom")) return;
+        if (!g_lobby || g_lobby_room != room) poll_lobby();
+        if (!g_lobby || g_lobby_room != room) return;
+        const int from = field<uint8_t>(event, n.lobby_event_sender_offset);
+        const bool from_host = !g_lobby->hosting() && from == g_lobby->host_id();
+        if (lobby_messages::receive(from, from_host, text)) call->skip_original = 1;
+        return;
+    }
     call->skip_original = 1;
     int from = field<uint8_t>(event, n.lobby_event_sender_offset);
     switch (g_lobby_log.take(from)) {
@@ -300,6 +316,18 @@ StartOverride g_override;
 constexpr const char* kOverrideHint = "Press Start again within 10 seconds to start anyway.";
 static_assert(StartOverride::kWindow == 10.0, "kOverrideHint names the window");
 
+// Mods' say once the handshake lets the game start (on_lobby_start): true
+// if one refuses, with Start skipped and its reasons shown. Pressing Start
+// again doesn't override a mod (StartOverride is the handshake's only).
+bool mods_refuse(void* room, tome_hook_call* call) {
+    std::vector<std::string> reasons;
+    if (lobby_messages::start_allowed(reasons)) return false;
+    call->skip_original = 1;
+    TOME_INFO("Handshake: not starting, a mod refused (%zu reason(s))", reasons.size());
+    for (const std::string& r : reasons) show(room, r);
+    return true;
+}
+
 void TOME_CALL before_start_game(tome_mod*, tome_hook_call* call, void*) {
     void* room = reinterpret_cast<void*>(static_cast<uintptr_t>(call->args[0]));
     if (!frames::is_class(room, "CGameChatroom") || !g_is_host(net_index(room))) return;
@@ -309,6 +337,7 @@ void TOME_CALL before_start_game(tome_mod*, tome_hook_call* call, void*) {
         // checked, so a host with required mods doesn't start blind.
         if (local_set().empty()) return;
         if (g_override.press({"the lobby couldn't be read"}, now_seconds())) {
+            if (mods_refuse(room, call)) return;
             TOME_WARN("Handshake: starting anyway (the host pressed Start again); the lobby couldn't be read");
             show(room, "|cffff4040Starting without the check: the game may desync.|r");
             return;
@@ -323,10 +352,12 @@ void TOME_CALL before_start_game(tome_mod*, tome_hook_call* call, void*) {
     bool only_patches = false;
     if (g_lobby->can_start(problems, &only_patches)) {
         g_override.reset();
+        if (mods_refuse(room, call)) return;
         TOME_INFO("Handshake: starting; every player's required mods match");
         return;
     }
     if (g_override.press(problems, now_seconds())) {
+        if (mods_refuse(room, call)) return;
         TOME_WARN("Handshake: starting anyway (the host pressed Start again); the players' %s differ",
                   only_patches ? "built-in patches" : "required mods");
         for (const std::string& p : problems) TOME_WARN("Handshake:   %s", p.c_str());
@@ -574,6 +605,49 @@ void on_game_end() {
     g_in_game = false;
     g_host_slot = -1;
     mod_manager().set_game_lock(false);
+}
+
+bool lobby_members(std::vector<LobbyMember>& out, bool& hosting) {
+    out.clear();
+    if (!g_build) return false;
+    void* room = current_room();
+    if (!room) return false;
+    if (!g_lobby || g_lobby_room != room) poll_lobby();
+    if (!g_lobby || g_lobby_room != room) return false;
+    const int index = net_index(room);
+    const int local = g_local_player(index) & 0xFF;
+    if (local == 0xFF) return false;
+    hosting = g_lobby->hosting();
+    const int host = hosting ? local : g_lobby->host_id();
+    for (int id = 0; id < kMaxPlayerId; ++id) {
+        const char* name = g_player_name(id, index);
+        if (id != local && !(name && *name)) continue;
+        LobbyMember m;
+        m.id = id;
+        m.name = name ? name : "";
+        m.local = id == local;
+        m.host = id == host;
+        m.tome = m.local || g_lobby->runs_tome(id);
+        out.push_back(std::move(m));
+    }
+    return true;
+}
+
+bool lobby_send_line(int to, const std::string& text) {
+    if (!g_build) return false;
+    void* room = current_room();
+    if (!room) return false;
+    send_line(room, to, text);
+    return true;
+}
+
+bool lobby_press_start() {
+    if (!g_build) return false;
+    void* room = current_room();
+    if (!room || !g_is_host(net_index(room))) return false;
+    using StartGameFn = void(__thiscall*)(void* room);
+    reinterpret_cast<StartGameFn>(g_game_base + g_build->net.chatroom_start_game)(room);
+    return true;
 }
 
 bool in_game() {

@@ -17,6 +17,7 @@ add_executable(tome_tests
     test_game_lock.cpp
     test_handshake.cpp
     test_netmsg.cpp
+    test_lobbymsg.cpp
     test_hash.cpp
     test_hash_cache.cpp
     test_hooks.cpp

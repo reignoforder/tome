@@ -344,6 +344,20 @@ void Lobby::note_claim(int from, const ModSet& set, bool first) {
     }
 }
 
+int Lobby::host_id() const {
+    if (host_) return -1;
+    if (host_id_ >= 0) return host_id_;
+    return claims_.size() == 1 ? claims_.begin()->first : -1;
+}
+
+bool Lobby::runs_tome(int id) const {
+    if (host_) {
+        auto it = peers_.find(id);
+        return it != peers_.end() && it->second.answered;
+    }
+    return id >= 0 && id == host_id() && claims_.count(id) != 0;
+}
+
 bool Lobby::can_start(std::vector<std::string>& problems, bool* only_patches) const {
     problems.clear();
     bool patches = true;

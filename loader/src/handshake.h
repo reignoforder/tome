@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace tome::handshake {
 
@@ -41,6 +42,29 @@ bool in_replay();
 // Whether the current game took its first step: the players are in place,
 // the game lock is final and actions may be sent. Main thread.
 bool game_stepped();
+
+// --- the lobby, for mods' lobby messages (lobby_messages.cpp) ---
+
+struct LobbyMember {
+    int id = 0;  // net player id
+    std::string name;
+    bool host = false;   // the game's host
+    bool local = false;  // this computer
+    bool tome = false;   // the handshake heard from its Tome (always for local)
+};
+
+// Whether a game's lobby is up and readable here; if so, who's in it and
+// whether this computer hosts. Main thread.
+bool lobby_members(std::vector<LobbyMember>& out, bool& hosting);
+
+// Sends one hidden lobby chat line to player `to` (a net id). False outside
+// a readable lobby. Main thread.
+bool lobby_send_line(int to, const std::string& text);
+
+// The host's Start, pressed in code: CGameChatroom::StartGame through its
+// hooks, so every check runs. False unless this computer hosts a readable
+// lobby. Main thread.
+bool lobby_press_start();
 
 // Sends one SyncStoredInteger action, which reaches every player (this one
 // too) and the replay. False, with nothing sent, outside a game or in a

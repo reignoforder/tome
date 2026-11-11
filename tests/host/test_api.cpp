@@ -774,6 +774,21 @@ TEST(host_objects_outside_a_game) {
     CHECK_EQ(api->net_send(mod, bytes, TOME_NET_MAX_MESSAGE), TOME_ERR_UNAVAILABLE);
     CHECK_EQ(api->net_send(mod, nullptr, 0), TOME_ERR_UNAVAILABLE);
     CHECK_EQ(api->on_net_message(mod, nullptr, nullptr), TOME_ERR_INVALID_ARGUMENT);
+    // The lobby (API version 21): no lobby here; bad arguments first.
+    CHECK(tome_has_lobby(api));
+    char lobby_bytes[TOME_LOBBY_MAX_MESSAGE + 1] = {};
+    CHECK_EQ(api->lobby_send(mod, 0, nullptr, 4), TOME_ERR_INVALID_ARGUMENT);
+    CHECK_EQ(api->lobby_send(mod, 0, lobby_bytes, TOME_LOBBY_MAX_MESSAGE + 1), TOME_ERR_INVALID_ARGUMENT);
+    CHECK_EQ(api->lobby_send(nullptr, 0, lobby_bytes, 4), TOME_ERR_INVALID_ARGUMENT);
+    CHECK_EQ(api->lobby_send(mod, TOME_LOBBY_EVERYONE, lobby_bytes, TOME_LOBBY_MAX_MESSAGE), TOME_ERR_UNAVAILABLE);
+    CHECK_EQ(api->on_lobby_message(mod, nullptr, nullptr), TOME_ERR_INVALID_ARGUMENT);
+    tome_lobby_player players[2];
+    CHECK_EQ(api->lobby_players(players, 2), -1);
+    CHECK_EQ(api->lobby_players(nullptr, 0), -1);
+    CHECK_EQ(api->lobby_players(nullptr, 2), -1);
+    CHECK_EQ(api->on_lobby_start(mod, nullptr, nullptr), TOME_ERR_INVALID_ARGUMENT);
+    CHECK_EQ(api->lobby_start(nullptr), TOME_ERR_INVALID_ARGUMENT);
+    CHECK_EQ(api->lobby_start(mod), TOME_ERR_UNAVAILABLE);
 }
 
 // Versions and the installed mods (API version 20): the mod list as the
@@ -824,7 +839,7 @@ TEST(host_versions_and_installed_mods) {
     CHECK(api != nullptr);
     if (!api) return;
     CHECK(tome_has_mod_list(api));
-    CHECK_EQ(api->api_version, 20u);
+    CHECK_EQ(api->api_version, 21u);
 
     // Versions, by Tome's rules; the details are in tests/test_version.cpp.
     int32_t order = 5;
