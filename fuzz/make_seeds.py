@@ -45,6 +45,9 @@ def netmsg_line(sender, part, count, mission, key):
 add("netmsg", netmsg_line(1, 0, 1, "1 1 hello", "aGVsbG8="))
 add("netmsg", netmsg_line(1, 0, 2, "1 2 my-mod", "A" * 252) + b"\n" + netmsg_line(1, 1, 2, "1 2 my-mod", "AAAA"))
 add("netmsg", netmsg_line(2, 0, 1, "1 3 hello", ""))
+add("lobbymsg", b"\x01[Tome] Msg 1 1 hello 1/1: aGVsbG8=")
+add("lobbymsg", b"\x01[Tome] Msg 1 2 my-mod 1/2: " + b"A" * 128 + b"\n\x01[Tome] Msg 1 2 my-mod 2/2: AAAA")
+add("lobbymsg", b"\x02[Tome] Msg 1 3 hello 1/1: ")
 add("desync", b"\xff\n" + bytes([2]) + b"1 1 local-mod\t0000000000000007\n" + bytes([3]) + b"1 1 local-mod\t0000000000000008")
 add("desync", bytes([2]) + b"1 2 my-mod\t00000000deadbeef\n\xff\n\xff\n")
 

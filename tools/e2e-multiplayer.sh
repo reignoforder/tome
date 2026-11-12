@@ -293,6 +293,18 @@ check "$HOST_LOG" "Handshake: from lobby player 129: \[Tome\] My mods 1/1: sync-
     "host: gets the client's new set (a live reload in the lobby)"
 check "$HOST_LOG" "Handshake: Guest has the same required mods" "host: says they match now"
 check "$CLIENT_LOG" "Handshake: Your required mods match the host's \(sync-test 1\.0\.0" "client: says so too"
+# Mods' lobby messages (API version 21): sync-test's client says hello to
+# the host once the host's Tome answered, the host says welcome back.
+check "$CLIENT_LOG" "lobby: sent hello to the host \(player 128, Tome\): 0" "client: a lobby message to the host"
+check "$HOST_LOG" "lobby message from player 129 \(from host 0, 5 bytes\): hello" "host: gets it from the client"
+check "$HOST_LOG" "lobby: sent welcome to player 129: 0" "host: answers"
+check "$CLIENT_LOG" "lobby message from player 128 \(from host 1, 7 bytes\): welcome" "client: gets it, from the host"
+check_absent "$CLIENT_LOG" "\[Tome\] Msg " "client: no lobby message line shown or logged as chat"
+# sync-test holds the first allowed Start once, then presses it itself.
+check "$HOST_LOG" "lobby: holding the start once \(note shown: 0\)" "host: a mod holds the start, with a note"
+check "$HOST_LOG" "Handshake: not starting, a mod refused" "host: the start waits for the mod"
+check "$HOST_LOG" "lobby_start: pressing Start" "host: the mod presses Start"
+check "$HOST_LOG" "lobby: letting the start through" "host: the mod lets it through"
 check "$HOST_LOG" "Handshake: starting; every player's required mods match" "host: Start goes through"
 for who in host client; do
     log="$HOST_LOG"; [[ "$who" == client ]] && log="$CLIENT_LOG"

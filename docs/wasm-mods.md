@@ -104,6 +104,8 @@ outside memory; nothing is terminated.
 | `object_type`, `object_of`, `handle_of`, `player_object`, `unit_info`, `get_property`, `set_property`, `get_keyed_property`, `set_keyed_property`, `list_objects` | same | objects are handles (below); `tome_object_type_of` in C (`tome_object_type` is the enum); `unit_info` writes a `tome_wasm_unit` |
 | `host_player` | same | `tome_host_player` in C, `host_player()` (an `Option`) in Rust |
 | `net_send`, `on_net_message` | same | `tome_net_send` and `tome_on_net_message(fn(player, data, size, replay, user), user)` in C; `net_send(&[u8])` and `on_net_message(\|player, data, replay\| ...)` in Rust |
+| `lobby_show`, `lobby_start` | same | API version 21; `tome_lobby_show(text)` and `tome_lobby_start()` in C, `lobby_show(&str)` and `lobby_start()` in Rust |
+| `lobby_send`, `on_lobby_message`, `lobby_players`, `on_lobby_start` | not yet | API version 21: DLL mods only for now |
 | `timer_start`, `timer_stop` | same | `tome_timer_start(clock, delay, interval, fn(timer, user), user, &id)` in C, `timer_start(Clock::Game, ...)` in Rust; the callback block is `[timer][state]` (0: fires again, 1: its last time, 2: ended with its game, not called), so the module frees its side of a timer that's done |
 | `check_metadata` | same | the text up to 64 KiB; `tome_check_metadata` in C, `check_metadata(&str)` (a `MetadataCheck`) in Rust |
 | `version_compare`, `version_match` | same | `tome_version_compare(kind, a, b, &order)` and `tome_version_match(kind, range, version)` in C; `version_compare(VersionKind::Mod, a, b)` (an `Ordering`) and `version_match(...)` (an `Option<bool>`) in Rust |

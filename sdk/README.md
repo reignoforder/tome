@@ -98,6 +98,14 @@ helpers check for you.
   find the folder mods are installed in (`mods_dir`), and check a release's
   `tome.mod.json` before installing it, as Tome will check it
   (`check_metadata`): what an updater or a mod browser needs.
+- **The lobby** [21]: before a LAN or Battle.net game starts, send up to
+  1 KiB to your mod on other players' computers (`lobby_send`,
+  `on_lobby_message`: the host to any player who runs Tome, a player to the
+  host; hidden lobby chat lines), see who's in the lobby (`lobby_players`), write in its chat
+  (`lobby_show`),
+  and keep the game from starting until your mod is ready
+  (`on_lobby_start`; `lobby_start` presses Start once it is). Required mods
+  only; WebAssembly mods have `lobby_show` and `lobby_start`.
 - **Your mod's time**: Tome times every call into your mod. The Mods menu's
   Details page shows its time a frame and its slowest call, `/tome perf`
   the busiest mods.

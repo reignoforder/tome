@@ -221,6 +221,18 @@ pub fn display_text(text: &str, seconds: f32) -> Result<()> {
     check(unsafe { raw::display_text(ptr, len, seconds) })
 }
 
+/// Shows `text` in this computer's lobby chat (API version 21).
+pub fn lobby_show(text: &str) -> Result<()> {
+    let (ptr, len) = str_arg(text);
+    check(unsafe { raw::lobby_show(ptr, len) })
+}
+
+/// Presses the host's Start for this mod (API version 21): the same
+/// checks run. Only for a "sync": "required" mod, in the host's lobby.
+pub fn lobby_start() -> Result<()> {
+    check(unsafe { raw::lobby_start() })
+}
+
 /// Asks the player to restart the game (a dialog; nothing happens unless
 /// they agree).
 pub fn restart_game() -> Result<()> {

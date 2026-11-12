@@ -228,6 +228,10 @@ TOME_WASM_IMPORT(version_match) int32_t tome_raw_version_match(int32_t kind, con
  * -1 (invalid); `reason` (may be NULL with size 0) gets why not, NUL-terminated and cut to fit
  * (tome.h, check_metadata). */
 TOME_WASM_IMPORT(check_metadata) int32_t tome_check_metadata(const void* text, uint32_t size, char* reason, uint32_t reason_size);
+/* The lobby (tome.h, lobby_show, lobby_start; API version 21): a line in this computer's lobby chat,
+ * and the host's Start pressed for this mod. Lobby messages and on_lobby_start are for DLL mods only. */
+TOME_WASM_IMPORT(lobby_show) int32_t tome_raw_lobby_show(const char* text, uint32_t len);
+TOME_WASM_IMPORT(lobby_start) int32_t tome_lobby_start(void);
 /* One argument or the result of jass_call: the member the native's signature
  * says. Handles are JASS handle ids here (tome_handle_of), not this module's
  * object handles; strings are UTF-8. */
@@ -278,6 +282,10 @@ static inline void tome_log(int32_t level, const char* text) {
 }
 static inline int32_t tome_display_text(const char* text, float seconds) {
     return tome_raw_display_text(text, (uint32_t)tome_strlen(text), seconds);
+}
+
+static inline int32_t tome_lobby_show(const char* text) {
+    return tome_raw_lobby_show(text, (uint32_t)tome_strlen(text));
 }
 
 /* kind: TOME_VERSION_MOD or TOME_VERSION_GAME. *order: -1, 0 or 1; TOME_ERR_INVALID_ARGUMENT if

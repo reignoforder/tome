@@ -133,6 +133,7 @@ add_library(tome_core STATIC
     src/core/game_lock.cpp
     src/core/handshake.cpp
     src/core/netmsg.cpp
+    src/core/lobbymsg.cpp
     src/core/edition.cpp
     src/core/hash_cache.cpp
     src/core/hooks.cpp
@@ -208,6 +209,7 @@ add_library(tome_runtime OBJECT
     src/mod_menu.cpp
     src/mods_ready.cpp
     src/net_messages.cpp
+    src/lobby_messages.cpp
     src/natives.cpp
     src/overlay.cpp
     src/packages.cpp

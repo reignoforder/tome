@@ -1589,7 +1589,57 @@ reaches the same mod on every player's computer, the sender's included.
   sync-test's `/synctest` sends a line and 1000 bytes from the client and a
   line from the host, and both sides check each arrives whole from the right
   player. Not checked: playback in a replay (the test's replay runs without
-  sync-test). No lobby channel yet: messages are for games.
+  sync-test). For the lobby, before a game, see "Lobby messages".
+
+## Lobby messages
+
+API version 21 (`lobby_send`, `on_lobby_message`, `lobby_players`,
+`lobby_show`, `on_lobby_start`, `lobby_start`; `loader/src/lobby_messages.cpp`, the wire
+format in `core/lobbymsg.*`, unit-tested and fuzzed). For required mods that
+must agree on something with every player before the game starts (the
+Geomancer mod: the seed of the map every player generates).
+
+- **The channel:** lobby chat lines, as the handshake's
+  (`handshake::lobby_send_line`: `NetSendLobbyEvent` to one player), each
+  `[Tome] Msg 1 <message id> <mod id> <part>/<count>: <base64>`, up to 96
+  bytes of the message per line (the longest header and 128 base64
+  characters stay under the 250 a line may have), so a 1 KiB message is up
+  to 11 lines. `before_chat_received` hands every line the handshake doesn't
+  decode to `lobby_messages::receive`, which hides all `[Tome] Msg ` lines,
+  well formed or not (a person can't type one into the chat), reassembles
+  them per sender (`lobbymsg::Reassembler`, as `netmsg`'s) and gives whole
+  ones to the mod they name, if it's required. The sender is the event's
+  sender byte, stamped by the host's router; `from_host` compares it with
+  the host the handshake knows (`Lobby::host_id`).
+- **Who gets them:** only players whose Tome hides them: on the host, those
+  whose handshake reply arrived (`Lobby::runs_tome`); on a client, the host
+  once its set arrived. Players without Tome would see the lines, so they
+  get none; a joined player talks to the host only (it doesn't know who
+  else runs Tome). Not in replays (lobby lines aren't recorded); nothing
+  is sent in games (`net_send` is for that).
+- **The start:** `before_start_game` runs the handshake's checks first;
+  once they let the game start (or the host overrides them), every
+  required mod's `on_lobby_start` callback runs (`start_allowed`), and any
+  refusal skips Start, its reason in the chat. `StartOverride` doesn't
+  apply to mods: a mod refuses because something isn't ready (a player
+  without the map), which a second press doesn't change. `lobby_start`
+  calls `CGameChatroom::StartGame` through its hooks, so the same checks
+  run; it's refused inside an `on_lobby_start` callback (it would recurse).
+- **Limits:** 16 messages a second per mod (each to each recipient), the
+  log budget per sender for malformed lines (`LogBudget(10)`), one message
+  in progress per sender, dropped when the lobby closes.
+- **Trust:** `from_host` and who a client may send to come from the host
+  the game names (NetGetPlayerNumber); without that mapping a client knows
+  no host for mods (`Lobby::host_id` -1), so it sends nothing. A mod's
+  `lobby_start` never overrides or arms the handshake's override (the
+  host's second press), and an `on_lobby_start` callback that fails refuses.
+  `lobby_players` reads the list the half-second poll keeps; a player who
+  leaves drops their message in progress.
+- **Tests:** `tests/test_lobbymsg.cpp`, `fuzz/fuzz_lobbymsg.cpp`,
+  `handshake_lobby_tome_peers` (who runs Tome), host tests for the
+  arguments outside a lobby, and the two-instance LAN game
+  (`tools/e2e-multiplayer.sh`: sync-test's hello and welcome, its note,
+  its hold on the start and its own press).
 ## Timers
 
 API version 19 (`timer_start`, `timer_stop`; `loader/src/timers.cpp`, the
