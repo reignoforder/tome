@@ -462,14 +462,20 @@ fn callbacks_outlive_the_thread_that_registered_them() {
         let on_thread = on_thread;
         unsafe { rt::enable(on_thread.1, None) };
         let dropped = Dropped(counted);
-        on_thread.0.register_command("hello", move |_| {
-            let _ = &dropped;
-        })
-        .unwrap();
+        on_thread
+            .0
+            .register_command("hello", move |_| {
+                let _ = &dropped;
+            })
+            .unwrap();
     })
     .join()
     .unwrap();
-    assert_eq!(drops.load(SeqCst), 0, "the bootstrap thread's end freed a callback Tome still holds");
+    assert_eq!(
+        drops.load(SeqCst),
+        0,
+        "the bootstrap thread's end freed a callback Tome still holds"
+    );
     // Freed at the next enable, as callbacks registered on the main thread are.
     unsafe { rt::disable(rt::mod_ptr(), None) };
     unsafe { rt::enable(rt::mod_ptr(), None) };
@@ -481,16 +487,31 @@ fn versions_and_installed_mods() {
     let _serial = SERIAL.lock().unwrap();
     let tome = loaded(20, size_of::<sys::tome_api>());
     assert!(tome.has(20));
-    assert_eq!(tome.version_compare(VersionKind::Mod, "a", "b"), Ok(core::cmp::Ordering::Less));
-    assert_eq!(tome.version_compare(VersionKind::Mod, "b", "b"), Ok(core::cmp::Ordering::Equal));
-    assert_eq!(tome.version_compare(VersionKind::Mod, "bad", "b"), Err(Error::INVALID_ARGUMENT));
-    assert_eq!(tome.version_compare(VersionKind::Mod, "a\0", "b"), Err(Error::INVALID_ARGUMENT));
+    assert_eq!(
+        tome.version_compare(VersionKind::Mod, "a", "b"),
+        Ok(core::cmp::Ordering::Less)
+    );
+    assert_eq!(
+        tome.version_compare(VersionKind::Mod, "b", "b"),
+        Ok(core::cmp::Ordering::Equal)
+    );
+    assert_eq!(
+        tome.version_compare(VersionKind::Mod, "bad", "b"),
+        Err(Error::INVALID_ARGUMENT)
+    );
+    assert_eq!(
+        tome.version_compare(VersionKind::Mod, "a\0", "b"),
+        Err(Error::INVALID_ARGUMENT)
+    );
     assert_eq!(tome.version_match(VersionKind::Game, "yes", "1.27b"), Some(true));
     assert_eq!(tome.version_match(VersionKind::Game, "no", "1.27b"), Some(false));
     assert_eq!(tome.version_match(VersionKind::Mod, "yes", "1.0.0"), None);
     assert_eq!(tome.mods_dir(), "C:\\tome\\mods");
     assert_eq!(tome.check_metadata("fits"), Ok(MetadataCheck::Runs));
-    assert_eq!(tome.check_metadata("old"), Ok(MetadataCheck::NotHere("needs Tome >=9".into())));
+    assert_eq!(
+        tome.check_metadata("old"),
+        Ok(MetadataCheck::NotHere("needs Tome >=9".into()))
+    );
     assert_eq!(
         tome.check_metadata("{"),
         Ok(MetadataCheck::Invalid("tome.mod.json: expected a value".into()))

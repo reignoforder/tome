@@ -40,8 +40,10 @@ extern "C" {
  * 17: the game's host (host_player). 18: messages between players (net_send, on_net_message).
  * 19: timers (timer_start, timer_stop) and desync checks (on_checksum).
  * 20: versions and the installed mods (version_compare, version_match, list_mods, mods_dir,
- * check_metadata, TOME_EVENT_MODS_CHANGED). */
-#define TOME_API_VERSION 20
+ * check_metadata, TOME_EVENT_MODS_CHANGED).
+ * 21: messages in a game's lobby (lobby_send, on_lobby_message, lobby_players, lobby_show) and
+ * a say in when it starts (on_lobby_start, lobby_start). */
+#define TOME_API_VERSION 21
 
 #define TOME_CALL __cdecl
 /* C linkage in C++ too: Tome looks the lifecycle functions up by their plain names. */
@@ -707,6 +709,48 @@ typedef struct tome_net_message {
 } tome_net_message;
 
 typedef void (TOME_CALL *tome_net_message_fn)(tome_mod* mod, const tome_net_message* message, void* user);
+
+/*
+ * Messages in a game's lobby (API version 21), before the game starts:
+ * from a "sync": "required" mod to the same mod on another player's
+ * computer, as hidden lobby chat lines (the multiplayer handshake's way;
+ * docs/architecture.md, "Lobby messages"). The host reaches each player
+ * who runs Tome (the handshake found out); a joined player reaches the
+ * host. Unlike net_send's, they aren't in the replay, and each goes to one
+ * computer at a time, in the order sent. The sender is stamped by the
+ * host's game, so a player can't pass for another.
+ */
+#define TOME_LOBBY_MAX_MESSAGE 1024
+/* lobby_send's `to`: every player who runs Tome (from the host only). */
+#define TOME_LOBBY_EVERYONE (-1)
+
+typedef struct tome_lobby_message {
+    uint32_t size;        /* sizeof(tome_lobby_message) as Tome built it */
+    int32_t player;       /* the sender's lobby id (tome_lobby_player.id) */
+    int32_t from_host;    /* 1 if the sender is the game's host */
+    const void* data;     /* valid only during the call */
+    uint32_t data_size;   /* 0 .. TOME_LOBBY_MAX_MESSAGE */
+} tome_lobby_message;
+
+typedef void (TOME_CALL *tome_lobby_message_fn)(tome_mod* mod, const tome_lobby_message* message, void* user);
+
+/* One person in the lobby (computers aren't listed), from lobby_players. */
+typedef struct tome_lobby_player {
+    int32_t id;         /* the lobby's net id: lobby_send's `to` */
+    int32_t is_host;    /* the game's host (player number 1) */
+    int32_t is_local;   /* this computer */
+    int32_t runs_tome;  /* the handshake heard from its Tome (always 1 for is_local) */
+    char name[32];      /* UTF-8, NUL-terminated (cut short to fit) */
+} tome_lobby_player;
+
+/* on_lobby_start's verdicts. */
+#define TOME_START_ALLOW 1
+#define TOME_START_REFUSE 0
+
+/* The host pressed Start (or lobby_start ran): return TOME_START_ALLOW, or
+ * TOME_START_REFUSE with up to `reason_size` bytes of a reason (UTF-8,
+ * NUL-terminated) for the lobby's chat; an empty reason refuses quietly. */
+typedef int32_t (TOME_CALL *tome_lobby_start_fn)(tome_mod* mod, char* reason, uint32_t reason_size, void* user);
 
 /*
  * Timers (API version 19). A timer runs `fn` on the main thread after a
@@ -1507,6 +1551,55 @@ typedef struct tome_api {
      * to fit `reason_size`. Any thread.
      */
     int32_t (TOME_CALL *check_metadata)(const char* text, size_t size, char* reason, size_t reason_size);
+
+    /* --- API version 21: the lobby (see tome_lobby_message) --- */
+
+    /* Sends `size` bytes (up to TOME_LOBBY_MAX_MESSAGE) to this mod on the
+     * computer of lobby player `to`, who gets them through on_lobby_message
+     * a moment later. The host sends to any player who runs Tome
+     * (tome_lobby_player.runs_tome) or to all of them (TOME_LOBBY_EVERYONE);
+     * a joined player only to the host. Only in a LAN or Battle.net game's
+     * lobby, for a "sync": "required" mod, at most 16 messages a second:
+     * TOME_ERR_UNAVAILABLE otherwise (or when `to` doesn't run Tome as far
+     * as this computer knows). TOME_ERR_INVALID_ARGUMENT for too many bytes
+     * or NULL data with a size. Main thread. */
+    tome_result (TOME_CALL *lobby_send)(tome_mod* mod, int32_t to, const void* data, uint32_t size);
+
+    /* Calls `fn` on the main thread for each lobby message this mod's
+     * copies send it (lobby_send), until the mod is disabled. Any thread.
+     * A message from another player is untrusted input: check what it says,
+     * and who sent it (from_host). */
+    tome_result (TOME_CALL *on_lobby_message)(tome_mod* mod, tome_lobby_message_fn fn, void* user);
+
+    /* The people in the lobby, this computer included, up to `max` into
+     * `out` (out may be NULL with max 0). Returns how many there are (more
+     * than `max` if they don't fit), or -1 outside a game's lobby. Poll it
+     * (TOME_EVENT_TICK) to see players come and go. Main thread. */
+    int32_t (TOME_CALL *lobby_players)(tome_lobby_player* out, int32_t max);
+
+    /* Calls `fn` when the host presses Start, once Tome's own checks pass
+     * (every player has the same required mods), only on the host and only
+     * for a "sync": "required" mod: any mod's TOME_START_REFUSE keeps the
+     * game from starting. Pressing Start again doesn't get past a mod's
+     * refusal (it does past the handshake's: StartOverride), and a callback
+     * that fails (crashes) refuses too. Any thread; `fn` runs on the main
+     * thread. */
+    tome_result (TOME_CALL *on_lobby_start)(tome_mod* mod, tome_lobby_start_fn fn, void* user);
+
+    /* The host's Start, pressed by a mod: the same checks run (the
+     * handshake's, then every mod's on_lobby_start callback, this one's
+     * too, which should now allow), then the game starts as if the host
+     * had pressed it. A mod's press never overrides the handshake's
+     * refusal the way the host's second press does. TOME_ERR_UNAVAILABLE off the host's lobby, for a mod
+     * that isn't "sync": "required", or from inside an on_lobby_start
+     * callback; TOME_OK if the checks ran (whether or not they let the
+     * game start). Main thread. */
+    tome_result (TOME_CALL *lobby_start)(tome_mod* mod);
+
+    /* Shows a line (UTF-8, the game's |c color codes allowed) in this
+     * computer's lobby chat, for this player only. TOME_ERR_UNAVAILABLE
+     * outside a game's lobby. Main thread. */
+    tome_result (TOME_CALL *lobby_show)(tome_mod* mod, const char* text);
 } tome_api;
 
 /*
@@ -1696,6 +1789,11 @@ static inline int tome_has_timers(const tome_api* api) {
  * check_metadata (version 20). */
 static inline int tome_has_mod_list(const tome_api* api) {
     return api->api_version >= 20 && api->size >= offsetof(tome_api, check_metadata) + sizeof(api->check_metadata);
+}
+
+/* True if the running Tome has the lobby functions (version 21). */
+static inline int tome_has_lobby(const tome_api* api) {
+    return api->api_version >= 21 && api->size >= offsetof(tome_api, lobby_show) + sizeof(api->lobby_show);
 }
 
 static inline int32_t tome_list_mods(const tome_api* api, tome_mod* mod, tome_mod_info* out, int32_t max) {

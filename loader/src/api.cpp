@@ -15,6 +15,7 @@
 #include "mod_manager.h"
 #include "mod_mappings.h"
 #include "natives.h"
+#include "lobby_messages.h"
 #include "net_messages.h"
 #include "objects.h"
 #include "popups.h"
@@ -258,6 +259,7 @@ void init_api(const GameBuild& build) {
     g_api.mods_dir = api_mods_dir;
     g_api.check_metadata = api_check_metadata;
     net_messages::fill_api(g_api);
+    lobby_messages::fill_api(g_api);
     frames::fill_api(g_api);
     hooks::init(build.base, build.known ? build.known->data : nullptr);
     mod_mappings::init(build.base);

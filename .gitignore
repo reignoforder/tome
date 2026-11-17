@@ -51,3 +51,6 @@ war3map.j
 # Tome's runtime folders, if the repo root is ever used as a game folder
 /mods/
 /tome/
+# Core dumps (Wine in the container leaves them in the working folder)
+/core
+core.[0-9]*
