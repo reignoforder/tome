@@ -791,6 +791,10 @@ TEST(host_objects_outside_a_game) {
     CHECK_EQ(api->lobby_start(mod), TOME_ERR_UNAVAILABLE);
     CHECK_EQ(api->lobby_show(mod, nullptr), TOME_ERR_INVALID_ARGUMENT);
     CHECK_EQ(api->lobby_show(mod, "hello"), TOME_ERR_UNAVAILABLE);
+    // Destroying frames: arguments first; no frame of Tome's is one a mod may destroy.
+    CHECK(tome_has_frame_destroy(api));
+    CHECK_EQ(api->frame_destroy(nullptr, nullptr), TOME_ERR_INVALID_ARGUMENT);
+    CHECK_EQ(api->frame_destroy(mod, nullptr), TOME_ERR_INVALID_ARGUMENT);
 }
 
 // Versions and the installed mods (API version 20): the mod list as the

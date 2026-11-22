@@ -56,6 +56,7 @@ constexpr size_t kMaxModuleSize = 16u << 20;
     X(frame_set_point, "(iiiiff)i") \
     X(frame_set_text, "(iii)i") \
     X(frame_set_visible, "(ii)i") \
+    X(frame_destroy, "(i)i") \
     X(frame_set_animation, "(iii)i") \
     X(frame_on_click, "(ii)i") \
     X(load_fdf, "(ii)i") \

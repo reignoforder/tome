@@ -1600,6 +1600,20 @@ typedef struct tome_api {
      * computer's lobby chat, for this player only. TOME_ERR_UNAVAILABLE
      * outside a game's lobby. Main thread. */
     tome_result (TOME_CALL *lobby_show)(tome_mod* mod, const char* text);
+
+    /* Destroys a frame made with frame_create (or the game's BlzCreateFrame
+     * through a map's script) and the frames below it: they leave their
+     * parent and the game's name table, so their names and contexts can be
+     * created again, and the pointers to them (and the JASS ids and Wasm
+     * handles) stop being frames: frame_get finds nothing, the other frame_*
+     * calls refuse them. Tome's own frames and the game's can't be destroyed
+     * (TOME_ERR_INVALID_ARGUMENT), nor can one that's gone already, e.g. with
+     * its screen. TOME_ERR_UNAVAILABLE on a build that doesn't map the
+     * destructor. Called from the frame's own click callback (or any
+     * button's), the destroy happens right after that click is over; the
+     * pointer is not to be used after this call returns either way. Main
+     * thread. */
+    tome_result (TOME_CALL *frame_destroy)(tome_mod* mod, tome_frame* frame);
 } tome_api;
 
 /*
@@ -1794,6 +1808,12 @@ static inline int tome_has_mod_list(const tome_api* api) {
 /* True if the running Tome has the lobby functions (version 21). */
 static inline int tome_has_lobby(const tome_api* api) {
     return api->api_version >= 21 && api->size >= offsetof(tome_api, lobby_show) + sizeof(api->lobby_show);
+}
+
+/* True if the running Tome has frame_destroy (version 21; on a build that doesn't map the
+ * game's destructor it still fails with TOME_ERR_UNAVAILABLE). */
+static inline int tome_has_frame_destroy(const tome_api* api) {
+    return api->api_version >= 21 && api->size >= offsetof(tome_api, frame_destroy) + sizeof(api->frame_destroy);
 }
 
 static inline int32_t tome_list_mods(const tome_api* api, tome_mod* mod, tome_mod_info* out, int32_t max) {

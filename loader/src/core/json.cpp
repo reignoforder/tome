@@ -347,6 +347,7 @@ private:
                 } else if (cp >= 0xDC00 && cp <= 0xDFFF) {
                     return fail("unpaired low surrogate");
                 }
+                if (cp == 0) return fail("NUL in string");
                 append_utf8(out, cp);
                 break;
             }

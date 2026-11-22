@@ -447,7 +447,7 @@ MAIN_TID=$(grep -oE "main thread [0-9]+" "$LOG" | head -n 1 | grep -oE "[0-9]+$"
 
 if ((${#MAP_ARG[@]})); then
     echo "JASS natives (map script)"
-    check "bound $((21 + RUST * 4 + WASM * 5 + WASMRS * 4)) Tome natives" "natives bound when the map loaded" 45
+    check "bound $((22 + RUST * 4 + WASM * 5 + WASMRS * 4)) Tome natives" "natives bound when the map loaded" 45
     check "\[hello\] HelloLog\(42\) called from JASS" "integer argument" 30
     check "\[hello\] HelloLogReal\(2\.5\) called from JASS" "real argument and real return value"
     check "\[hello\] HelloLog\(1001\) called from JASS" "TomeIsLoaded() returned true"
@@ -858,8 +858,19 @@ if ((${#MAP_ARG[@]})); then
     # Once the loaded game runs, a movie queued with "-movie" plays as the
     # mission is quit, skipped with Esc (TOME_DEBUG_SKIP_MOVIES: no frames
     # are presented during a movie, so the script can't).
-    TOME_DEBUG_CLICKS="wait:TomeLogInteger(8604);settle;type:-movie;wait:e2e: movie queued;\
-key:F10;settle;click:EndGameButton;settle;click:QuitButton;wait:skipping the movie;wait:Screen: score screen" \
+    # An install without its Movies folder (renamed or removed to skip the
+    # intros) has nothing to play: that part is skipped, not failed.
+    MOVIES=1
+    [[ -e "$GAME/Movies" ]] || MOVIES=0
+    if ((MOVIES)); then
+        MOVIE_INPUT="type:-movie;wait:e2e: movie queued;"
+        MOVIE_WAIT="wait:skipping the movie;"
+    else
+        echo "movie: skipped (the game has no Movies folder)"
+        MOVIE_INPUT="" MOVIE_WAIT=""
+    fi
+    TOME_DEBUG_CLICKS="wait:TomeLogInteger(8604);settle;${MOVIE_INPUT}\
+key:F10;settle;click:EndGameButton;settle;click:QuitButton;${MOVIE_WAIT}wait:Screen: score screen" \
         launch
     check "hello +1\.0\.0 +disabled" "hello starts disabled" 30
     check "\[map\] TomeLogInteger\(0\)" "map still loads; disabled native returned 0" 45
@@ -874,8 +885,10 @@ key:F10;settle;click:EndGameButton;settle;click:QuitButton;wait:skipping the mov
     check "\[hello\] loaded a saved game: Save\\\\.+\\\\TomeE2E\.w3z" "loaded event with the saved game's path" 30
     check_count "Game started: " 2 "the loaded game started" 30
     check "\[map\] TomeLogInteger\(8604\)" "the loaded game's timers run (and don't load again)" 15
-    check "movie-frame-length: blizzard\.ax patched" "a movie (queued by the map, played as it ends): blizzard.ax patched" 30
-    check "Debug: skipping the movie" "the movie played, and was skipped" 15
+    if ((MOVIES)); then
+        check "movie-frame-length: blizzard\.ax patched" "a movie (queued by the map, played as it ends): blizzard.ax patched" 30
+        check "Debug: skipping the movie" "the movie played, and was skipped" 15
+    fi
     check "Screen: score screen" "the game goes on after the movie" 20
     stop_game
 fi
@@ -1043,6 +1056,9 @@ type:/tome disable hello;wait:[hello] disabled;type:/hello ignored;frames:5;\
 type:/tome enable hello;wait:[hello] game start: ;settle;type:/tome nonsense;wait:Chat command: /tome nonsense;\
 type:/tome logs 3;wait:/tome logs: showed ;\
 key:Esc;wait:pressed Esc;click:HelloButton,13;until:[hello] Hello button clicked (2);\
+type:/hellodestroy;wait:[hello] /hellodestroy: ;type:/hellodestroy click;wait:Chat command: /hellodestroy click;\
+click:HelloButton,13;until:[hello] destroying the button from its click;settle;\
+type:/hellodestroy gone;wait:[hello] /hellodestroy gone: ;\
 key:F10;wait:game paused by;settle;click:TomeEscModsButton;until:Mod menu opened in game;\
 key:Esc;until:Mod menu closed in game;settle;key:Esc;wait:game resumed by;settle;\
 key:Ctrl+F10;wait:Mod menu opened in game;settle;click:TomeEscModsFooter3;until:Mod menu closed in game;settle;\
@@ -1073,6 +1089,9 @@ check "/tome logs: showed 3 lines" "/tome logs shows the end of tome.log" 10
 check_absent "Hello, ignored" "a disabled mod's command doesn't run"
 check "\[hello\] .+ pressed Esc" "Esc event (sent whether or not the map listens)"
 check "\[hello\] Hello button clicked \(2\)" "click on an in-game button" 10
+check "\[hello\] /hellodestroy: ok" "frames made through Tome are destroyed, and their names are free again" 10
+check "\[hello\] destroying the button from its click: 0" "a button can be destroyed from its own click callback" 10
+check "\[hello\] /hellodestroy gone: yes" "and it's gone once the click is over" 10
 check "Esc menu set up; Mods button added" "the Esc menu has a Mods button"
 check "\[hello\] game paused by .+" "the Esc menu pauses a single player game: pause event with the player" 10
 check "\[hello\] game resumed by .+" "and closing it resumes" 10

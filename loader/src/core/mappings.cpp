@@ -480,6 +480,7 @@ bool bind_build(const mappings::Build& build, BuildMappings& out, std::vector<st
     bind("CTextFrame::SetText", Kind::Function, ui.text_frame_set_text);
     bind("CFrame.vtable.Show", Kind::Offset, ui.frame_show_offset);
     bind("CFrame.vtable.Hide", Kind::Offset, ui.frame_hide_offset);
+    bind_optional("CFrame.vtable.Destroy", Kind::Offset, ui.frame_destroy_offset);
     bind("CGlueMenu::BindControl", Kind::Function, ui.glue_bind_control);
     bind("CMainMenu.vtable", Kind::Data, ui.main_menu_vtable);
     bind("CMainMenu.vtable.OnEvent", Kind::Offset, ui.main_menu_event_offset);
@@ -778,7 +779,7 @@ bool bind_build(const mappings::Build& build, BuildMappings& out, std::vector<st
         errors.push_back("the handshake's event layouts overlap");
     }
 
-    for (uint32_t offset : {ui.frame_show_offset, ui.frame_hide_offset, ui.main_menu_event_offset,
+    for (uint32_t offset : {ui.frame_show_offset, ui.frame_hide_offset, ui.frame_destroy_offset, ui.main_menu_event_offset,
                             ui.main_menu_setup_offset, ui.observer_event_offset}) {
         if (offset % 4 != 0) errors.push_back("vtable offsets must be multiples of 4");
     }

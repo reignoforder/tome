@@ -125,6 +125,7 @@ struct BuildMappings {
         uint32_t text_frame_set_text;     // CTextFrame::SetText
         uint32_t frame_show_offset;       // CFrame.vtable.Show
         uint32_t frame_hide_offset;       // CFrame.vtable.Hide
+        uint32_t frame_destroy_offset;    // CFrame.vtable.Destroy (0 where the build doesn't map it)
         uint32_t glue_bind_control;       // CGlueMenu::BindControl
         uint32_t main_menu_vtable;        // CMainMenu.vtable
         uint32_t main_menu_event_offset;  // CMainMenu.vtable.OnEvent

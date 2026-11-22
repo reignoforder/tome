@@ -663,6 +663,13 @@ impl Frame {
         check(unsafe { raw::frame_set_visible(self.0, visible as i32) })
     }
 
+    /// Destroys a frame made with [`Frame::create`], and the frames below it;
+    /// their handles stop working and their names can be created again. From
+    /// a click callback it happens right after the click.
+    pub fn destroy(self) -> Result<()> {
+        check(unsafe { raw::frame_destroy(self.0) })
+    }
+
     /// A sprite's animation, by tags.
     pub fn set_animation(self, tags: &[i32]) -> Result<()> {
         let count = i32::try_from(tags.len()).map_err(|_| Error::INVALID_ARGUMENT)?;

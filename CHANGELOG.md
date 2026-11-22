@@ -28,6 +28,13 @@ API version of each addition in `tome.h` and `sdk/README.md` ("[14]").
 
 API version 21.
 
+- **Destroying frames** (API version 21): `frame_destroy` (C, Rust and
+  WebAssembly) and the JASS native `BlzDestroyFrame` destroy a frame made
+  through Tome and the frames below it. The game unlinks it from its parent
+  and its name table, so its name and context can be created again, and
+  every pointer, JASS id and handle for it stops being a frame. Called from
+  a click callback, it happens right after the click. Not for the game's own
+  frames or Tome's; 1.27b only (1.26a's destructor slot isn't mapped).
 - **Mods: the lobby** (API version 21): a `"sync": "required"` mod can talk
   to its copies in a LAN or Battle.net game's lobby, before the game starts
   (`lobby_send`, `on_lobby_message`: up to 1 KiB, hidden lobby chat lines

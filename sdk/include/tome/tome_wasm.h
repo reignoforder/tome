@@ -177,6 +177,8 @@ TOME_WASM_IMPORT(frame_create) tome_frame_t tome_raw_frame_create(const char* na
 TOME_WASM_IMPORT(frame_set_point) int32_t tome_frame_set_point(tome_frame_t frame, int32_t point, tome_frame_t relative, int32_t relative_point, float x, float y);
 TOME_WASM_IMPORT(frame_set_text) int32_t tome_raw_frame_set_text(tome_frame_t frame, const char* text, uint32_t len);
 TOME_WASM_IMPORT(frame_set_visible) int32_t tome_frame_set_visible(tome_frame_t frame, int32_t visible);
+/* Destroys a frame made with tome_frame_create (tome.h, frame_destroy): its handle, and its children's, stop working. */
+TOME_WASM_IMPORT(frame_destroy) int32_t tome_frame_destroy(tome_frame_t frame);
 TOME_WASM_IMPORT(frame_set_animation) int32_t tome_frame_set_animation(tome_frame_t sprite, const int32_t* tags, int32_t count);
 TOME_WASM_IMPORT(frame_on_click) int32_t tome_raw_frame_on_click(tome_frame_t button, uint32_t callback);
 TOME_WASM_IMPORT(load_fdf) int32_t tome_raw_load_fdf(const char* path, uint32_t len);

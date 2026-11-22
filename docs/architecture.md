@@ -859,8 +859,18 @@ menu code uses the same helpers.
   its hidden frame back with `frame_get`.
 - **Disable:** revokers remove the UI callbacks and the clicks (a click on a
   disabled mod's button does nothing) and hide the frames the mod created,
-  if the game still finds them under their names. Frames aren't destroyed;
-  their screen owns them.
+  if the game still finds them under their names. Their screen owns them,
+  unless a mod destroys one (below).
+- **Destroying:** `frame_destroy` (and `BlzDestroyFrame`) calls the frame's
+  destructor (`CFrame.vtable.Destroy`, `reverse-engineering.md`, "Frames")
+  with the unlink flag, for a frame made through Tome only (`g_created`
+  in `frames.cpp`, keyed by pointer and checked against the name and context
+  it registered under, so a pointer the game reuses isn't taken for it).
+  The game unlinks it from its parent and the name table, so its name is
+  free again and every JASS id, Wasm handle and click registration for it
+  fails the existing "does the game still find it" check. Called from a click
+  callback (the game's own click code goes on using the button after the
+  observer returns), it's queued and runs right after (`main_thread::post`).
 - **JASS:** `BlzGetFrameByName`, `BlzCreateFrame`, `BlzFrameSetPoint`,
   `BlzFrameSetText`, `BlzFrameSetVisible`, `BlzLoadTOCFile`, with 1.31's
   names but integer frame ids (the FrameTable index) instead of
@@ -2150,7 +2160,7 @@ API version 10: `popup`, `popup_close`, `restart_game`.
   clicks don't reach the menu or the game behind it; the backdrop, title
   and text are its children, anchored at runtime with two points each
   (no SetHeight needed). Buttons are separate `TomePopupButton` frames,
-  one per slot. Frames can't be destroyed, so each screen gets one set,
+  one per slot. Popups' frames aren't destroyed (they're Tome's own), so each screen gets one set,
   with its own range of create contexts (popup = base, slot i = base + 1
   + i), reused by every later popup there; unused slots are hidden.
 - **Layout** (`popup::layout`, unit-tested): up to three options whose

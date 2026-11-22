@@ -114,7 +114,7 @@ namespace {
 
 int32_t TOME_CALL api_selection(tome_unit* units, uint32_t unit_size, int32_t max, int32_t* leader) {
     if (leader) *leader = -1;
-    if (!g_build || max < 0 || (max > 0 && (!units || unit_size == 0))) return 0;
+    if (!g_build || max < 0 || (max > 0 && (!units || unit_size < sizeof(uint32_t)))) return 0;
     if (!frames::on_main_thread()) {
         TOME_ERROR("selection called off the game's main thread (thread %lu); ignored", GetCurrentThreadId());
         return 0;

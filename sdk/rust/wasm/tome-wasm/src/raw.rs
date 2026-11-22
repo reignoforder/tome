@@ -54,6 +54,7 @@ imports! {
     fn frame_set_point(frame: u32, point: i32, relative: u32, relative_point: i32, x: f32, y: f32) -> i32;
     fn frame_set_text(frame: u32, text: *const u8, len: u32) -> i32;
     fn frame_set_visible(frame: u32, visible: i32) -> i32;
+    fn frame_destroy(frame: u32) -> i32;
     fn frame_set_animation(sprite: u32, tags: *const i32, count: i32) -> i32;
     fn frame_on_click(button: u32, callback: u32) -> i32;
     fn load_fdf(path: *const u8, len: u32) -> i32;

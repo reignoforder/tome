@@ -7,6 +7,7 @@
 #include "game_build.h"
 #include "guard.h"
 #include "log.h"
+#include "main_thread.h"
 #include "mod_manager.h"
 #include "natives.h"
 #include "overlay.h"
@@ -17,6 +18,7 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <cstring>
 #include <functional>
 #include <map>
@@ -41,6 +43,7 @@ using SpriteInstanceFn = void*(__thiscall*)(void* sprite);
 using SetAnimationFn = void(__fastcall*)(void* instance, const int* tags, int count, int flags);
 using SetTextFn = void(__thiscall*)(void* text_frame, const char* text);
 using FrameMethodFn = void(__thiscall*)(void* frame);
+using FrameDestroyFn = void(__thiscall*)(void* frame, int unlink);
 using StringTextFn = const char*(__thiscall*)(const void* jass_string);
 using SetListenerFn = void(__thiscall*)(void* control, int command, void* listener, int enable);
 using SetFocusFn = void(__thiscall*)(void* frame, int focus, int, void* other);
@@ -204,6 +207,41 @@ void run_ui_hooks(int32_t event) {
     }
 }
 
+// --- frames made through Tome, and destroying them ------------------------------
+// Only a frame a mod (or a map's BlzCreateFrame) made can be destroyed: Tome
+// knows nothing of what else the game holds on to in its own frames (a
+// screen's control lists, its pointers to its children). Keyed by pointer,
+// with the name and context the frame registered under, so a pointer the
+// game reuses for another frame after its screen went isn't taken for it.
+// Main thread.
+std::map<void*, std::pair<std::string, int>> g_created;
+int g_in_click = 0;                // clicks being handled: a destroy waits for them to finish
+std::vector<void*> g_destroy_later;  // frames to destroy once the click that asked is over
+
+bool created_alive(void* frame) {
+    auto it = g_created.find(frame);
+    return it != g_created.end() && get(it->second.first.c_str(), it->second.second) == frame;
+}
+
+void remember_created(void* frame, const std::string& name, int context) {
+    for (auto it = g_created.begin(); it != g_created.end();) {
+        it = get(it->second.first.c_str(), it->second.second) == it->first ? std::next(it) : g_created.erase(it);
+    }
+    if (frame) g_created[frame] = {name, context};
+}
+
+// Whether `frame` can be destroyed now: a frame made through Tome that still
+// exists, on a build that maps the destructor.
+tome_result destroyable(void* frame, const char* what) {
+    if (!g_build->ui.frame_destroy_offset) return TOME_ERR_UNAVAILABLE;
+    if (!created_alive(frame)) {
+        TOME_ERROR("%s: that isn't a frame made through Tome that still exists (only those can be destroyed)", what);
+        g_created.erase(frame);
+        return TOME_ERR_INVALID_ARGUMENT;
+    }
+    return TOME_OK;
+}
+
 // --- clicks --------------------------------------------------------------------
 // Controls report clicks to CObservers registered with CControl::SetListener,
 // passing the registration's command id. Tome registers one observer of its
@@ -243,6 +281,22 @@ bool frame_alive(void* frame) {
     return record && get(record->name.c_str(), record->context) == frame;
 }
 
+void destroy_now(void* frame) {
+    const auto entry = g_created[frame];
+    auto vtable = *reinterpret_cast<uintptr_t**>(frame);
+    reinterpret_cast<FrameDestroyFn>(vtable[g_build->ui.frame_destroy_offset / sizeof(uintptr_t)])(frame, 1);
+    g_created.erase(frame);
+    if (get(entry.first.c_str(), entry.second)) {
+        TOME_WARN("frame_destroy(%s, context %d): the game still finds a frame under that name", entry.first.c_str(),
+                  entry.second);
+    }
+    // Clicks on it, or on the buttons below it, are over.
+    ExclusiveLock hold(g_clicks_lock);
+    for (auto it = g_clicks.begin(); it != g_clicks.end();) {
+        it = frame_alive(it->second.button) ? std::next(it) : g_clicks.erase(it);
+    }
+}
+
 int __thiscall observer_on_event(Observer*, void* event) {
     int command = *reinterpret_cast<int*>(static_cast<char*>(event) + 8);
     Click click;
@@ -252,15 +306,31 @@ int __thiscall observer_on_event(Observer*, void* event) {
         if (it == g_clicks.end() || !frame_alive(it->second.button)) return 0;
         click = it->second;
     }
+    ++g_in_click;
     if (click.tome_fn) {
         click.tome_fn();
     } else {
         guard::run(click.mod, "click callback", nullptr,
                    [&] { click.fn(click.mod, static_cast<tome_frame*>(click.button), click.user); });
     }
+    --g_in_click;
     // A clicked button keeps the keyboard focus, and in a game it would take
-    // the next Enter instead of the chat box. Hand the keyboard back.
-    if (screen_live(TOME_UI_GAME) && *g_focused_frame == click.button) g_set_focus(click.button, 0, 0, nullptr);
+    // the next Enter instead of the chat box. Hand the keyboard back (unless
+    // the callback destroyed it: the game's click code goes on using it).
+    if (frame_alive(click.button) && screen_live(TOME_UI_GAME) && *g_focused_frame == click.button) {
+        g_set_focus(click.button, 0, 0, nullptr);
+    }
+    if (g_in_click == 0 && !g_destroy_later.empty()) {
+        // The game's own click code still runs after this returns, on the
+        // button (it may be the one being destroyed): wait for it.
+        main_thread::post([] {
+            std::vector<void*> later;
+            later.swap(g_destroy_later);
+            for (void* frame : later) {
+                if (created_alive(frame)) destroy_now(frame);
+            }
+        });
+    }
     return 1;
 }
 
@@ -390,13 +460,29 @@ tome_frame* TOME_CALL api_frame_create(tome_mod* mod, const char* name, tome_fra
                   static_cast<long>(context));
     }
     g_table.remember(reinterpret_cast<uintptr_t>(frame), name, context);
-    // The parent owns the frame, so there's nothing to free; hide it while
-    // that screen still exists.
+    remember_created(frame, name, context);
+    // The parent owns the frame (frame_destroy ends that early); hide it
+    // while its screen still exists.
     std::string frame_name = name;
     mod->add_revoker([frame, frame_name, context] {
         if (on_main_thread() && get(frame_name.c_str(), context) == frame) set_visible(frame, false);
     });
     return static_cast<tome_frame*>(frame);
+}
+
+tome_result TOME_CALL api_frame_destroy(tome_mod* mod, tome_frame* frame) {
+    if (!mod || !frame) return TOME_ERR_INVALID_ARGUMENT;
+    if (tome_result r = check_main_thread("frame_destroy"); r != TOME_OK) return r;
+    if (tome_result r = destroyable(frame, mod->id.c_str()); r != TOME_OK) return r;
+    if (g_in_click > 0) {
+        // From a click callback: right after the click is over.
+        if (std::find(g_destroy_later.begin(), g_destroy_later.end(), frame) == g_destroy_later.end()) {
+            g_destroy_later.push_back(frame);
+        }
+        return TOME_OK;
+    }
+    destroy_now(frame);
+    return TOME_OK;
 }
 
 tome_result TOME_CALL api_frame_set_point(tome_frame* frame, int32_t point, tome_frame* relative,
@@ -514,7 +600,22 @@ int32_t native_create_frame(const void* name, int32_t owner, int32_t priority, i
     const char* text = jass_string(name);
     void* parent = jass_frame(owner);
     if (!text || !*text || !parent || get(text, context)) return 0;  // see api_frame_create
-    return g_table.remember(reinterpret_cast<uintptr_t>(create(text, parent, priority, context)), text, context);
+    void* frame = create(text, parent, priority, context);
+    remember_created(frame, text, context);
+    return g_table.remember(reinterpret_cast<uintptr_t>(frame), text, context);
+}
+
+// native BlzDestroyFrame takes integer frame returns nothing
+// Only frames made by BlzCreateFrame or a mod's frame_create (see api_frame_destroy).
+int32_t native_destroy_frame(int32_t frame) {
+    void* f = jass_frame(frame);
+    if (!f || destroyable(f, "BlzDestroyFrame") != TOME_OK) return 0;
+    if (g_in_click > 0) {
+        if (std::find(g_destroy_later.begin(), g_destroy_later.end(), f) == g_destroy_later.end()) g_destroy_later.push_back(f);
+    } else {
+        destroy_now(f);
+    }
+    return 0;
 }
 
 // native BlzFrameSetPoint takes integer frame, integer point, integer relative, integer relativePoint, real x, real y returns nothing
@@ -573,6 +674,7 @@ void declare_natives() {
         {"native BlzCreateFrame takes string name, integer owner, integer priority, integer createContext "
          "returns integer",
          reinterpret_cast<void*>(&native_create_frame)},
+        {"native BlzDestroyFrame takes integer frame returns nothing", reinterpret_cast<void*>(&native_destroy_frame)},
         {"native BlzFrameSetPoint takes integer frame, integer point, integer relative, integer relativePoint, "
          "real x, real y returns nothing",
          reinterpret_cast<void*>(&native_frame_set_point)},
@@ -649,6 +751,7 @@ void fill_api(tome_api& api) {
     api.frame_set_visible = api_frame_set_visible;
     api.frame_set_animation = api_frame_set_animation;
     api.frame_on_click = api_frame_on_click;
+    api.frame_destroy = api_frame_destroy;
     api.ui_root = api_ui_root;
 }
 

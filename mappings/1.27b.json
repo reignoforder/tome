@@ -153,6 +153,10 @@
       "kind": "offset", "value": "0xd0",
       "doc": "void __thiscall Hide(void). Sets bit 0 of the flags at +0xB0 and marks children hidden by parent."
     },
+    "CFrame.vtable.Destroy": {
+      "kind": "offset", "value": "0xd8",
+      "doc": "void __thiscall Destroy(int unlink) (ret 4; CFrame's is 0xF55D0): the teardown the game uses for screens and for frames that fail to initialize. With unlink 1 it removes the frame from its parent's child list (0xF05A0, through 0xF1010), then destroys the children, clears the focus and hover globals that point at it (0xD47820..0xD4782C, the focused frame 0xD47830), removes it from the name table (0xF1B70) and frees its listeners. Children go the same way, so their names are free again."
+    },
     "CFrame.vtable.Show": {
       "kind": "offset", "value": "0xd4",
       "doc": "void __thiscall Show(void). Also shows every child."

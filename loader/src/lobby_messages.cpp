@@ -303,6 +303,10 @@ bool start_allowed(std::vector<std::string>& reasons) {
         allowed = false;
         reason[kMaxReason - 1] = '\0';
         TOME_INFO("[%s] refused the start%s%s", h.mod->id.c_str(), reason[0] ? ": " : "", reason);
+        // One line, like lobby_show's: a reason can't add lines to the chat.
+        for (char* c = reason; *c; ++c) {
+            if (*c == '\r' || *c == '\n') *c = ' ';
+        }
         if (reason[0]) reasons.push_back(reason);
     }
     g_in_start = false;

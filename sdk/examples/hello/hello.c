@@ -14,10 +14,13 @@
  */
 #include <tome/tome.h>
 
+#include <string.h>
+
 static const tome_api* api;
 static tome_mod* self;
 static int times_enabled;
 static int clicks;
+static int destroy_on_click; /* /hellodestroy click: the next click destroys the button it was made for */
 static unsigned ticks;
 static unsigned game_ticks;
 static unsigned orders; /* logged this game: orders are frequent */
@@ -81,10 +84,16 @@ static void show_clicks(int32_t context) {
 
 /* `user` carries the button's create context: one per screen. */
 static void TOME_CALL on_hello_clicked(tome_mod* mod, tome_frame* button, void* user) {
-    (void)button;
     ++clicks;
     tome_logf(api, mod, TOME_LOG_INFO, "Hello button clicked (%d)", clicks);
     show_clicks((int32_t)(intptr_t)user);
+    if (destroy_on_click) {
+        /* Destroying a button from its own click callback is allowed: Tome
+         * waits until the click is over. */
+        destroy_on_click = 0;
+        tome_logf(api, mod, TOME_LOG_INFO, "destroying the button from its click: %d",
+                  (int)api->frame_destroy(mod, button));
+    }
 }
 
 /* Runs each time one of the screens is built, so the button comes back with it. */
@@ -424,6 +433,35 @@ static void greet(tome_mod* mod, const char* who, const char* source) {
 static void TOME_CALL on_hello_command(tome_mod* mod, const char* args, void* user) {
     (void)user;
     greet(mod, args, "/hello command");
+}
+
+/* API version 21: frame_destroy. /hellodestroy makes a button in the game with its own context, destroys
+ * it (the game then finds neither it nor its text child), makes the same name again and destroys that;
+ * /hellodestroy click destroys the in-game Hello button at its next click; /hellodestroy gone says
+ * whether it's gone. */
+static void TOME_CALL on_destroy_command(tome_mod* mod, const char* args, void* user) {
+    tome_frame* root = api->ui_root(TOME_UI_GAME);
+    tome_frame* button;
+    int ok_all = 1, round;
+    (void)user;
+    if (strcmp(args, "click") == 0) {
+        destroy_on_click = 1;
+        return;
+    }
+    if (strcmp(args, "gone") == 0) {
+        tome_logf(api, mod, TOME_LOG_INFO, "/hellodestroy gone: %s", api->frame_get("HelloButton", TOME_UI_GAME) ? "no" : "yes");
+        return;
+    }
+    if (!root || api->load_fdf(mod, "ui/hello.fdf") != TOME_OK) return;
+    for (round = 0; round < 2; ++round) {
+        button = api->frame_create(mod, "HelloButton", root, 0, 99);
+        ok_all &= button && api->frame_get("HelloButtonText", 99);
+        ok_all &= api->frame_destroy(mod, button) == TOME_OK;
+        ok_all &= !api->frame_get("HelloButton", 99) && !api->frame_get("HelloButtonText", 99);
+    }
+    /* The game's own frames aren't ours to destroy. */
+    ok_all &= api->frame_destroy(mod, root) == TOME_ERR_INVALID_ARGUMENT;
+    tome_logf(api, mod, TOME_LOG_INFO, "/hellodestroy: %s", ok_all ? "ok" : "MISMATCH");
 }
 
 /* API version 16: game objects. /helloobj reads the selected unit and its
@@ -776,6 +814,7 @@ TOME_EXPORT void TOME_CALL tome_mod_enable(tome_mod* mod) {
         for (i = TOME_EVENT_SPELL_CHANNEL; i <= TOME_EVENT_NIGHT; ++i) api->on_event(mod, i, on_more_event, NULL);
     }
     if (tome_has_objects(api)) api->register_command(mod, "helloobj", on_objects_command, NULL);
+    if (tome_has_frame_destroy(api)) api->register_command(mod, "hellodestroy", on_destroy_command, NULL);
     if (tome_has_mod_list(api)) api->on_event(mod, TOME_EVENT_MODS_CHANGED, on_mods_changed, NULL);
     if (tome_has_settings(api)) {
         api->on_setting_changed(mod, on_setting_changed, NULL);

@@ -90,7 +90,7 @@ outside memory; nothing is terminated.
 | `setting_*`, `set_setting_*`, `on_setting_changed` | same | |
 | `on_event` | same | the callback gets a `tome_wasm_event` (below) |
 | `on_ui`, `ui_root` | same | the callback gets the screen as an i32 |
-| `frame_get`, `frame_create`, `frame_set_point`, `frame_set_text`, `frame_set_visible`, `frame_set_animation`, `frame_on_click` | same | frames are handles (below); a click gets the button's handle |
+| `frame_get`, `frame_create`, `frame_set_point`, `frame_set_text`, `frame_set_visible`, `frame_destroy`, `frame_set_animation`, `frame_on_click` | same | frames are handles (below); a click gets the button's handle |
 | `load_fdf`, `load_toc` | same | `load_fdf`: a path in the mod's folder, as for DLLs; `load_toc`: checked like `read_game_file` |
 | `on_keybind`, `keybind_name` | same | |
 | `popup`, `popup_close` | same | the popup as a struct of `(ptr, len)` strings; the callback gets the id and choice |

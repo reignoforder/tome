@@ -106,6 +106,10 @@ helpers check for you.
   and keep the game from starting until your mod is ready
   (`on_lobby_start`; `lobby_start` presses Start once it is). Required mods
   only; WebAssembly mods have `lobby_show` and `lobby_start`.
+- **Destroying frames** [21]: `frame_destroy` (`BlzDestroyFrame` in JASS)
+  destroys a frame your mod made and the frames below it, so a list, a tooltip
+  or a panel can come and go and its name can be created again. Only frames
+  made through Tome (not the game's own, not Tome's menus); on 1.27b.
 - **Your mod's time**: Tome times every call into your mod. The Mods menu's
   Details page shows its time a frame and its slowest call, `/tome perf`
   the busiest mods.

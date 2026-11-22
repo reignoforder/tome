@@ -756,6 +756,13 @@ int32_t w_frame_set_visible(wasm_exec_env_t env, uint32_t frame, int32_t visible
     return api()->frame_set_visible(f, visible);
 }
 
+int32_t w_frame_destroy(wasm_exec_env_t env, uint32_t frame) {
+    Impl* impl = impl_of(env);
+    tome_frame* f = arg_frame(impl, "frame_destroy", frame);
+    if (!f) return TOME_ERR_INVALID_ARGUMENT;
+    return api()->frame_destroy(impl->mod, f);
+}
+
 int32_t w_frame_set_animation(wasm_exec_env_t env, uint32_t frame, uint32_t tags, int32_t count) {
     Impl* impl = impl_of(env);
     tome_frame* f = arg_frame(impl, "frame_set_animation", frame);
