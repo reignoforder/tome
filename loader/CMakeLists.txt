@@ -170,6 +170,7 @@ add_library(tome_core STATIC
     src/core/version.cpp
     src/core/wasm_abi.cpp
     src/core/wasm_alloc.cpp
+    src/core/wasm_hooks.cpp
     src/core/wasm_layout.cpp
     src/core/widescreen.cpp
     src/core/x86.cpp

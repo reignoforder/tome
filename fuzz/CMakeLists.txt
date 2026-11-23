@@ -45,6 +45,7 @@ add_library(fuzz_core STATIC
     ${CORE}/update_check.cpp
     ${CORE}/version.cpp
     ${CORE}/wasm_abi.cpp
+    ${CORE}/wasm_hooks.cpp
     ${CORE}/wasm_layout.cpp
     ${CORE}/zip.cpp
 )
@@ -56,7 +57,7 @@ target_include_directories(fuzz_core PUBLIC ${ROOT}/loader/src ${ROOT}/sdk/inclu
 target_compile_options(fuzz_core PUBLIC -g -O1 -fno-exceptions -fno-rtti ${SANITIZERS} -fsanitize=fuzzer-no-link)
 target_link_options(fuzz_core PUBLIC ${SANITIZERS})
 
-foreach(name handshake netmsg lobbymsg desync chat zip inflate json jass paths blp signature update wasm_abi wasm_layout)
+foreach(name handshake netmsg lobbymsg desync chat zip inflate json jass paths blp signature update wasm_abi wasm_layout wasm_hooks)
     add_executable(fuzz_${name} fuzz_${name}.cpp)
     target_link_libraries(fuzz_${name} PRIVATE fuzz_core)
     target_compile_options(fuzz_${name} PRIVATE -fsanitize=fuzzer)

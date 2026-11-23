@@ -16,9 +16,10 @@ use std::rc::Rc;
 
 use crate::events::EventInfo;
 use crate::natives::{Args, Ret, RetKind};
-use crate::{Error, Frame, Level, Result, UiEvent};
+use crate::{Error, Frame, HookCall, Level, LobbyMessage, LobbyStart, Result, UiEvent};
 
 type MessageFn = Rc<dyn Fn(&str, &[u8])>;
+type NetFn = Rc<dyn Fn(i32, &[u8], bool)>;
 
 #[derive(Clone)]
 pub(crate) enum Callback {
@@ -28,10 +29,13 @@ pub(crate) enum Callback {
     Click(Rc<dyn Fn(Frame)>),
     Popup(Rc<dyn Fn(u32, Option<usize>)>),
     Message(MessageFn),
-    Net(Rc<dyn Fn(i32, &[u8], bool)>),
+    Net(NetFn),
     Native(Rc<dyn Fn(&Args) -> Ret>),
     Timer(Rc<dyn Fn(u32)>),
     Checksum(Rc<dyn Fn() -> u64>),
+    Hook(Rc<dyn Fn(&mut HookCall)>),
+    Lobby(Rc<dyn Fn(&LobbyMessage)>),
+    LobbyStart(Rc<dyn Fn() -> LobbyStart>),
 }
 
 // A block from tome_buffer: 8-aligned (events hold doubles), with a byte
@@ -215,6 +219,48 @@ pub fn callback(id: u32, addr: usize, len: u32) {
             if let (Some(player), Some(replay)) = (word(data, 0), word(data, 4)) {
                 f(player as i32, &data[8..], replay != 0)
             }
+        }
+        Callback::Hook(f) => {
+            // [flags][result][arguments...]: changed in place, and Tome reads
+            // the block after this returns, so it lives until the next callback.
+            let words = (len / 4) as usize;
+            if words < 2 || addr % 4 != 0 {
+                return;
+            }
+            let call = unsafe { core::slice::from_raw_parts_mut(addr as *mut u32, words) };
+            f(&mut HookCall { words: call });
+            let kept = block.take();
+            STATE.with(|s| s.borrow_mut().answer = kept);
+        }
+        Callback::Lobby(f) => {
+            // [player][from host][data]
+            if let (Some(player), Some(from_host)) = (word(data, 0), word(data, 4)) {
+                f(&LobbyMessage { player: player as i32, from_host: from_host != 0, data: &data[8..] })
+            }
+        }
+        Callback::LobbyStart(f) => {
+            // The block is [verdict][reason, NUL-terminated], zeros when it
+            // comes (refuse quietly); Tome reads it after this returns.
+            if len < 8 {
+                return;
+            }
+            let (verdict, reason) = match f() {
+                LobbyStart::Allow => (crate::consts::TOME_START_ALLOW, String::new()),
+                LobbyStart::Refuse(reason) => (crate::consts::TOME_START_REFUSE, reason),
+            };
+            let room = len as usize - 5; // a byte stays 0 for the NUL
+            let mut end = reason.len().min(room);
+            while !reason.is_char_boundary(end) {
+                end -= 1;
+            }
+            let out = addr as *mut u8;
+            unsafe {
+                core::ptr::copy_nonoverlapping(verdict.to_le_bytes().as_ptr(), out, 4);
+                core::ptr::copy_nonoverlapping(reason.as_ptr(), out.add(4), end);
+                *out.add(4 + end) = 0;
+            }
+            let kept = block.take();
+            STATE.with(|s| s.borrow_mut().answer = kept);
         }
         Callback::Native(_) => {}
         Callback::Timer(f) => {
@@ -413,6 +459,73 @@ mod tests {
         callback(id, addr, 8);
         let got = unsafe { bytes(addr, 8) };
         assert_eq!(got, &[8, 7, 6, 5, 4, 3, 2, 1]);
+    }
+
+    #[test]
+    fn a_lobby_start_answers_in_its_block() {
+        let id = register(Callback::LobbyStart(Rc::new(|| LobbyStart::Refuse("not yet".into()))), |_| 0).unwrap();
+        let addr = buffer(256);
+        callback(id, addr, 256);
+        let got = unsafe { bytes(addr, 256) };
+        assert_eq!(&got[..4], &[0, 0, 0, 0]);
+        assert_eq!(&got[4..12], b"not yet\0");
+        let id = register(Callback::LobbyStart(Rc::new(|| LobbyStart::Allow)), |_| 0).unwrap();
+        let addr = buffer(256);
+        callback(id, addr, 256);
+        let got = unsafe { bytes(addr, 256) };
+        assert_eq!(&got[..5], &[1, 0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn a_long_refusal_is_cut_on_a_character() {
+        let long = "é".repeat(200);
+        let id = register(Callback::LobbyStart(Rc::new(move || LobbyStart::Refuse(long.clone()))), |_| 0).unwrap();
+        let addr = buffer(256);
+        callback(id, addr, 256);
+        let got = unsafe { bytes(addr, 256) };
+        let end = got[4..].iter().position(|&b| b == 0).unwrap();
+        assert!(end <= 251);
+        assert!(core::str::from_utf8(&got[4..4 + end]).is_ok());
+    }
+
+    #[test]
+    fn a_lobby_message_has_its_sender_and_data() {
+        let seen = Rc::new(core::cell::Cell::new((0, false, 0usize)));
+        let s = seen.clone();
+        let id = register(
+            Callback::Lobby(Rc::new(move |m: &LobbyMessage| s.set((m.player, m.from_host, m.data.len())))),
+            |_| 0,
+        )
+        .unwrap();
+        let block: [u8; 11] = [7, 0, 0, 0, 1, 0, 0, 0, 9, 9, 9];
+        callback(id, block.as_ptr() as usize, 11);
+        assert_eq!(seen.get(), (7, true, 3));
+    }
+
+    #[test]
+    fn a_hook_changes_its_block_in_place() {
+        let id = register(
+            Callback::Hook(Rc::new(|call: &mut HookCall| {
+                assert_eq!(call.arg_count(), 2);
+                assert_eq!(call.handle(0), 7);
+                let hp = call.float(1);
+                call.set_float(1, hp * 2.0);
+                call.set_result_int(5);
+                call.skip();
+            })),
+            |_| 0,
+        )
+        .unwrap();
+        let addr = buffer(16);
+        let block = unsafe { core::slice::from_raw_parts_mut(addr as *mut u32, 4) };
+        block[2] = 7;
+        block[3] = 1.5f32.to_bits();
+        callback(id, addr, 16);
+        let got = unsafe { core::slice::from_raw_parts(addr as *const u32, 4) };
+        assert_eq!(got[0], 1);
+        assert_eq!(got[1], 5);
+        assert_eq!(f32::from_bits(got[3]), 3.0);
+        assert_eq!(got[2], 7);
     }
 
     #[test]

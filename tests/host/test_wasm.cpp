@@ -806,6 +806,54 @@ TEST(host_wasm_imports_checked) {
     CHECK(config.find("3.5") != std::string::npos);
 }
 
+// The lobby's imports (API version 21) outside a lobby: sends are
+// unavailable, the player list is -1, and what's outside the module's memory
+// or too large is refused.
+TEST(host_wasm_lobby_outside_a_lobby) {
+    Fixture f;
+    const uint32_t send = f.b.import("tome", "lobby_send", {I32, I32, I32}, {I32});
+    const uint32_t players = f.b.import("tome", "lobby_players", {I32, I32}, {I32});
+    f.b.data(200, "hello");
+    constexpr int32_t kOut = 2000, kOutside = 70000;
+
+    Bytes body;
+    int checks = 0;
+    auto add = [&](std::initializer_list<Bytes> parts) {
+        for (const Bytes& p : parts) body.insert(body.end(), p.begin(), p.end());
+    };
+    auto expect = [&](std::initializer_list<Bytes> call, int32_t expected) {
+        char marker[8];
+        std::snprintf(marker, sizeof(marker), "ok%02d", ++checks);
+        const int32_t at = 1100 + 8 * checks;
+        f.b.data(static_cast<uint32_t>(at), marker);
+        add(call);
+        add({op::i32_const(expected), op::i32_eq(), op::if_(), f.log_at(at, 4), op::end()});
+    };
+    using namespace op;
+    expect({i32_const(TOME_LOBBY_EVERYONE), i32_const(200), i32_const(5), call(send)}, TOME_ERR_UNAVAILABLE);
+    expect({i32_const(0), i32_const(200), i32_const(TOME_LOBBY_MAX_MESSAGE + 1), call(send)},
+           TOME_ERR_INVALID_ARGUMENT);
+    expect({i32_const(0), i32_const(kOutside), i32_const(5), call(send)}, TOME_ERR_INVALID_ARGUMENT);
+    expect({i32_const(kOut), i32_const(4), call(players)}, -1);
+    expect({i32_const(kOutside), i32_const(4), call(players)}, -1);
+    expect({i32_const(kOut), i32_const(-1), call(players)}, -1);
+
+    f.load({i32_const(0)});
+    f.b.export_func("tome_mod_enable", f.b.func({}, {}, {body}));
+    f.callbacks();
+    Home home;
+    CHECK(install_wasm(home, "wasm-lobby", f.b.bytes()));
+    Session session;
+    CHEkCK(session.start(home));
+    mod_manager().set_enabled("wasm-lobby", true);
+    CHECK(running("wasm-lobby"));
+    for (int i = 1; i <= checks; ++i) {
+        char marker[16];
+        std::snprintf(marker, sizeof(marker), "[wasm-lobby] ok%02d", i);
+        CHECK_LOG(marker);
+    }
+}
+
 // Versions by Tome's rules (API version 20), from a module: strings and
 // the result's place checked like every other import's.
 TEST(host_wasm_versions) {

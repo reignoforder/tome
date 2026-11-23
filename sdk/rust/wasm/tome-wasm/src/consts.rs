@@ -8,6 +8,10 @@
 pub const TOME_API_VERSION: u32 = 21;
 pub const TOME_POPUP_CLOSED: i32 = -1;
 pub const TOME_NET_MAX_MESSAGE: u32 = 1024;
+pub const TOME_LOBBY_MAX_MESSAGE: u32 = 1024;
+pub const TOME_LOBBY_EVERYONE: i32 = -1;
+pub const TOME_START_ALLOW: i32 = 1;
+pub const TOME_START_REFUSE: i32 = 0;
 
 // tome_result
 pub const TOME_OK: i32 = 0;
@@ -154,6 +158,10 @@ pub const TOME_CHAT_ALL: i32 = 0;
 pub const TOME_CHAT_ALLIES: i32 = 1;
 pub const TOME_CHAT_OBSERVERS: i32 = 2;
 pub const TOME_CHAT_PRIVATE: i32 = 3;
+
+// tome_hook_phase
+pub const TOME_HOOK_BEFORE: i32 = 1;
+pub const TOME_HOOK_AFTER: i32 = 3;
 
 // tome_clock
 pub const TOME_CLOCK_REAL: i32 = 0;

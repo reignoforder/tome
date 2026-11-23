@@ -7,6 +7,10 @@
 #define TOME_API_VERSION 21
 #define TOME_POPUP_CLOSED (-1)
 #define TOME_NET_MAX_MESSAGE 1024
+#define TOME_LOBBY_MAX_MESSAGE 1024
+#define TOME_LOBBY_EVERYONE (-1)
+#define TOME_START_ALLOW 1
+#define TOME_START_REFUSE 0
 
 typedef enum tome_result {
     TOME_OK = 0,
@@ -319,6 +323,17 @@ typedef enum tome_chat_recipient {
     TOME_CHAT_OBSERVERS = 2,  /* observers or referees */
     TOME_CHAT_PRIVATE = 3
 } tome_chat_recipient;
+
+/*
+ * When a module's hook runs relative to the game's function (tome_hook): BEFORE
+ * may change number arguments or skip the function, AFTER may change the result.
+ * Handlers run on the game's main thread. (Raw DLL hooks also have a REPLACE
+ * phase; a module can't use it.)
+ */
+typedef enum tome_hook_phase {
+    TOME_HOOK_BEFORE = 1,
+    TOME_HOOK_AFTER = 3
+} tome_hook_phase;
 
 /*
  * Timers (API version 19). A timer runs `fn` on the main thread after a

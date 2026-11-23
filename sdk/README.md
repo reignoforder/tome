@@ -53,6 +53,11 @@ helpers check for you.
   players, resources, day and night, saved games.
 - **UI** [3, 5]: frames from the mod's own FDF files on every menu screen and
   in games, button clicks, popups [10].
+- **Typed hooks and calls** (no API change): `#include <tome/tome_game.h>`
+  (generated from the mapping files, `tools/gen-game-header.py`) for
+  `TOME_FN_<name>` (the name for `hook` and `resolve`), `tome_fn_<name>` (the
+  function's pointer type, calling convention included) and `TOME_ARGS(<name>,
+  call)->text`, a hook's arguments by name instead of `call->args[1]`.
 - **Hooks** [4, 9]: run code before, after or instead of a mapped game
   function or an import of game.dll, Tome's or one the mod maps itself
   (`mappings/<build>.json`, `docs/tome-mod-json.md`).
@@ -105,7 +110,8 @@ helpers check for you.
   (`lobby_show`),
   and keep the game from starting until your mod is ready
   (`on_lobby_start`; `lobby_start` presses Start once it is). Required mods
-  only; WebAssembly mods have `lobby_show` and `lobby_start`.
+  only; WebAssembly mods have all of it (`tome_lobby_send`, `tome_on_lobby_message`,
+  `tome_lobby_players`, `tome_on_lobby_start`; `lobby_send` and friends in Rust).
 - **Destroying frames** [21]: `frame_destroy` (`BlzDestroyFrame` in JASS)
   destroys a frame your mod made and the frames below it, so a list, a tooltip
   or a panel can come and go and its name can be created again. Only frames
@@ -258,8 +264,9 @@ It can use almost all of the API: settings, chat commands, game events,
 screens, frames and clicks, keybinds, popups, the selection, messages
 between mods, JASS natives and code values, the game's files, and files of
 its own (`tome_config_read`/`tome_config_write` instead of a folder path).
-It can't hook game functions, resolve addresses or reach memory: if a mod
-needs those, it's a DLL mod.
+It can't resolve addresses or reach memory, and its hooks are limited to the
+game functions that take numbers and units, items and players
+(`tome_wasm_game.h`): if a mod needs more than that, it's a DLL mod.
 
 ```sh
 cp -r templates/wasm my-mod && cd my-mod

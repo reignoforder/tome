@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "id": "rs-probe",
+  "version": "1.0.0",
+  "name": "Rust runtime probe",
+  "description": "Test-only: exercises the Rust Wasm runtime's lobby and hook callbacks.",
+  "game": "1.27b",
+  "tome": "*",
+  "wasm": "runtime_probe_rs.wasm",
+  "sync": "required"
+}

@@ -105,7 +105,7 @@ static void end(uint32_t saved) {
 
 /* --- callbacks --------------------------------------------------------------- */
 
-enum kind { K_TEXT = 1, K_EVENT, K_UI, K_CLICK, K_POPUP, K_MESSAGE, K_NATIVE, K_NET, K_TIMER, K_CHECKSUM };
+enum kind { K_TEXT = 1, K_EVENT, K_UI, K_CLICK, K_POPUP, K_MESSAGE, K_NATIVE, K_NET, K_TIMER, K_CHECKSUM, K_LOBBY, K_LOBBY_START, K_HOOK };
 
 typedef struct entry {
     int kind;
@@ -228,6 +228,23 @@ static void callback(uint32_t id, uint32_t ptr, uint32_t len) {
         for (int i = 0; i < 8; ++i) data[i] = (unsigned char)(hash >> (8 * i));
         break;
     }
+    case K_HOOK:
+        /* [flags][result][arguments...], changed in place (the game gets them back). */
+        ((tome_hook_fn)e->fn)(data, e->user);
+        break;
+    case K_LOBBY:
+        /* [player][from host][data] */
+        if (len >= 8) ((tome_lobby_message_fn)e->fn)((int32_t)word(data), (int32_t)word(data + 4), data + 8, len - 8, e->user);
+        break;
+    case K_LOBBY_START: {
+        /* The block is [verdict][reason]; zeros refuse quietly. */
+        if (len < 8) break;
+        data[4] = 0;
+        const int32_t verdict = ((tome_lobby_start_fn)e->fn)((char*)data + 4, e->user);
+        data[len - 1] = 0;
+        for (int i = 0; i < 4; ++i) data[i] = (unsigned char)((uint32_t)verdict >> (8 * i));
+        break;
+    }
     case K_NET:
         /* [player][replay][data] */
         if (len >= 8) ((tome_net_message_fn)e->fn)((int32_t)word(data), data + 8, len - 8, (int32_t)word(data + 4), e->user);
@@ -282,6 +299,22 @@ int32_t tome_on_keybind(const char* key, tome_text_fn fn, void* user) {
 int32_t tome_subscribe(const char* topic, tome_message_fn fn, void* user) {
     const uint32_t id = add(K_MESSAGE, (void*)fn, user);
     return id ? registered(id, tome_raw_subscribe(topic, (uint32_t)tome_strlen(topic), id)) : TOME_ERR_INVALID_ARGUMENT;
+}
+
+int32_t tome_hook(const char* name, int32_t phase, int32_t priority, tome_hook_fn fn, void* user) {
+    const uint32_t id = add(K_HOOK, (void*)fn, user);
+    if (!id) return TOME_ERR_INVALID_ARGUMENT;
+    return registered(id, tome_raw_hook(name, (uint32_t)tome_strlen(name), phase, priority, id));
+}
+
+int32_t tome_on_lobby_message(tome_lobby_message_fn fn, void* user) {
+    const uint32_t id = add(K_LOBBY, (void*)fn, user);
+    return id ? registered(id, tome_raw_on_lobby_message(id)) : TOME_ERR_INVALID_ARGUMENT;
+}
+
+int32_t tome_on_lobby_start(tome_lobby_start_fn fn, void* user) {
+    const uint32_t id = add(K_LOBBY_START, (void*)fn, user);
+    return id ? registered(id, tome_raw_on_lobby_start(id)) : TOME_ERR_INVALID_ARGUMENT;
 }
 
 int32_t tome_on_net_message(tome_net_message_fn fn, void* user) {

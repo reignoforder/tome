@@ -96,5 +96,10 @@ constexpr size_t kMaxModuleSize = 16u << 20;
     X(version_compare, "(iiiiii)i") \
     X(version_match, "(iiiii)i") \
     X(check_metadata, "(iiii)i") \
+    X(hook, "(iiiii)i") \
     X(lobby_show, "(ii)i") \
+    X(lobby_send, "(iii)i") \
+    X(on_lobby_message, "(i)i") \
+    X(lobby_players, "(ii)i") \
+    X(on_lobby_start, "(i)i") \
     X(lobby_start, "()i")

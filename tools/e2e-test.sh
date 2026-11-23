@@ -426,12 +426,16 @@ if ((WASM)); then
     check "\[hello-wasm\] enabled" "and enabled"
     check "\[hello-wasm\] main menu: SinglePlayerButton found" "a Wasm mod got a frame handle on the main menu"
     check "\[hello-wasm\] 100 ticks" "events reach a Wasm mod"
+    check "\[hello-wasm\] first CGlueMgr::SetScreen after enable: screen [0-9]+" \
+        "a typed hook in C Wasm read the game function's arguments"
 fi
 if ((WASMRS)); then
     check "\[hello-wasm-rs\] loaded, Warcraft III ${GAME_VERSION//./\\.}" "the Rust Wasm example loaded (game info)"
     check "\[hello-wasm-rs\] enabled" "and enabled"
     check "\[hello-wasm-rs\] main menu: SinglePlayerButton found" "a Rust Wasm closure got a frame handle"
     check "\[hello-wasm-rs\] 100 ticks" "events reach a Rust Wasm closure"
+    check "\[hello-wasm-rs\] first CGlueMgr::SetScreen after enable: screen [0-9]+" \
+        "a typed hook in Rust Wasm read the game function's arguments"
 fi
 if ((RUST)); then
     check "\[hello-rs\] loaded \(Tome [0-9.]+, Warcraft III ${GAME_VERSION//./\\.}, game\.dll at 0x[0-9a-f]{8}\)" "a Rust mod loaded"

@@ -146,6 +146,9 @@ add("update", "# release keys\n11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=\n")
 add("wasm_layout", b"(Hunit;RS)Hunit;\n" + bytes([5, 0, 16, 0]) + b"abcde" + bytes(8) + b"xyz")
 add("wasm_layout", b"(ISC)V\n" + bytes(12))
 add("wasm_layout", b"()C")
+add("wasm_hooks", b"void(CUnit* this, float amount)")
+add("wasm_hooks", b"int(unsigned int flags, CItem* item)")
+add("wasm_hooks", b"void(const char* text, ...)")
 
 # WebAssembly modules (fuzz_wamr): small ones made here for what Tome's
 # configuration turns on (loops for the budget, memory growth, tables and

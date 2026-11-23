@@ -44,6 +44,7 @@ loader/
     settings.*            config.schema.json subset, settings values, menu steps
     signature.*           tome.sig: Ed25519 signatures of mods (Monocypher), base64
     wasm_abi.*            Wasm mods (wasm-mods.md): checked reads/writes of a module's memory, handles
+    wasm_hooks.*          Wasm mods: which mapped functions a module may hook (from the signature), the handler's block
     wasm_layout.*         Wasm mods: the wasm32 structs Tome writes (events, units...), JASS signatures
     wasm_imports.h        Wasm mods: Tome's import list (WAMR signatures) and the modules' limits
     wasm_alloc.*          Wasm mods: the capped heap WAMR allocates from

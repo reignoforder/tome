@@ -230,10 +230,16 @@ TOME_WASM_IMPORT(version_match) int32_t tome_raw_version_match(int32_t kind, con
  * -1 (invalid); `reason` (may be NULL with size 0) gets why not, NUL-terminated and cut to fit
  * (tome.h, check_metadata). */
 TOME_WASM_IMPORT(check_metadata) int32_t tome_check_metadata(const void* text, uint32_t size, char* reason, uint32_t reason_size);
-/* The lobby (tome.h, lobby_show, lobby_start; API version 21): a line in this computer's lobby chat,
- * and the host's Start pressed for this mod. Lobby messages and on_lobby_start are for DLL mods only. */
+/* The lobby (tome.h, API version 21): a line in this computer's lobby chat, the host's Start pressed
+ * for this mod, messages to this mod's copies and a say in the start: use tome_lobby_send,
+ * tome_on_lobby_message, tome_lobby_players and tome_on_lobby_start (below). */
+TOME_WASM_IMPORT(hook) int32_t tome_raw_hook(const char* name, uint32_t len, int32_t phase, int32_t priority, uint32_t callback);
 TOME_WASM_IMPORT(lobby_show) int32_t tome_raw_lobby_show(const char* text, uint32_t len);
 TOME_WASM_IMPORT(lobby_start) int32_t tome_lobby_start(void);
+TOME_WASM_IMPORT(lobby_send) int32_t tome_lobby_send(int32_t to, const void* data, uint32_t size);
+TOME_WASM_IMPORT(on_lobby_message) int32_t tome_raw_on_lobby_message(uint32_t callback);
+TOME_WASM_IMPORT(lobby_players) int32_t tome_raw_lobby_players(void* out, int32_t max);
+TOME_WASM_IMPORT(on_lobby_start) int32_t tome_raw_on_lobby_start(uint32_t callback);
 /* One argument or the result of jass_call: the member the native's signature
  * says. Handles are JASS handle ids here (tome_handle_of), not this module's
  * object handles; strings are UTF-8. */
@@ -360,6 +366,42 @@ int32_t tome_on_keybind(const char* id, tome_text_fn fn, void* user);          /
 int32_t tome_subscribe(const char* topic, tome_message_fn fn, void* user);
 int32_t tome_register_native(const char* name, tome_native_fn fn, void* user);
 int32_t tome_on_net_message(tome_net_message_fn fn, void* user);
+/* A hook on a game function (tome_wasm_game.h lists the ones a module can hook, each with the struct
+ * `block` points at): fn runs before (TOME_HOOK_BEFORE) or after (TOME_HOOK_AFTER) the game's
+ * function, on the game's main thread only (calls from other threads aren't reported). Changing
+ * float arguments and the ints not marked const in the block changes what the game's function gets (BEFORE) or returns (AFTER, or
+ * TOME_WASM_HOOK_SKIP in the block's `flags` in BEFORE). Higher priorities run first. TOME_ERR_UNAVAILABLE
+ * if the function isn't mapped for this game, TOME_ERR_INVALID_ARGUMENT if a module can't hook it. Kept
+ * until the mod is disabled. */
+#ifndef TOME_WASM_HOOK_SKIP
+#define TOME_WASM_HOOK_SKIP 1 /* set in the block's `flags` (BEFORE): return `result`, skip the game's function */
+#endif
+typedef void (*tome_hook_fn)(void* block, void* user);
+int32_t tome_hook(const char* name, int32_t phase, int32_t priority, tome_hook_fn fn, void* user);
+/* A message in the lobby from `player` (tome_lobby_player.id; from_host 1 if it's the host), up to
+ * TOME_LOBBY_MAX_MESSAGE bytes. Untrusted input from another player: check what it says. */
+typedef void (*tome_lobby_message_fn)(int32_t player, int32_t from_host, const void* data, uint32_t size, void* user);
+int32_t tome_on_lobby_message(tome_lobby_message_fn fn, void* user);
+/* One person in the lobby (tome.h, tome_lobby_player), as tome_lobby_players fills it in. */
+typedef struct tome_lobby_player {
+    int32_t id;         /* lobby_send's `to` */
+    int32_t is_host;
+    int32_t is_local;   /* this computer */
+    int32_t runs_tome;  /* the handshake heard from its Tome */
+    char name[32];      /* UTF-8, NUL-terminated */
+} tome_lobby_player;
+_Static_assert(sizeof(tome_lobby_player) == 48, "tome_lobby_player's layout is Tome's");
+/* The people in the lobby, up to `max` into `out` (NULL with 0 to count them): how many there are, or
+ * -1 outside a game's lobby. */
+static inline int32_t tome_lobby_players(tome_lobby_player* out, int32_t max) {
+    return tome_raw_lobby_players(out, max);
+}
+/* The host pressed Start (only for a "sync": "required" mod, only on the host): return TOME_START_ALLOW,
+ * or TOME_START_REFUSE; a refusal may leave a reason for the lobby's chat in `reason` (up to
+ * TOME_LOBBY_REASON_SIZE bytes with the NUL; "" refuses quietly). */
+#define TOME_LOBBY_REASON_SIZE 252
+typedef int32_t (*tome_lobby_start_fn)(char* reason, void* user);
+int32_t tome_on_lobby_start(tome_lobby_start_fn fn, void* user);
 /* A timer (tome.h, timer_start: TOME_CLOCK_REAL or TOME_CLOCK_GAME); *timer (may be NULL) gets its id.
  * A registration until it fires for the last time, is stopped or its game ends. */
 typedef void (*tome_timer_fn)(uint32_t timer, void* user);

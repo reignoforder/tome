@@ -93,7 +93,12 @@ imports! {
     fn version_compare(kind: i32, a: *const u8, a_len: u32, b: *const u8, b_len: u32, order: *mut i32) -> i32;
     fn version_match(kind: i32, range: *const u8, range_len: u32, version: *const u8, version_len: u32) -> i32;
     fn check_metadata(text: *const u8, size: u32, reason: *mut u8, reason_size: u32) -> i32;
+    fn hook(name: *const u8, len: u32, phase: i32, priority: i32, callback: u32) -> i32;
     fn lobby_show(text: *const u8, len: u32) -> i32;
     fn lobby_start() -> i32;
+    fn lobby_send(to: i32, data: *const u8, size: u32) -> i32;
+    fn on_lobby_message(callback: u32) -> i32;
+    fn lobby_players(out: *mut u8, max: i32) -> i32;
+    fn on_lobby_start(callback: u32) -> i32;
     fn jass_call(name: *const u8, len: u32, args: *const u32, count: i32, result: *mut u32, text: *mut u8, capacity: u32) -> i32;
 }

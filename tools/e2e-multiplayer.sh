@@ -251,12 +251,15 @@ check "$HOST_LOG" "Screen ready: lobby" "host: the lobby takes input" || exit 1
 # Client, once the host's game is there to see: Local Area Network, the
 # name Guest, the first game in the list (it has no name to click by; it
 # shows up within a few frames of the screen), Join Game. In the game it
-# waits for the report and stays until the end.
+# waits for the report and stays until the end. It waits for the first
+# desync check to match and nothing else before skewing: waits only look at
+# lines after the previous wait's, and that line can come before or after the
+# host's message (the round is at 3 s of game time).
 launch client "wait:Screen ready: main menu;click:LocalAreaNetworkButton;wait:Screen ready: LAN;\
 focus:PlayerNameEditBox;text:Guest;frames:120;0.26,0.335;settle;click:JoinButton;wait:Screen ready: lobby;\
 wait:Game started: ;wait:Handshake: every player;type:/synctest hello;wait:message from player 1 (5 bytes;\
 type:/synctest big;\
-wait:message from player 0 (9 bytes;wait:Desync check: sync-test's state matches;type:/synctest skew"
+wait:Desync check: sync-test's state matches;type:/synctest skew"
 
 # Every check below needs the client in the lobby: without it they would
 # each wait out the watchdog.

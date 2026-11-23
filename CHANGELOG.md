@@ -28,6 +28,26 @@ API version of each addition in `tome.h` and `sdk/README.md` ("[14]").
 
 API version 21.
 
+- **Typed hooks and game calls** (no API change): `sdk/include/tome/tome_game.h`,
+  generated from the mapping files (`tools/gen-game-header.py`, checked by a
+  test), gives every mapped function with a signature a name macro
+  (`TOME_FN_CTextFrame_SetText`), a function pointer type with its calling
+  convention (`tome_fn_CTextFrame_SetText`) and an arguments struct laid over a
+  hook's `call->args` (`TOME_ARGS(CTextFrame_SetText, call)->text`). The hello-cpp
+  example uses it.
+- **Typed hooks for Wasm mods** (API version 21): `hook` (C `tome_hook`, Rust
+  `hook`) runs a module's handler before or after a mapped game function that
+  takes only numbers and units, items and players and returns nothing or a
+  number (63 on 1.27b: not the JASS natives, the CRT, crash handling, start-up
+  or shutdown). The handler gets its arguments and result as a block of words
+  it may change (floats, and the ints of a few functions whose ints are plain
+  values; other ints may be indexes and stay read-only; the game never gets a
+  pointer from a module), or skips the game's function in a BEFORE handler. `tome_wasm_game.h`,
+  generated like `tome_game.h`, names each one and types its block.
+- **Wasm mods in the lobby** (API version 21): `lobby_send`, `on_lobby_message`,
+  `lobby_players` and `on_lobby_start` for WebAssembly mods, in C
+  (`tome_lobby_send`, ...) and Rust, so a Wasm mod can do all the lobby does.
+
 - **Destroying frames** (API version 21): `frame_destroy` (C, Rust and
   WebAssembly) and the JASS native `BlzDestroyFrame` destroy a frame made
   through Tome and the frames below it. The game unlinks it from its parent

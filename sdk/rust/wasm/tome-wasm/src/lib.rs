@@ -233,6 +233,182 @@ pub fn lobby_start() -> Result<()> {
     check(unsafe { raw::lobby_start() })
 }
 
+// --- hooks --------------------------------------------------------------------
+
+/// When a hook's handler runs around the game's function.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HookPhase {
+    /// Before it: the handler may change float arguments and the plain int ones
+    /// (other ints are read-only), or `skip` the
+    /// game's function and give the result itself.
+    Before,
+    /// After it: the handler may read and change the result.
+    After,
+}
+
+/// One call of a hooked game function, as `hook` hands it to a handler: the
+/// arguments in the order of the function's signature (`tome_wasm_game.h`
+/// shows them for each function that can be hooked). Numbers (`int`,
+/// `uint32_t`, `float`) can be changed in a BEFORE handler; units, items and
+/// players are handles, read with `handle` and never changed.
+pub struct HookCall<'a> {
+    pub(crate) words: &'a mut [u32],
+}
+
+impl HookCall<'_> {
+    fn arg_word(&self, index: usize) -> u32 {
+        self.words.get(2 + index).copied().unwrap_or(0)
+    }
+    fn set_arg_word(&mut self, index: usize, value: u32) {
+        if let Some(word) = self.words.get_mut(2 + index) {
+            *word = value;
+        }
+    }
+    /// How many arguments there are (`this` counts).
+    pub fn arg_count(&self) -> usize {
+        self.words.len().saturating_sub(2)
+    }
+    /// Argument `index` as an integer (0 if there's no such argument).
+    pub fn int(&self, index: usize) -> i32 {
+        self.arg_word(index) as i32
+    }
+    /// Argument `index` as an unsigned integer.
+    pub fn uint(&self, index: usize) -> u32 {
+        self.arg_word(index)
+    }
+    /// Argument `index` as a float.
+    pub fn float(&self, index: usize) -> f32 {
+        f32::from_bits(self.arg_word(index))
+    }
+    /// Argument `index` as a unit, item or player handle (0: none).
+    pub fn handle(&self, index: usize) -> u32 {
+        self.arg_word(index)
+    }
+    /// Changes number argument `index` (a BEFORE handler: the game's function gets it).
+    pub fn set_int(&mut self, index: usize, value: i32) {
+        self.set_arg_word(index, value as u32);
+    }
+    /// Changes number argument `index`.
+    pub fn set_float(&mut self, index: usize, value: f32) {
+        self.set_arg_word(index, value.to_bits());
+    }
+    /// The result (what the game's function returned: AFTER handlers only; 0 before).
+    pub fn result_int(&self) -> i32 {
+        self.words[1] as i32
+    }
+    /// The result as a float.
+    pub fn result_float(&self) -> f32 {
+        f32::from_bits(self.words[1])
+    }
+    /// Changes the result (AFTER handlers, or after `skip`).
+    pub fn set_result_int(&mut self, value: i32) {
+        self.words[1] = value as u32;
+    }
+    /// Changes the result.
+    pub fn set_result_float(&mut self, value: f32) {
+        self.words[1] = value.to_bits();
+    }
+    /// BEFORE handlers: the game's function doesn't run; the result set here is returned.
+    pub fn skip(&mut self) {
+        self.words[0] |= 1; // TOME_WASM_HOOK_SKIP
+    }
+}
+
+/// Runs `f` around the mapped game function `name` (`tome_wasm_game.h` lists
+/// the ones a module can hook: numbers, units, items and players as arguments,
+/// a number or nothing as the result), on the game's main thread only. Higher
+/// priorities run first. Kept until the mod is disabled.
+pub fn hook(name: &str, phase: HookPhase, priority: i32, f: impl Fn(&mut HookCall) + 'static) -> Result<()> {
+    let phase = match phase {
+        HookPhase::Before => consts::TOME_HOOK_BEFORE,
+        HookPhase::After => consts::TOME_HOOK_AFTER,
+    };
+    let (ptr, len) = str_arg(name);
+    rt::register(Callback::Hook(Rc::new(f)), |id| unsafe { raw::hook(ptr, len, phase, priority, id) }).map(drop)
+}
+
+/// Sends `data` (up to `consts::TOME_LOBBY_MAX_MESSAGE` bytes) to this mod on
+/// the computer of lobby player `to` (`LobbyPlayer::id`, or
+/// `consts::TOME_LOBBY_EVERYONE` from the host). Only in a lobby, for a
+/// "sync": "required" mod.
+pub fn lobby_send(to: i32, data: &[u8]) -> Result<()> {
+    let size = u32::try_from(data.len()).unwrap_or(u32::MAX);
+    check(unsafe { raw::lobby_send(to, data.as_ptr(), size) })
+}
+
+/// A message `on_lobby_message` hands over: untrusted input from another
+/// player, so check what it says and who sent it.
+pub struct LobbyMessage<'a> {
+    /// The sender's lobby id (`LobbyPlayer::id`).
+    pub player: i32,
+    /// The sender is the game's host.
+    pub from_host: bool,
+    pub data: &'a [u8],
+}
+
+/// `f` gets every message this mod's copies send it in the lobby.
+pub fn on_lobby_message(f: impl Fn(&LobbyMessage) + 'static) -> Result<()> {
+    rt::register(Callback::Lobby(Rc::new(f)), |id| unsafe { raw::on_lobby_message(id) }).map(drop)
+}
+
+/// A person in the lobby (computers aren't listed).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LobbyPlayer {
+    /// The lobby's net id: `lobby_send`'s `to`.
+    pub id: i32,
+    pub is_host: bool,
+    /// This computer.
+    pub is_local: bool,
+    /// The handshake heard from its Tome.
+    pub runs_tome: bool,
+    pub name: String,
+}
+
+/// The people in the lobby, this computer included; `None` outside a game's lobby.
+pub fn lobby_players() -> Option<Vec<LobbyPlayer>> {
+    const SIZE: usize = 48;
+    let mut max = 16usize;
+    loop {
+        let mut buf = vec![0u8; max * SIZE];
+        let total = unsafe { raw::lobby_players(buf.as_mut_ptr(), max as i32) };
+        let total = usize::try_from(total).ok()?;
+        if total > max {
+            max = total;
+            continue;
+        }
+        return Some(buf.chunks_exact(SIZE).take(total).map(parse_lobby_player).collect());
+    }
+}
+
+fn parse_lobby_player(raw: &[u8]) -> LobbyPlayer {
+    let int = |at: usize| i32::from_le_bytes([raw[at], raw[at + 1], raw[at + 2], raw[at + 3]]);
+    let name = &raw[16..48];
+    let len = name.iter().position(|&b| b == 0).unwrap_or(name.len());
+    LobbyPlayer {
+        id: int(0),
+        is_host: int(4) != 0,
+        is_local: int(8) != 0,
+        runs_tome: int(12) != 0,
+        name: String::from_utf8_lossy(&name[..len]).into_owned(),
+    }
+}
+
+/// What `on_lobby_start` says about the host's Start.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LobbyStart {
+    Allow,
+    /// Keeps the game from starting; the reason (up to 251 bytes, may be
+    /// empty) goes to the lobby's chat.
+    Refuse(String),
+}
+
+/// `f` runs when the host presses Start, once Tome's own checks pass: only on
+/// the host, only for a "sync": "required" mod. Any mod's refusal keeps the
+/// game from starting.
+pub fn on_lobby_start(f: impl Fn() -> LobbyStart + 'static) -> Result<()> {
+    rt::register(Callback::LobbyStart(Rc::new(f)), |id| unsafe { raw::on_lobby_start(id) }).map(drop)
+}
+
 /// Asks the player to restart the game (a dialog; nothing happens unless
 /// they agree).
 pub fn restart_game() -> Result<()> {

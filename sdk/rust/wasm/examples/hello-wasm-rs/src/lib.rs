@@ -6,7 +6,7 @@
 
 use std::cell::Cell;
 
-use tome_wasm::{Args, Event, EventInfo, Frame, Handle, UiEvent, info};
+use tome_wasm::{Args, Event, EventInfo, Frame, Handle, HookPhase, UiEvent, info};
 
 thread_local! {
     static TICKS: Cell<u32> = const { Cell::new(0) };
@@ -45,6 +45,15 @@ fn enable() {
     for event in [Event::MAP_LOAD, Event::GAME_START, Event::GAME_END, Event::TICK] {
         tome_wasm::on_event(event, on_event).ok();
     }
+    // A typed hook: CGlueMgr::SetScreen(int screen, int force), after the
+    // game's own (tome_wasm_game.h lists what a module can hook).
+    let first = Cell::new(true);
+    tome_wasm::hook("CGlueMgr::SetScreen", HookPhase::After, 0, move |call| {
+        if first.replace(false) {
+            info!("first CGlueMgr::SetScreen after enable: screen {}", call.int(0));
+        }
+    })
+    .ok();
     tome_wasm::on_ui(UiEvent::MAIN_MENU, |_| {
         // Frames are handles: looked up by name each time they're used.
         let found = Frame::get("SinglePlayerButton", 0).is_some();

@@ -55,6 +55,7 @@ add_executable(tome_tests
     test_verify.cpp
     test_wasm_abi.cpp
     test_wasm_alloc.cpp
+    test_wasm_hooks.cpp
     test_wasm_layout.cpp
     test_version.cpp
     test_widescreen.cpp
@@ -64,6 +65,7 @@ add_executable(tome_tests
 target_link_libraries(tome_tests PRIVATE tome_core)
 # For checking the mapping files against the local install, if present.
 target_compile_definitions(tome_tests PRIVATE TOME_TEST_GAME_DIR="${TOME_GAME_DIR}")
+target_compile_definitions(tome_tests PRIVATE TOME_TEST_WASM_GAME_HEADER="${CMAKE_SOURCE_DIR}/sdk/include/tome/tome_wasm_game.h")
 target_compile_definitions(tome_tests PRIVATE TOME_TEST_RELEASE_KEYS="${CMAKE_SOURCE_DIR}/loader/release-keys.txt")
 target_compile_options(tome_tests PRIVATE -Wall -Wextra -fno-exceptions -fno-rtti)
 target_link_options(tome_tests PRIVATE -static)
@@ -78,6 +80,16 @@ tome_add_mod(crash SOURCES e2e/mods/crash/crash.c METADATA e2e/mods/crash/tome.m
 set_target_properties(hook_a PROPERTIES OUTPUT_NAME hook-a)
 set_target_properties(hook_b PROPERTIES OUTPUT_NAME hook-b)
 # sync-test's code; tools/e2e-multiplayer.sh puts it next to the fixture's assets.
+# A Wasm mod for tests/host/test_wasm.cpp that exercises the C runtime's lobby and
+# hook callbacks (built when a Wasm toolchain was found, sdk/CMakeLists.txt).
+if(TARGET hello_wasm)
+    tome_add_wasm_mod(wasm_runtime_probe SOURCES wasm/runtime-probe/runtime_probe.c
+        METADATA wasm/runtime-probe/tome.mod.json FOLDER wasm-runtime-probe NO_CHECK)  # it hooks functions only its test maps
+endif()
+if(TARGET hello_wasm_rs)
+    tome_add_rust_mod(wasm_runtime_probe_rs WASM CRATE wasm/runtime-probe-rs METADATA tome.mod.json
+        FOLDER wasm-runtime-probe-rs NO_CHECK)
+endif()
 tome_add_mod(sync_test SOURCES e2e/mods/sync-test/sync_test.c METADATA e2e/mods/sync-test/tome.mod.json FOLDER sync-test)
 set_target_properties(sync_test PROPERTIES OUTPUT_NAME sync-test)
 
@@ -165,11 +177,11 @@ target_compile_options(tome_host_tests PRIVATE -Wall -Wextra -fno-exceptions -fn
 target_link_options(tome_host_tests PRIVATE -static)
 add_dependencies(tome_host_tests hook_a hook_b crash hello hello_cpp fake_shade)
 if(TARGET hello_wasm)
-    add_dependencies(tome_host_tests hello_wasm)
+    add_dependencies(tome_host_tests hello_wasm wasm_runtime_probe)
     target_compile_definitions(tome_host_tests PRIVATE TOME_TEST_WASM_EXAMPLE=1)
 endif()
 if(TARGET hello_wasm_rs)
-    add_dependencies(tome_host_tests hello_wasm_rs)
+    add_dependencies(tome_host_tests hello_wasm_rs wasm_runtime_probe_rs)
     target_compile_definitions(tome_host_tests PRIVATE TOME_TEST_WASM_RUST_EXAMPLE=1)
 endif()
 # Signed by sdk/support/tome_sign.py with a public test-only key

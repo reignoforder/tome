@@ -54,6 +54,11 @@ find_package(Python3 COMPONENTS Interpreter QUIET)
 if(EXISTS "${gen_consts}" AND Python3_FOUND)
     add_test(NAME tome_wasm_consts_current COMMAND ${Python3_EXECUTABLE} -I "${gen_consts}" --check)
 endif()
+# The same for tome_game.h and the mapping files.
+set(gen_game_header "${CMAKE_CURRENT_SOURCE_DIR}/../tools/gen-game-header.py")
+if(EXISTS "${gen_game_header}" AND Python3_FOUND)
+    add_test(NAME tome_game_header_current COMMAND ${Python3_EXECUTABLE} -I "${gen_game_header}" --check)
+endif()
 
 if(NOT TOME_BUILD_WASM STREQUAL "OFF")
     tome_find_wasm_toolchain()
