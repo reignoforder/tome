@@ -20,7 +20,11 @@
  * The fix refuses such a name, and one longer than path_guard::kMaxPathLen,
  * which the game would truncate (for PreloadGenEnd, one too long to fit after
  * the game's folder, which can crash the game); a plain relative name (the
- * natives' intended use, subdirectories included) is untouched. Preload's
+ * natives' intended use, subdirectories included) is untouched. The writes
+ * also refuse a name a program or script would have (path_guard::
+ * is_executable_name: .exe, .dll, .bat, .vbs, .lnk, Miles' .mix, ...), which
+ * no map needs and no game file is: defence in depth, as they already land
+ * in the game's data folders. Preload's
  * argument is never refused: maps use it as a data channel (PreloadGenEnd
  * writes it out word for word, any length and any characters). The game only
  * opens the files Preload lists in PreloadStart, PreloadEnd, PreloadEndEx and
@@ -38,7 +42,7 @@
  * we key off the native's NAME at bind time, this needs only the BindNative
  * mapping and automatically covers any build that has it.
  *
- * Built in as a patch, not a mod, so it's always in force (patches.h). The
+ * Built in as a patch, not a mod, so mods can't turn it off (patches.h). The
  * BindNative hook is deliberately NOT reserved: the threat model is malicious
  * maps, not mods, and a mod is native code that can bypass any API boundary
  * anyway (see hooks::reserve), so reserving BindNative would only cost
@@ -46,6 +50,7 @@
  */
 #include "patches.h"
 
+#include "core/log_guard.h"
 #include "core/path_guard.h"
 #include "hooks.h"
 #include "log.h"
@@ -162,19 +167,19 @@ bool g_preload_unsafe = false;
 size_t g_custom_map_data_max = path_guard::kMaxPathLen;
 
 // A map can call these natives in a loop with an arbitrary (long, multi-line)
-// name: log the first refusals in full, then only every kLogEvery-th, and
-// print at most kLogChars of the name with control characters replaced, so a
-// map can neither flood tome.log nor forge lines in it. The first refusal of
-// each native for each reason is logged too, whatever came before it (at most
-// 2 * kCount lines), so one is never lost behind other refusals.
-constexpr unsigned long kLogFirst = 20;
-constexpr unsigned long kLogEvery = 1000;
+// name: log the first refusals in full, then only every kEvery-th
+// (log::Throttle), and print at most kLogChars of the name with control
+// characters replaced, so a map can neither flood tome.log nor forge lines
+// in it. The first refusal of each native for each reason is logged too,
+// whatever came before it (at most kReasons * kCount lines), so one is never lost
+// behind other refusals.
 constexpr size_t kLogChars = 160;
-enum Reason { kTooLong, kEscapes, kReasons };
+enum Reason { kTooLong, kEscapes, kExecutable, kReasons };
 bool g_logged[kCount][kReasons] = {};
 
 // True if a path argument (an RCString*) of kSpecs[i] escapes the data
-// folder or is too long, and the call must be skipped. A null string passes
+// folder or is too long, or (a write's) names a program or script, and the
+// call must be skipped. A null string passes
 // through: the engine handles it, and there's nothing to sanitize.
 bool escapes(size_t i, uint32_t jass_string) {
     const Spec& spec = kSpecs[i];
@@ -185,15 +190,14 @@ bool escapes(size_t i, uint32_t jass_string) {
                        : spec.in_custom_map_data ? g_custom_map_data_max
                                                  : path_guard::kMaxPathLen;
     const bool too_long = text.size() > max;
-    if (!too_long && (spec.access == Access::Data ? !path_guard::is_unsafe_any_length(text)
-                                                  : !path_guard::is_unsafe(text))) {
-        return false;
-    }
+    const bool unsafe = spec.access == Access::Data ? path_guard::is_unsafe_any_length(text) : path_guard::is_unsafe(text);
+    const bool executable = spec.access == Access::Write && path_guard::is_executable_name(text);
+    if (!too_long && !unsafe && !executable) return false;
     const unsigned long total = spec.access == Access::Data ? ++g_kept_total : ++g_refused_total;
-    const Reason reason = too_long ? kTooLong : kEscapes;
+    const Reason reason = too_long ? kTooLong : unsafe ? kEscapes : kExecutable;
     const bool first_of_kind = !g_logged[i][reason];
     g_logged[i][reason] = true;
-    if (first_of_kind || total <= kLogFirst || total % kLogEvery == 0) {
+    if (first_of_kind || log::Throttle::logs(total)) {
         char shown[kLogChars + 1];
         size_t n = 0;
         for (; n < kLogChars && path[n]; ++n) {
@@ -207,7 +211,11 @@ bool escapes(size_t i, uint32_t jass_string) {
                       spec.name, shown, path[n] ? "..." : "", total);
         } else {
             TOME_WARN("path-sanitizer: refused %s(\"%s%s\") -- %s (total %lu)", spec.name, shown,
-                      path[n] ? "..." : "", reason == kTooLong ? "too long" : "escapes the data folder", total);
+                      path[n] ? "..." : "",
+                      reason == kTooLong  ? "too long"
+                      : reason == kEscapes ? "escapes the data folder"
+                                           : "names a program or script",
+                      total);
         }
     }
     return true;
@@ -287,7 +295,7 @@ bool list_native_runs(size_t i) {
     }
     if (!g_preload_unsafe) return true;
     ++g_list_refused;
-    if (g_list_refused <= kLogFirst || g_list_refused % kLogEvery == 0) {
+    if (log::Throttle::logs(g_list_refused)) {
         TOME_WARN("path-sanitizer: refused %s() -- the preload list holds a name that escapes the data folder "
                   "(total %lu)", kListSpecs[i].name, g_list_refused);
     }
@@ -384,7 +392,8 @@ bool install_path_sanitizer(uintptr_t game_base, const BuildMappings& build, con
     hooks::add(bind, before);
     report = "sanitizes paths of " + std::to_string(kCount) + " file natives (PreloadGenEnd names up to " +
              std::to_string(g_custom_map_data_max) + " characters" +
-             (prefix ? "" : "; the game folder's length is unknown") + "; guards the preload list)";
+             (prefix ? "" : "; the game folder's length is unknown") +
+             "; no program or script names written; guards the preload list)";
     return true;
 }
 
@@ -404,6 +413,7 @@ extern const Patch kPathSanitizer = {
     nullptr,    // reserves nothing: mods may still hook BindNative (see file header)
     nullptr,    // needed everywhere
     install_path_sanitizer,
+    true,  // sync: changes what map scripts do
 };
 
 } // namespace tome::patches

@@ -177,6 +177,8 @@ TOME_WASM_IMPORT(frame_create) tome_frame_t tome_raw_frame_create(const char* na
 TOME_WASM_IMPORT(frame_set_point) int32_t tome_frame_set_point(tome_frame_t frame, int32_t point, tome_frame_t relative, int32_t relative_point, float x, float y);
 TOME_WASM_IMPORT(frame_set_text) int32_t tome_raw_frame_set_text(tome_frame_t frame, const char* text, uint32_t len);
 TOME_WASM_IMPORT(frame_set_visible) int32_t tome_frame_set_visible(tome_frame_t frame, int32_t visible);
+/* Destroys a frame made with tome_frame_create (tome.h, frame_destroy): its handle, and its children's, stop working. */
+TOME_WASM_IMPORT(frame_destroy) int32_t tome_frame_destroy(tome_frame_t frame);
 TOME_WASM_IMPORT(frame_set_animation) int32_t tome_frame_set_animation(tome_frame_t sprite, const int32_t* tags, int32_t count);
 TOME_WASM_IMPORT(frame_on_click) int32_t tome_raw_frame_on_click(tome_frame_t button, uint32_t callback);
 TOME_WASM_IMPORT(load_fdf) int32_t tome_raw_load_fdf(const char* path, uint32_t len);
@@ -211,6 +213,33 @@ TOME_WASM_IMPORT(get_keyed_property) int32_t tome_get_keyed_property(uint32_t ob
 TOME_WASM_IMPORT(set_keyed_property) int32_t tome_set_keyed_property(uint32_t object, int32_t property, uint32_t key, double value);
 /* Every unit, item, destructable or player (TOME_OBJECT_*) as handles, up to `max`; how many there are, -1 if not. */
 TOME_WASM_IMPORT(list_objects) int32_t tome_list_objects(int32_t type, uint32_t* out, int32_t max);
+/* The current game's host: its player slot (0 = Player 1), -1 outside a game (tome.h, host_player). */
+TOME_WASM_IMPORT(host_player) int32_t tome_host_player(void);
+/* Messages between players (tome.h, net_send): up to TOME_NET_MAX_MESSAGE bytes to this mod on every
+ * player's computer, from the game's first step on; tome_on_net_message (below) receives them. */
+TOME_WASM_IMPORT(net_send) int32_t tome_net_send(const void* data, uint32_t size);
+TOME_WASM_IMPORT(on_net_message) int32_t tome_raw_on_net_message(uint32_t callback);
+/* Timers and desync checks (tome.h, API version 19): use tome_timer_start and tome_on_checksum (below). */
+TOME_WASM_IMPORT(timer_start) int32_t tome_raw_timer_start(int32_t clock, double delay, double interval, uint32_t callback, uint32_t* timer);
+TOME_WASM_IMPORT(timer_stop) int32_t tome_raw_timer_stop(uint32_t timer);
+TOME_WASM_IMPORT(on_checksum) int32_t tome_raw_on_checksum(uint32_t callback);
+/* Versions by Tome's rules (tome.h, API version 20): use tome_version_compare and tome_version_match (below). */
+TOME_WASM_IMPORT(version_compare) int32_t tome_raw_version_compare(int32_t kind, const char* a, uint32_t a_len, const char* b, uint32_t b_len, int32_t* order);
+TOME_WASM_IMPORT(version_match) int32_t tome_raw_version_match(int32_t kind, const char* range, uint32_t range_len, const char* version, uint32_t version_len);
+/* Whether a tome.mod.json (up to 64 KiB) would run here: 1, 0 (not for this game, edition, Tome or build),
+ * -1 (invalid); `reason` (may be NULL with size 0) gets why not, NUL-terminated and cut to fit
+ * (tome.h, check_metadata). */
+TOME_WASM_IMPORT(check_metadata) int32_t tome_check_metadata(const void* text, uint32_t size, char* reason, uint32_t reason_size);
+/* The lobby (tome.h, API version 21): a line in this computer's lobby chat, the host's Start pressed
+ * for this mod, messages to this mod's copies and a say in the start: use tome_lobby_send,
+ * tome_on_lobby_message, tome_lobby_players and tome_on_lobby_start (below). */
+TOME_WASM_IMPORT(hook) int32_t tome_raw_hook(const char* name, uint32_t len, int32_t phase, int32_t priority, uint32_t callback);
+TOME_WASM_IMPORT(lobby_show) int32_t tome_raw_lobby_show(const char* text, uint32_t len);
+TOME_WASM_IMPORT(lobby_start) int32_t tome_lobby_start(void);
+TOME_WASM_IMPORT(lobby_send) int32_t tome_lobby_send(int32_t to, const void* data, uint32_t size);
+TOME_WASM_IMPORT(on_lobby_message) int32_t tome_raw_on_lobby_message(uint32_t callback);
+TOME_WASM_IMPORT(lobby_players) int32_t tome_raw_lobby_players(void* out, int32_t max);
+TOME_WASM_IMPORT(on_lobby_start) int32_t tome_raw_on_lobby_start(uint32_t callback);
 /* One argument or the result of jass_call: the member the native's signature
  * says. Handles are JASS handle ids here (tome_handle_of), not this module's
  * object handles; strings are UTF-8. */
@@ -230,6 +259,30 @@ TOME_WASM_IMPORT(jass_call) int32_t tome_raw_jass_call(const char* name, uint32_
 
 /* --- the wrappers (support/tome_wasm.c) ---------------------------------- */
 
+/* A hash for desync checks, as tome.h's (FNV-1a, 64 bits; the same on every computer). */
+#define TOME_HASH_INIT 0xcbf29ce484222325ull
+static inline uint64_t tome_hash_bytes(uint64_t hash, const void* data, size_t size) {
+    const unsigned char* p = (const unsigned char*)data;
+    for (size_t i = 0; i < size; ++i) {
+        hash ^= p[i];
+        hash *= 0x100000001b3ull;
+    }
+    return hash;
+}
+static inline uint64_t tome_hash_u32(uint64_t hash, uint32_t value) {
+    const unsigned char b[4] = {(unsigned char)value, (unsigned char)(value >> 8), (unsigned char)(value >> 16),
+                                (unsigned char)(value >> 24)};
+    return tome_hash_bytes(hash, b, 4);
+}
+static inline uint64_t tome_hash_u64(uint64_t hash, uint64_t value) {
+    return tome_hash_u32(tome_hash_u32(hash, (uint32_t)value), (uint32_t)(value >> 32));
+}
+static inline uint64_t tome_hash_double(uint64_t hash, double value) {
+    uint64_t bits;
+    __builtin_memcpy(&bits, &value, sizeof(bits));
+    return tome_hash_u64(hash, bits);
+}
+
 size_t tome_strlen(const char* s);
 
 static inline void tome_log(int32_t level, const char* text) {
@@ -237,6 +290,21 @@ static inline void tome_log(int32_t level, const char* text) {
 }
 static inline int32_t tome_display_text(const char* text, float seconds) {
     return tome_raw_display_text(text, (uint32_t)tome_strlen(text), seconds);
+}
+
+static inline int32_t tome_lobby_show(const char* text) {
+    return tome_raw_lobby_show(text, (uint32_t)tome_strlen(text));
+}
+
+/* kind: TOME_VERSION_MOD or TOME_VERSION_GAME. *order: -1, 0 or 1; TOME_ERR_INVALID_ARGUMENT if
+ * either isn't a version (tome.h, version_compare). */
+static inline int32_t tome_version_compare(int32_t kind, const char* a, const char* b, int32_t* order) {
+    return tome_raw_version_compare(kind, a, (uint32_t)tome_strlen(a), b, (uint32_t)tome_strlen(b), order);
+}
+
+/* 1 if `version` is in `range`, 0 if not, -1 if either can't be parsed (tome.h, version_match). */
+static inline int32_t tome_version_match(int32_t kind, const char* range, const char* version) {
+    return tome_raw_version_match(kind, range, (uint32_t)tome_strlen(range), version, (uint32_t)tome_strlen(version));
 }
 /* The game build ("1.27b") and file version; valid until the next call. */
 const tome_wasm_game_info* tome_game_info(void);
@@ -286,6 +354,8 @@ typedef void (*tome_message_fn)(const char* topic, const void* data, uint32_t si
  * if it's one of this call's own arguments of that type (others become
  * null). Natives returning code aren't available. */
 typedef uint32_t (*tome_native_fn)(const uint32_t* args, void* user);
+/* A message from `player` (its slot); `replay` 1 while a replay plays it back. */
+typedef void (*tome_net_message_fn)(int32_t player, const void* data, uint32_t size, int32_t replay, void* user);
 
 int32_t tome_register_command(const char* name, tome_text_fn fn, void* user);  /* fn gets the arguments */
 int32_t tome_on_setting_changed(tome_text_fn fn, void* user);                  /* fn gets the key */
@@ -295,6 +365,52 @@ int32_t tome_frame_on_click(tome_frame_t button, tome_click_fn fn, void* user);
 int32_t tome_on_keybind(const char* id, tome_text_fn fn, void* user);          /* fn gets the id */
 int32_t tome_subscribe(const char* topic, tome_message_fn fn, void* user);
 int32_t tome_register_native(const char* name, tome_native_fn fn, void* user);
+int32_t tome_on_net_message(tome_net_message_fn fn, void* user);
+/* A hook on a game function (tome_wasm_game.h lists the ones a module can hook, each with the struct
+ * `block` points at): fn runs before (TOME_HOOK_BEFORE) or after (TOME_HOOK_AFTER) the game's
+ * function, on the game's main thread only (calls from other threads aren't reported). Changing
+ * float arguments and the ints not marked const in the block changes what the game's function gets (BEFORE) or returns (AFTER, or
+ * TOME_WASM_HOOK_SKIP in the block's `flags` in BEFORE). Higher priorities run first. TOME_ERR_UNAVAILABLE
+ * if the function isn't mapped for this game, TOME_ERR_INVALID_ARGUMENT if a module can't hook it. Kept
+ * until the mod is disabled. */
+#ifndef TOME_WASM_HOOK_SKIP
+#define TOME_WASM_HOOK_SKIP 1 /* set in the block's `flags` (BEFORE): return `result`, skip the game's function */
+#endif
+typedef void (*tome_hook_fn)(void* block, void* user);
+int32_t tome_hook(const char* name, int32_t phase, int32_t priority, tome_hook_fn fn, void* user);
+/* A message in the lobby from `player` (tome_lobby_player.id; from_host 1 if it's the host), up to
+ * TOME_LOBBY_MAX_MESSAGE bytes. Untrusted input from another player: check what it says. */
+typedef void (*tome_lobby_message_fn)(int32_t player, int32_t from_host, const void* data, uint32_t size, void* user);
+int32_t tome_on_lobby_message(tome_lobby_message_fn fn, void* user);
+/* One person in the lobby (tome.h, tome_lobby_player), as tome_lobby_players fills it in. */
+typedef struct tome_lobby_player {
+    int32_t id;         /* lobby_send's `to` */
+    int32_t is_host;
+    int32_t is_local;   /* this computer */
+    int32_t runs_tome;  /* the handshake heard from its Tome */
+    char name[32];      /* UTF-8, NUL-terminated */
+} tome_lobby_player;
+_Static_assert(sizeof(tome_lobby_player) == 48, "tome_lobby_player's layout is Tome's");
+/* The people in the lobby, up to `max` into `out` (NULL with 0 to count them): how many there are, or
+ * -1 outside a game's lobby. */
+static inline int32_t tome_lobby_players(tome_lobby_player* out, int32_t max) {
+    return tome_raw_lobby_players(out, max);
+}
+/* The host pressed Start (only for a "sync": "required" mod, only on the host): return TOME_START_ALLOW,
+ * or TOME_START_REFUSE; a refusal may leave a reason for the lobby's chat in `reason` (up to
+ * TOME_LOBBY_REASON_SIZE bytes with the NUL; "" refuses quietly). */
+#define TOME_LOBBY_REASON_SIZE 252
+typedef int32_t (*tome_lobby_start_fn)(char* reason, void* user);
+int32_t tome_on_lobby_start(tome_lobby_start_fn fn, void* user);
+/* A timer (tome.h, timer_start: TOME_CLOCK_REAL or TOME_CLOCK_GAME); *timer (may be NULL) gets its id.
+ * A registration until it fires for the last time, is stopped or its game ends. */
+typedef void (*tome_timer_fn)(uint32_t timer, void* user);
+int32_t tome_timer_start(int32_t clock, double delay, double interval, tome_timer_fn fn, void* user, uint32_t* timer);
+int32_t tome_timer_stop(uint32_t timer);
+/* Desync checks (tome.h, on_checksum): fn returns a hash of the mod's game state (tome_hash_* below).
+ * NULL removes it. */
+typedef uint64_t (*tome_checksum_fn)(void* user);
+int32_t tome_on_checksum(tome_checksum_fn fn, void* user);
 /* fn may be NULL; *id (may be NULL) gets the popup's id. */
 int32_t tome_popup(const char* title, const char* text, const char* const* options, int32_t option_count,
                    int32_t default_option, int32_t cancel_option, tome_popup_fn fn, void* user, uint32_t* id);

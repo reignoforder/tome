@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <vector>
 
 namespace tome::jass {
@@ -51,5 +52,12 @@ struct ShadowFinding {
 // but only the map script's own lines are reported.
 bool scan_shadow_exploit(std::string_view script, std::vector<ShadowFinding>& findings,
                          const std::vector<std::string_view>& prelude = {});
+
+// The functions `script` declares that take parameters
+// (`[constant] function <name> takes <type> <param>, ... returns ...`), added
+// to `out`. ExecuteFunc runs a function with no arguments, so running one of
+// these crashes the game (docs/known-bugs.md, "JASS natives that crash or
+// misbehave"). Line-oriented like scan_shadow_exploit: comments are skipped.
+void functions_taking_parameters(std::string_view script, std::unordered_set<std::string>& out);
 
 } // namespace tome::jass

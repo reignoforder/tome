@@ -184,6 +184,11 @@ std::string details_body(const ModStatus& m, const Data& data) {
         }
     }
 
+    if (m.running && m.profile.calls > 0) {
+        const std::string time = profile::describe(m.profile);
+        line(colored(kGray, "Time: ") + (m.profile.average_ms > profile::kSlowMs ? colored(kYellow, time) : time));
+    }
+
     std::vector<std::string> keybinds;
     for (const keys::Binding& b : data.keybinds) {
         if (b.mod == m.id) keybinds.push_back(b.label + " (" + keys::format(b.key) + ")");

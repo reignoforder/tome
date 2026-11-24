@@ -12,6 +12,7 @@
  * for a crash.
  */
 #include <tome/tome.hpp>
+#include <tome/tome_game.h>  // typed names and arguments for hooks: TOME_FN_*, TOME_ARGS
 
 #include <atomic>
 #include <memory>
@@ -125,11 +126,10 @@ void enable(tome::Mod mod) {
     });
 
     set_text_calls = 0;
-    tome_result hooked = mod.call(&tome_api::hook, "CTextFrame::SetText", TOME_HOOK_AFTER, 0,
+    tome_result hooked = mod.call(&tome_api::hook, TOME_FN_CTextFrame_SetText, TOME_HOOK_AFTER, 0,
                                   [mod](tome_hook_call* call) {
                                       if (set_text_calls++ != 0) return;
-                                      // const char* text, after `this`.
-                                      auto text = reinterpret_cast<const char*>(call->args[1]);
+                                      const char* text = TOME_ARGS(CTextFrame_SetText, call)->text;
                                       mod.log(TOME_LOG_INFO, "first CTextFrame::SetText after enable: \"%s\"",
                                               text ? text : "");
                                   });

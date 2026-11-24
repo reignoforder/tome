@@ -56,6 +56,7 @@ constexpr size_t kMaxModuleSize = 16u << 20;
     X(frame_set_point, "(iiiiff)i") \
     X(frame_set_text, "(iii)i") \
     X(frame_set_visible, "(ii)i") \
+    X(frame_destroy, "(i)i") \
     X(frame_set_animation, "(iii)i") \
     X(frame_on_click, "(ii)i") \
     X(load_fdf, "(ii)i") \
@@ -85,4 +86,20 @@ constexpr size_t kMaxModuleSize = 16u << 20;
     X(get_keyed_property, "(iiii)i") \
     X(set_keyed_property, "(iiiF)i") \
     X(list_objects, "(iii)i") \
-    X(jass_call, "(iiiiiii)i")
+    X(jass_call, "(iiiiiii)i") \
+    X(host_player, "()i") \
+    X(net_send, "(ii)i") \
+    X(on_net_message, "(i)i") \
+    X(timer_start, "(iFFii)i") \
+    X(timer_stop, "(i)i") \
+    X(on_checksum, "(i)i") \
+    X(version_compare, "(iiiiii)i") \
+    X(version_match, "(iiiii)i") \
+    X(check_metadata, "(iiii)i") \
+    X(hook, "(iiiii)i") \
+    X(lobby_show, "(ii)i") \
+    X(lobby_send, "(iii)i") \
+    X(on_lobby_message, "(i)i") \
+    X(lobby_players, "(ii)i") \
+    X(on_lobby_start, "(i)i") \
+    X(lobby_start, "()i")

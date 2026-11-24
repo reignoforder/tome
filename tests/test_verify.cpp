@@ -7,6 +7,7 @@
 #include "test.h"
 
 #include <cstdio>
+#include <map>
 #include <cstring>
 
 using namespace tome;
@@ -112,6 +113,26 @@ TEST(verify_names_each_mismatch) {
     errors = mappings::verify_code(b, image.data(), 0x12);
     CHECK(contains(errors, "\"Fn\" at 0x00000010: outside the loaded image"));
     CHECK(contains(errors, "\"Fn.call.here\" at 0x00000040: outside the loaded image"));
+}
+
+// Bytes something patched since count as they were before (the mod
+// manager checks mods' files against the game's code, not Tome's patches).
+TEST(verify_reads_through_original_bytes) {
+    mappings::Build b;
+    CHECK(parse_build_text(kSmallBuild, b));
+    std::vector<uint8_t> image = small_image();
+    std::map<uint32_t, uint8_t> originals;
+    for (uint32_t i = 0; i < 5; ++i) originals[0x10 + i] = image[0x10 + i];  // Fn, before a jmp hook
+    for (uint32_t i = 0; i < 5; ++i) originals[0x40 + i] = image[0x40 + i];  // the call, before a redirect
+    image[0x10] = 0xE9;
+    image[0x11] = 0x12;
+    image[0x41] = 0x34;
+    CHECK(!mappings::verify_code(b, image.data(), image.size()).empty());
+    CHECK(mappings::verify_code(b, image.data(), image.size(), &originals).empty());
+    // A byte that's wrong outside what was patched still counts.
+    image[0x13] = 0x00;
+    originals.erase(0x13);
+    CHECK(!mappings::verify_code(b, image.data(), image.size(), &originals).empty());
 }
 
 TEST(verify_checks_import_slots) {

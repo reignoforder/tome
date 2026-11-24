@@ -5,9 +5,9 @@ can be a WebAssembly module (`"wasm"` in `tome.mod.json`) instead of a DLL.
 It runs in WAMR's interpreter inside Tome and can do almost everything a DLL
 mod does through the API: lifecycle, settings, chat commands, game events,
 screens and frames, clicks, keybinds, popups, messages between mods, JASS
-natives and code values, the game's files and its own files. It can't hook
-game functions, resolve addresses or touch memory outside its own: what
-makes it sandboxed. Mod makers: in C, `sdk/include/tome/tome_wasm.h`, the
+natives and code values, the game's files and its own files, and typed
+hooks on some game functions. It can't resolve addresses, hook the rest or
+touch memory outside its own: what makes it sandboxed. Mod makers: in C, `sdk/include/tome/tome_wasm.h`, the
 example `sdk/examples/hello-wasm` and the template `sdk/templates/wasm`; in
 Rust, the `tome-wasm` crate (`sdk/rust/wasm`), the example `hello-wasm-rs`
 and the template `sdk/templates/rust-wasm`; `sdk/README.md`, "WebAssembly
@@ -90,7 +90,7 @@ outside memory; nothing is terminated.
 | `setting_*`, `set_setting_*`, `on_setting_changed` | same | |
 | `on_event` | same | the callback gets a `tome_wasm_event` (below) |
 | `on_ui`, `ui_root` | same | the callback gets the screen as an i32 |
-| `frame_get`, `frame_create`, `frame_set_point`, `frame_set_text`, `frame_set_visible`, `frame_set_animation`, `frame_on_click` | same | frames are handles (below); a click gets the button's handle |
+| `frame_get`, `frame_create`, `frame_set_point`, `frame_set_text`, `frame_set_visible`, `frame_destroy`, `frame_set_animation`, `frame_on_click` | same | frames are handles (below); a click gets the button's handle |
 | `load_fdf`, `load_toc` | same | `load_fdf`: a path in the mod's folder, as for DLLs; `load_toc`: checked like `read_game_file` |
 | `on_keybind`, `keybind_name` | same | |
 | `popup`, `popup_close` | same | the popup as a struct of `(ptr, len)` strings; the callback gets the id and choice |
@@ -102,15 +102,66 @@ outside memory; nothing is terminated.
 | `register_native` | same | below |
 | `jass_code_call`, `jass_code_execute` | same | Tome checks code values, as for DLLs |
 | `object_type`, `object_of`, `handle_of`, `player_object`, `unit_info`, `get_property`, `set_property`, `get_keyed_property`, `set_keyed_property`, `list_objects` | same | objects are handles (below); `tome_object_type_of` in C (`tome_object_type` is the enum); `unit_info` writes a `tome_wasm_unit` |
+| `host_player` | same | `tome_host_player` in C, `host_player()` (an `Option`) in Rust |
+| `net_send`, `on_net_message` | same | `tome_net_send` and `tome_on_net_message(fn(player, data, size, replay, user), user)` in C; `net_send(&[u8])` and `on_net_message(\|player, data, replay\| ...)` in Rust |
+| `lobby_show`, `lobby_start` | same | API version 21; `tome_lobby_show(text)` and `tome_lobby_start()` in C, `lobby_show(&str)` and `lobby_start()` in Rust |
+| `lobby_send`, `on_lobby_message` | same | API version 21; up to `TOME_LOBBY_MAX_MESSAGE` bytes. `tome_lobby_send(to, data, size)` and `tome_on_lobby_message(fn(player, from_host, data, size, user), user)` in C; `lobby_send(to, &[u8])` and `on_lobby_message(\|&LobbyMessage\| ...)` in Rust. The callback block is `[player][from_host][data]` |
+| `lobby_players` | same | `tome_lobby_players(out, max)` fills `tome_lobby_player` structs (48 bytes: id, is_host, is_local, runs_tome, 32-byte name) and returns how many there are, -1 outside a lobby; `lobby_players()` in Rust returns `Option<Vec<LobbyPlayer>>` |
+| `on_lobby_start` | same | `tome_on_lobby_start(fn(reason, user) -> verdict, user)` in C, `on_lobby_start(\|\| LobbyStart::Allow)` in Rust. The callback block is 256 zero bytes the module answers in, `[verdict][reason, NUL-terminated]`: left as it is, it refuses quietly (a module that traps refuses too, and is disabled) |
+| `timer_start`, `timer_stop` | same | `tome_timer_start(clock, delay, interval, fn(timer, user), user, &id)` in C, `timer_start(Clock::Game, ...)` in Rust; the callback block is `[timer][state]` (0: fires again, 1: its last time, 2: ended with its game, not called), so the module frees its side of a timer that's done |
+| `check_metadata` | same | the text up to 64 KiB; `tome_check_metadata` in C, `check_metadata(&str)` (a `MetadataCheck`) in Rust |
+| `version_compare`, `version_match` | same | `tome_version_compare(kind, a, b, &order)` and `tome_version_match(kind, range, version)` in C; `version_compare(VersionKind::Mod, a, b)` (an `Ordering`) and `version_match(...)` (an `Option<bool>`) in Rust |
+| `on_checksum` | same | `tome_on_checksum(fn(user) -> uint64_t, user)` in C, `on_checksum(\|\| hash)` and `Hash` in Rust; the module writes the hash over its 8-byte callback block, which Tome reads back |
 | `jass_call` | same | arguments one word each (`tome_jass_value`), strings as pointers to NUL-terminated text in the module's memory, copied in; a string result copied into a buffer of the module's (`tome_jass_call` in C, `jass_call` in Rust); the same checks as for DLLs (below) |
-| `resolve`, `hook`, `unhook`, `hook_call_next` | **no** | addresses and raw arguments |
+| `hook` | typed only | `tome_hook(name, phase, priority, fn, user)` in C, `hook(name, HookPhase::Before\|After, priority, \|call\| ...)` in Rust: BEFORE and AFTER, for the functions that qualify (below). Calls from other threads aren't reported |
+| `resolve`, `unhook`, `hook_call_next` | **no** | addresses and raw arguments; no REPLACE; a hook stays until the mod is disabled |
 | `service_*`, `on_service` | **no** | function tables; `publish`/`subscribe` instead |
 | `jass_string`, `jass_string_create` | not needed | strings come and go as text (below) |
-| `mod_dir`, `config_dir` | **no** | paths |
+| `mod_dir`, `config_dir`, `mods_dir` | **no** | paths |
+| `list_mods` | **no** | structs of pointers; `TOME_EVENT_MODS_CHANGED` still arrives through `on_event` |
 
 New API functions get a Wasm import when they can be one without handing out
 a pointer; `tools/gen-wasm-consts.py` keeps the constants in step (a test
 checks).
+
+### Hooks
+
+A module hooks a mapped game function without ever seeing a pointer. Tome
+decides from the mapping's signature (`core/wasm_hooks.*`) whether a function
+qualifies:
+
+- arguments: `int`, `int32_t`, `uint32_t`, `unsigned` (numbers), `float`, and
+  `CUnit*`, `CItem*`, `CPlayerWar3*` (handles, `this` included);
+- result: `void`, an integer type or `float`.
+
+Strings, other pointers, 64-bit values, variadic functions and results that
+are pointers don't qualify (`hook` fails with `TOME_ERR_INVALID_ARGUMENT`
+and logs which argument it was); neither do imports, the JASS natives
+(`Native.*`: their numbers are trigger, code and condition handles), the CRT
+and crash handler (`__report_gsfailure`, `CrashHandler::*`) and the game's own
+`InitNatives` and `GameShutdown`. 63 functions do (the ones both builds map
+with the same signature); `sdk/include/tome/tome_wasm_game.h` (generated by
+`tools/gen-game-header.py`, checked by a test that it lists what the loader
+accepts) has each one's name (`TOME_FN_<name>`) and its block as a struct.
+
+The handler's block is `[flags][result][argument 0]...`, a 32-bit word each
+(floats as their bits, handles as the module's handles). A BEFORE handler may
+change `float` arguments and the `int` arguments of a few functions whose ints
+are plain values (the hero attributes' getters and setters, the health-bar
+calls; the generated header leaves the others `const`), or set
+`TOME_WASM_HOOK_SKIP` in `flags` to return `result` without the game's
+function running. An AFTER handler sees the game's `result` and may change it.
+Handles are read-only: the game only ever gets numbers from a module. So is any
+other `int` argument, which may be an index or a table key (`CPlayerWar3::SetState`'s
+`state`, `CGlueMgr::SetScreen`'s `screen`): a module can't set it out of range
+of the game's tables. The changeable numbers go to the game as they are, like
+a property written with `set_property`: a value the function can't take is the
+mod's mistake, though never a memory access of the module's.
+
+Handlers run on the game's main thread only: the module is single-threaded, so
+a hooked function that another thread calls isn't reported to it. A trap
+in a handler is a crash like any other (the mod is disabled, the game's function
+runs on).
 
 ### What Tome writes into the module's memory
 
@@ -259,8 +310,11 @@ mods work like DLL ones: the handshake hashes the module like any file.
 3. ✅ Natives (converted arguments, checked results) and code values.
 4. ✅ The C SDK (`tome_wasm.h`, runtime, `tome_add_wasm_mod`, example,
    template) and the Rust one (`tome-wasm`, `hello-wasm-rs`, template).
-5. Typed hooks (hook points with typed arguments implemented by Tome, for
-   both kinds of mod), one at a time, as mods ask for them.
+5. ✅ Typed hooks: BEFORE and AFTER handlers for the functions that qualify
+   (above), in C and Rust. DLL mods have `tome_game.h` (named arguments and
+   function pointer types for every mapped function). Later, as mods ask:
+   strings as arguments (copied in), REPLACE, hooks that can be removed,
+   more kinds of object.
 
 ## Not done / open
 

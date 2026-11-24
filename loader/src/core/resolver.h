@@ -46,6 +46,12 @@ struct ResolveResult {
 
 ResolveResult resolve(const std::vector<ResolveInput>& inputs, const ResolveEnvironment& env);
 
+// Whether `meta` fits the running game, edition and Tome (its "game",
+// "edition" and "tome"), as resolve() checks first: false with the state
+// of the first problem (IncompatibleGame or IncompatibleTome) and every
+// problem, "; "-separated, as the reason if it doesn't.
+bool compatible(const ModMetadata& meta, const ResolveEnvironment& env, ModState& state, std::string& reason);
+
 // The mods to turn off along with inputs[target] (docs/research.md §5.7):
 // enabled mods that resolve() lets run now but not once target is disabled,
 // because they need it, directly or not, and no other mod that runs gives

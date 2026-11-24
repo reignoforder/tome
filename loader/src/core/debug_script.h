@@ -13,6 +13,9 @@
 //                   layout change can't send it elsewhere
 //   focus:<frame>[,<context>]   gives that frame (a text box) the keyboard
 //                   focus, as clicking into it would
+//   dump:<frame>[,<context>]   logs the frame's rectangle (UI units: left,
+//                   bottom, right, top; one line, "Debug dump <frame>: ..."), for
+//                   checking a layout without reading pixels
 //   x,y             left click at a position (fractions of the client area),
 //                   through the mouse messages: for what has no name (a
 //                   dropdown's items, a text box taking the focus)
@@ -22,6 +25,8 @@
 //   key:<name>      a key press with modifiers ("Ctrl+J", core/keys.h)
 //   close           WM_CLOSE, like Alt-F4
 //   minimize, restore   like Alt-Tab away and back
+//   resize:<w>x<h>  the window's client area to w x h pixels, as dragging
+//                   its border (or leaving fullscreen) would
 //   wait:<text>     until tome.log has a line containing the text; each wait
 //                   looks only after the line the last one matched (or the
 //                   script's start)
@@ -45,7 +50,7 @@
 
 namespace tome::debug_script {
 
-enum class Kind { Click, ClickFrame, Focus, Move, Type, Text, Key, Close, Minimize, Restore, Wait, Frames, Until, Settle };
+enum class Kind { Click, ClickFrame, Focus, Dump, Move, Type, Text, Key, Close, Minimize, Restore, Resize, Wait, Frames, Until, Settle };
 
 // Frames between an until step's tries.
 inline constexpr uint32_t kUntilFrames = 30;
@@ -55,9 +60,10 @@ inline constexpr uint32_t kSettleFrames = 10;
 struct Step {
     Kind kind = Kind::Click;
     double x = 0, y = 0;  // Click, Move
-    std::string text;     // Type, Text, Key, Wait, Until; ClickFrame, Focus: the frame's name
-    int context = 0;      // ClickFrame, Focus
+    std::string text;     // Type, Text, Key, Wait, Until; ClickFrame, Focus, Dump: the frame's name
+    int context = 0;      // ClickFrame, Focus, Dump
     uint32_t frames = 0;  // Frames
+    uint32_t width = 0, height = 0;  // Resize: the client area, pixels
     uint32_t at_ms = 0;
 };
 

@@ -14,10 +14,13 @@
  */
 #include <tome/tome.h>
 
+#include <string.h>
+
 static const tome_api* api;
 static tome_mod* self;
 static int times_enabled;
 static int clicks;
+static int destroy_on_click; /* /hellodestroy click: the next click destroys the button it was made for */
 static unsigned ticks;
 static unsigned game_ticks;
 static unsigned orders; /* logged this game: orders are frequent */
@@ -81,10 +84,16 @@ static void show_clicks(int32_t context) {
 
 /* `user` carries the button's create context: one per screen. */
 static void TOME_CALL on_hello_clicked(tome_mod* mod, tome_frame* button, void* user) {
-    (void)button;
     ++clicks;
     tome_logf(api, mod, TOME_LOG_INFO, "Hello button clicked (%d)", clicks);
     show_clicks((int32_t)(intptr_t)user);
+    if (destroy_on_click) {
+        /* Destroying a button from its own click callback is allowed: Tome
+         * waits until the click is over. */
+        destroy_on_click = 0;
+        tome_logf(api, mod, TOME_LOG_INFO, "destroying the button from its click: %d",
+                  (int)api->frame_destroy(mod, button));
+    }
 }
 
 /* Runs each time one of the screens is built, so the button comes back with it. */
@@ -140,6 +149,10 @@ static void TOME_CALL on_game_event(tome_mod* mod, const tome_event_info* info, 
     if (info->event == TOME_EVENT_GAME_START) {
         game_ticks = 0;
         orders = 0;
+        /* API version 17: who hosts (in single player, the local player). */
+        if (tome_has_host_player(api)) {
+            tome_logf(api, mod, TOME_LOG_INFO, "the host is player %d", (int)api->host_player());
+        }
         if (game_start_callback) {
             int32_t result = 0;
             tome_result status = api->jass_code_call(game_start_callback, &result);
@@ -422,6 +435,35 @@ static void TOME_CALL on_hello_command(tome_mod* mod, const char* args, void* us
     greet(mod, args, "/hello command");
 }
 
+/* API version 21: frame_destroy. /hellodestroy makes a button in the game with its own context, destroys
+ * it (the game then finds neither it nor its text child), makes the same name again and destroys that;
+ * /hellodestroy click destroys the in-game Hello button at its next click; /hellodestroy gone says
+ * whether it's gone. */
+static void TOME_CALL on_destroy_command(tome_mod* mod, const char* args, void* user) {
+    tome_frame* root = api->ui_root(TOME_UI_GAME);
+    tome_frame* button;
+    int ok_all = 1, round;
+    (void)user;
+    if (strcmp(args, "click") == 0) {
+        destroy_on_click = 1;
+        return;
+    }
+    if (strcmp(args, "gone") == 0) {
+        tome_logf(api, mod, TOME_LOG_INFO, "/hellodestroy gone: %s", api->frame_get("HelloButton", TOME_UI_GAME) ? "no" : "yes");
+        return;
+    }
+    if (!root || api->load_fdf(mod, "ui/hello.fdf") != TOME_OK) return;
+    for (round = 0; round < 2; ++round) {
+        button = api->frame_create(mod, "HelloButton", root, 0, 99);
+        ok_all &= button && api->frame_get("HelloButtonText", 99);
+        ok_all &= api->frame_destroy(mod, button) == TOME_OK;
+        ok_all &= !api->frame_get("HelloButton", 99) && !api->frame_get("HelloButtonText", 99);
+    }
+    /* The game's own frames aren't ours to destroy. */
+    ok_all &= api->frame_destroy(mod, root) == TOME_ERR_INVALID_ARGUMENT;
+    tome_logf(api, mod, TOME_LOG_INFO, "/hellodestroy: %s", ok_all ? "ok" : "MISMATCH");
+}
+
 /* API version 16: game objects. /helloobj reads the selected unit and its
  * owner through properties and natives, changes them and puts them back.
  * (A mod that changes the game in multiplayer must be "sync": "required";
@@ -701,6 +743,23 @@ static void TOME_CALL on_setting_changed(tome_mod* mod, const char* key, void* u
     tome_logf(api, mod, TOME_LOG_INFO, "setting changed: %s", key);
 }
 
+/* API version 20: the installed mods, and versions by Tome's rules. The
+ * strings stay valid until this mod's next list_mods call. */
+static void TOME_CALL on_mods_changed(tome_mod* mod, const tome_event_info* info, void* user) {
+    tome_mod_info mods[32];
+    int32_t count, i, active = 0, newer = 0;
+    (void)info;
+    (void)user;
+    count = tome_list_mods(api, mod, mods, 32);
+    for (i = 0; i < count && i < 32; ++i) {
+        if (mods[i].state == TOME_MOD_ACTIVE) ++active;
+        /* What an updater asks of a release before it offers it. */
+        if (api->version_match(TOME_VERSION_MOD, ">=1.0.0", mods[i].version) == 1) ++newer;
+    }
+    tome_logf(api, mod, TOME_LOG_INFO, "mods changed: %d installed, %d active, %d at 1.0.0 or later", (int)count,
+              (int)active, (int)newer);
+}
+
 TOME_EXPORT int TOME_CALL tome_mod_load(const tome_api* tome, tome_mod* mod) {
     const tome_symbol* set_text;
     if (tome->api_version < 2 || tome->size < offsetof(tome_api, resolve) + sizeof(tome->resolve)) {
@@ -755,6 +814,8 @@ TOME_EXPORT void TOME_CALL tome_mod_enable(tome_mod* mod) {
         for (i = TOME_EVENT_SPELL_CHANNEL; i <= TOME_EVENT_NIGHT; ++i) api->on_event(mod, i, on_more_event, NULL);
     }
     if (tome_has_objects(api)) api->register_command(mod, "helloobj", on_objects_command, NULL);
+    if (tome_has_frame_destroy(api)) api->register_command(mod, "hellodestroy", on_destroy_command, NULL);
+    if (tome_has_mod_list(api)) api->on_event(mod, TOME_EVENT_MODS_CHANGED, on_mods_changed, NULL);
     if (tome_has_settings(api)) {
         api->on_setting_changed(mod, on_setting_changed, NULL);
         api->on_keybind(mod, "greet", on_greet_key, NULL);

@@ -57,4 +57,31 @@ bool has_flag(std::wstring_view command_line, std::wstring_view flag) {
     return false;
 }
 
+std::vector<std::string> list_values(std::wstring_view command_line, std::wstring_view option) {
+    std::vector<std::string> out;
+    std::vector<std::wstring> args = split(command_line);
+    for (size_t i = 1; i < args.size(); ++i) {
+        std::wstring_view arg = args[i];
+        if (arg.size() <= option.size() || arg[option.size()] != L'=' ||
+            !text::iequals(arg.substr(0, option.size()), option)) {
+            continue;
+        }
+        std::string item;
+        auto flush = [&] {
+            size_t b = item.find_first_not_of(" \t"), e = item.find_last_not_of(" \t");
+            if (b != std::string::npos) out.push_back(item.substr(b, e - b + 1));
+            item.clear();
+        };
+        for (wchar_t c : arg.substr(option.size() + 1)) {
+            if (c == L',') {
+                flush();
+            } else {
+                item += c < 0x80 ? static_cast<char>(text::ascii_lower(c)) : '?';
+            }
+        }
+        flush();
+    }
+    return out;
+}
+
 } // namespace tome::command_line

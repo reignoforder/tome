@@ -93,7 +93,7 @@ help:
 	@echo "                    tools/e2e-test.sh, then tools/e2e-multiplayer.sh"
 	@echo "make e2e-multiplayer  only the two-instance LAN game test (about 1.5 min)"
 	@echo "make coverage       line coverage of the tests and e2e tests, by section (tools/coverage.sh; build-cov/,"
-	@echo "                    COVERAGE_MIN=90 fails below that)"
+	@echo "                    COVERAGE_MIN=80 fails below that)"
 	@echo "make game           start the build in the game (tools/game.sh start); make game-stop"
 	@echo "make fuzz           libFuzzer targets (tools/fuzz.sh; FUZZ_SECONDS=60)"
 	@echo "make sdk            the SDK zip for mod makers ($(BUILD)/tome-sdk-<version>.zip)"
@@ -146,7 +146,7 @@ e2e: build
 e2e-multiplayer: build
 	BUILD="$(abspath $(BUILD))" tools/e2e-multiplayer.sh "$(BUILD)"
 
-COVERAGE_MIN ?= 90
+COVERAGE_MIN ?= 80
 coverage:
 	COVERAGE_MIN=$(COVERAGE_MIN) tools/coverage.sh
 

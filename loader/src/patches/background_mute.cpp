@@ -152,17 +152,20 @@ bool install_background_mute(uintptr_t, const BuildMappings&, const Variant&, st
 } // namespace
 
 void background_mute_start(const std::wstring& tome_dir) {
-    if (!g_installed) return;
     g_flag = tome_dir + L"\\background-mute.flag";
-    // Made here, from a posted message, rather than first inside a sent
-    // WM_ACTIVATEAPP.
-    session_volume();
-    if (g_mute.muted_by_us()) {
-        // Muted before the flag's path was known: mark it now, so a crash
-        // while away still gets undone. A flag from the last run is now ours.
-        write_file_atomic(g_flag, "");
-        return;
+    if (g_installed) {
+        // Made here, from a posted message, rather than first inside a sent
+        // WM_ACTIVATEAPP.
+        session_volume();
+        if (g_mute.muted_by_us()) {
+            // Muted before the flag's path was known: mark it now, so a crash
+            // while away still gets undone. A flag from the last run is now ours.
+            write_file_atomic(g_flag, "");
+            return;
+        }
     }
+    // Even with the patch off this start (the player's choice, patches.h): a
+    // mute the last run left would otherwise stay for good.
     if (GetFileAttributesW(g_flag.c_str()) == INVALID_FILE_ATTRIBUTES) return;
     // Left by a run that ended while away: undo its mute.
     ISimpleAudioVolume* volume = session_volume();

@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "id": "c-probe",
+  "version": "1.0.0",
+  "name": "C runtime probe",
+  "description": "Test-only: exercises the C Wasm runtime's lobby and hook callbacks.",
+  "game": "1.27b",
+  "tome": "*",
+  "wasm": "wasm_runtime_probe.wasm",
+  "sync": "required"
+}

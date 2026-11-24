@@ -162,7 +162,10 @@ TOME_TEST_API void TOME_CALL tome_test_set_code_result(uint32_t code, int result
 TOME_TEST_API int TOME_CALL tome_test_chat(const char* line);
 /* Raises `event` (tome_event) for the mods that listen to it, with the
  * fields a real one has when the game says nothing more (map "", players
- * -1, no units...). */
+ * -1, no units...). Timers (timer_start) follow these as the game's own:
+ * a TICK moves real time and a GAME_TICK game time by its `delta` (0 in
+ * the defaults: set it with tome_test_event_info), GAME_START starts the
+ * game clock and GAME_END ends its timers. */
 TOME_TEST_API void TOME_CALL tome_test_event(int32_t event);
 /* Those fields, for filling in some before tome_test_event_info. */
 TOME_TEST_API void TOME_CALL tome_test_event_defaults(int32_t event, tome_event_info* out);

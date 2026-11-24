@@ -40,6 +40,11 @@ struct Symbol {
     // Function only: its first bytes, checked against the loaded game.dll
     // before anything is patched. -1 matches any byte (relocated addresses).
     std::vector<int16_t> bytes;
+    // Function only, optional: its length in bytes, from its RVA (jump
+    // tables in it count). 0: not known. Tome's mapping has it for the
+    // functions it reserves (hooks::reserve), so a mod's name for a place
+    // inside one is reserved too.
+    uint32_t size = 0;
     std::string doc;
 };
 
@@ -62,6 +67,17 @@ struct ParseResult {
 
 // Validates one build file. Every error names the symbol it's about.
 ParseResult parse_build(const json::Value& root, Build& out);
+
+// Validates a mod's own mapping file for the running build
+// (<mod>/mappings/<build>.json, docs/architecture.md "Mods' own mappings"):
+// "schema" and "symbols" as in parse_build. The build header is optional;
+// a field it has must match `running`'s. `out` gets `running`'s header.
+ParseResult parse_mod_build(const json::Value& root, const Build& running, Build& out);
+
+// A mod's symbols go by "<mod id>/<name in its file>", e.g.
+// "mymod/CUnit::Foo" (Tome's own names never have a '/'). Splits one; false
+// if `name` isn't of that form.
+bool split_mod_symbol(std::string_view name, std::string_view& id, std::string_view& local);
 
 // Parses a "bytes" pattern: two lowercase hex digits or "??" per byte,
 // separated by single spaces.
@@ -109,6 +125,7 @@ struct BuildMappings {
         uint32_t text_frame_set_text;     // CTextFrame::SetText
         uint32_t frame_show_offset;       // CFrame.vtable.Show
         uint32_t frame_hide_offset;       // CFrame.vtable.Hide
+        uint32_t frame_destroy_offset;    // CFrame.vtable.Destroy (0 where the build doesn't map it)
         uint32_t glue_bind_control;       // CGlueMenu::BindControl
         uint32_t main_menu_vtable;        // CMainMenu.vtable
         uint32_t main_menu_event_offset;  // CMainMenu.vtable.OnEvent
@@ -235,6 +252,13 @@ struct BuildMappings {
         uint32_t player_name;               // NetGetPlayerName
         uint32_t local_player;              // NetGetLocalPlayer
         uint32_t is_host;                   // NetIsHost
+        uint32_t get_player_number;         // NetGetPlayerNumber (optional: 0 when not mapped)
+        // Optional, for TOME_DEBUG_LOBBY_AS only (developer builds).
+        uint32_t client_registry;           // NetClient::Registry
+        uint32_t registry_holder_offset;    // NetClientRegistry.holder
+        uint32_t holder_client_offset;      // NetClientHolder.client
+        uint32_t client_block_size;         // NetClient.block_size
+        uint32_t client_local_id_offset;    // NetClient.local_id
         uint32_t is_replay;                 // NetIsReplay
         uint32_t sync_init;                 // CNetEventSyncStoredInteger::Init
         uint32_t sync_sender_offset;        // CNetEventSyncStoredInteger.sender
@@ -284,9 +308,53 @@ struct BuildMappings {
     // CSpriteFrame::SetupCamera, its kSymbols): a build that doesn't map it
     // runs without the patch. The hooked functions are found by name, not
     // stored here.
+    // The rest are its 2D part's (install_wide_ui, with ui.layout_set_point,
+    // ui.layout_set_width, ui.layout_offset and game.glue_get): it's
+    // installed only where every one is mapped.
     struct {
-        uint32_t world_frame_offset;  // CGameUI.world_frame
+        uint32_t world_frame_offset;       // CGameUI.world_frame
+        uint32_t screen_get_current;       // CScreenFrame::GetCurrent
+        uint32_t create_simple_frame;      // CreateSimpleFrame
+        uint32_t ddc_width;                // DDCWidth
+        uint32_t layout_set_height;        // CLayoutFrame::SetHeight
+        uint32_t layout_clear_points;      // CLayoutFrame::ClearAllPoints
+        uint32_t layout_update_slot;       // CLayoutFrame.vtable.UpdateScreenRect
+        uint32_t layout_points_offset;     // CLayoutFrame.points
+        uint32_t relative_point_vtable;    // CLayoutFrame.relative_point_vtable
+        uint32_t cursor_frame_vtable;      // CCursorFrame.vtable
+        uint32_t highlight_frame_vtable;   // CHighlightFrame.vtable (0 if not mapped)
+        uint32_t glue_top_left_offset;     // CGlueMgr.sprite_top_left
+        uint32_t glue_top_right_offset;    // CGlueMgr.sprite_top_right
+        uint32_t sprite_setup_camera;      // CSpriteFrame::SetupCamera
+        uint32_t sprite_render_slot;       // CSpriteFrame.vtable.Render
+        uint32_t frame_alpha_offset;       // CFrame.alpha
+        uint32_t frame_apply_alpha_slot;   // CFrame.vtable.ApplyAlpha
+        uint32_t layout_get_rect_slot;     // CLayoutFrame.vtable.GetRect
+        uint32_t set_viewport;             // GxXformSetViewport
+        uint32_t gx_device;                // GxDevice.instance
+        uint32_t device_viewport_offset;   // CGxDevice.viewport
+        uint32_t layout_dependents_offset; // CLayoutFrame.dependents
+        uint32_t layout_width_offset;      // CLayoutFrame.width
+        uint32_t layout_scale_offset;      // CLayoutFrame.scale
+        uint32_t console_offset;           // CGameUI.console
+        uint32_t info_panel_offset;        // CGameUI.info_panel
+        uint32_t clock_offset;             // CGameUI.time_of_day
+        uint32_t console_upper_offset;     // CGameUI.console_upper
+        uint32_t portrait_layer_offset;    // CGameUI.portrait_layer
+        uint32_t minimap_layer_offset;     // CGameUI.minimap_layer
+        uint32_t resource_bar_offset;      // CGameUI.resource_bar
+        uint32_t inventory_cover_offset;   // CInfoPanel.inventory_cover
+        uint32_t simple_shown_offset;      // CSimpleFrame.shown
+        uint32_t simple_show_flag_offset;  // CSimpleFrame.show_flag
+        uint32_t simple_hide_slot;         // CSimpleFrame.vtable.Hide
+        uint32_t simple_show_slot;         // CSimpleFrame.vtable.Show
     } widescreen;
+
+    // Optional: global-string-guard's (patches/global_string_guard.cpp).
+    struct {
+        uint32_t create_string;       // CGameWar3::CreateString
+        uint32_t create_string_call;  // CreateJassString.call.create_string
+    } strings;
 
     // Optional: movie-display-reset's (patches/movie_display_reset.cpp).
     struct {
@@ -294,6 +362,25 @@ struct BuildMappings {
         uint32_t gamma_call;      // Movie.gamma_call (patched by movie-display-reset)
         uint32_t gamma_restore;   // Movie.gamma_restore (patched by movie-display-reset)
     } movie;
+
+    // Optional: jass-token-guard's (patches/jass_token_guard.cpp). The hooked
+    // JassScanner::nextToken and JassParser::parse are found by name, not
+    // stored here.
+    struct {
+        uint32_t overflow_check;   // JassScanner::nextToken.overflow_check (patched)
+        uint32_t capacity_offset;  // JassScanner.capacity
+        uint32_t root_offset;      // JassParser.root
+    } scanner;
+
+    // Optional: command-card-guard's (patches/command_card_guard.cpp). The
+    // hooked CCommandCard::PlaceButton is found by name, not stored here.
+    struct {
+        uint32_t x_offset;         // CCommandButtonData.x
+        uint32_t y_offset;         // CCommandButtonData.y
+        uint32_t add_check;        // CCommandCard::AddButton.pos_check (patched; 0 on 1.26a)
+        uint32_t move_check_button; // CGameUI::SetCommandButtonPos.pos_check_button (patched; 0 on 1.26a)
+        uint32_t move_check_data;   // CGameUI::SetCommandButtonPos.pos_check_data (patched; 0 on 1.26a)
+    } command_card;
 
     // Optional: game objects for mods (objects.cpp, API version 16). Each
     // property, handle lookup and jass_call works when its own symbols are

@@ -212,18 +212,33 @@ not refused, that `Preload("e2e save: ..\Gold")` is kept and the
 
 #### Long string literal overruns the JASS compiler's buffer
 
-**Seen on 1.27b (Nov 2026, in game), not fixed.** The JASS scanner
-(`JassScanner::nextToken`, game.dll `0x9249D0`) stores each character of a
-token in a heap buffer at `[this+8]` with no bound. A `war3map.j` with a
-string literal of ~4000 characters writes past that buffer while the map
-loads (access violation writing at `0x924AE4`; the e2e map with such a
-literal crashed this way). That is a heap overrun from map data, before any
-native runs. A string of the same length built by concatenation at run time
-is fine (4009 characters checked), so it is the scanner's token buffer, not
-JASS strings in general. Possible fix: Tome already hooks `nextToken` (memhack
-guard). It could check the token buffer's size, or refuse a map whose
-`war3map.j` has a literal over the limit before it compiles. The buffer's
-size is still to be read from the scanner's constructor (`0x9246A0`).
+**Seen on 1.27b (Nov 2026, in game). Fixed in Tome (jass-token-guard).** The
+JASS scanner (`JassScanner::nextToken`, game.dll `0x9249D0`, a flex-style
+DFA) keeps the token it reads in two heap buffers of `capacity + 1` bytes
+(the text at `[this+0x98]` and each character's state at `[this+8]`; the
+constructor `0x9246A0` gets the capacity from `Jass::compile`: 2100). Its
+character loop compares the token's length with the capacity, but then
+takes the error exit (return -2) only if `[this+0x1C]` is set, which the
+function clears when it starts, so the check never fires. A `war3map.j`
+with a string literal (or comment, or name) over 2100 characters writes past
+both buffers while the map loads: ~4000 characters crashed the game (access
+violation writing at `0x924AE4`), shorter overruns corrupt the heap
+silently. A string of the same length built by concatenation at run time is
+fine (4009 characters checked): it's the scanner's buffers, not JASS strings.
+1.26a has the same code (`0x45FF30`).
+
+The fix makes the check's `jne` a `jmp` to the same exit: a token that
+fills the buffers ends the compile as the parser's fatal errors do. That
+path crashed on its own: the parser's constructor (`0x91E9A0`) doesn't set
+the parse's root node (`JassParser.root`, `+0x34`), only a finished parse
+does, and after a failed one `0x913D44` calls a destructor through whatever
+it holds. The patch zeroes it before each parse. With both, a map with a
+3000-character literal goes back to the main menu (checked in game, 1.27b
+and 1.26a), as a map whose script doesn't compile does, and `tome.log` says
+why. `tests/game` runs the real scanner on such a literal: without the patch
+it writes past capacity + 1, with it nothing. Maps whose literal is between
+2101 characters and the length that crashed may have loaded before (with a
+corrupted heap); they don't load now.
 
 ### BLP texture loader reads past the file (`CBLPFile::Open`)
 
@@ -281,6 +296,46 @@ copy, with a mip past its end, checks the
 clamp is applied, and checks the guard refuses the file without crashing the
 game. Covers maps and mods alike.
 
+### Map downloads from a host
+
+**Read from the code on 1.27b (Nov 2026; same on 1.26a).** When a player
+joins a LAN or Battle.net game, the host sends the map's path as it has it
+(`Maps\FrozenThrone\(2)EchoIsles.w3x`), its size and checksums. The
+client checks the path with the map transfer's `MapTransfer::IsValidName`
+(game.dll `0x979000`), then looks for the map at that path under the game
+folder (`0x9789E0`), then by its base name anywhere under `Maps\`, and
+only if neither matches downloads it into `Maps\Download\<base name>`
+(`0x979090`; files up to 128 MB). The game's check refuses an absolute
+path, any of `*/:><|&+^?"`, an extension other than `.w3m` and `.w3x`, and a
+base name that is a DOS device (`nul`, `con`, `prn`, `aux`, `com1`–`9`,
+`lpt1`–`9`), compared up to the last dot. So the download can't be written
+outside `Maps\Download\`, nor get another extension. Two gaps remain:
+
+- **`..` components pass.** A host can point the client's lookup at a
+  `.w3m`/`.w3x` anywhere relative to the game folder, and with enough of
+  them anywhere on its drive: the client opens and checksums the file, tells
+  the host whether it matches, and plays it if it does. That leaks whether a
+  file the host knows exists on the player's disk, and loads a map from
+  outside `Maps\`.
+- **A device name with a second dot passes** (`com1.x.w3x`, also `conin$`,
+  `conout$` and the superscript ports, which the game's table lacks). Windows
+  before 11 still opens the device for such a name: the lookup reads from a
+  port or the console (a read that may never return), and the download
+  writes the map to it.
+
+Not reached: UNC paths and other drives (the game folder is put in front),
+and the base name the download is written under.
+
+**Fix implemented (lan-map-guard, built-in patch).** An AFTER handler on
+`MapTransfer::IsValidName` also refuses what the path sanitizer's
+`path_guard::is_unsafe` refuses: `..` components, device names by Windows'
+own rules, `:`, rooted paths, names over 259 characters. The transfer is
+then not made, as for a name the game refuses, and the client can't join
+with that map. A host's own maps have plain relative paths. The hook is
+reserved. `tests/game` calls the real check through the guard (a host's
+real paths pass, the game's own refusals stay, the gaps above are
+refused); not checked against a modified host in a LAN game.
+
 ## Fixed only after 1.27b
 
 These are all still present in 1.27b.
@@ -319,16 +374,64 @@ older versions ([BNETDocs](https://bnetdocs.org/news/105/warcraft-iii-1-27a-patc
 ## JASS natives that crash or misbehave
 
 *Forum*, from the [natives list](https://www.hiveworkshop.com/threads/producer-update-natives-list.301405/)
-and crash threads. Which patch each was observed on isn't confirmed.
+and crash threads. **Checked on 1.27b in game (Nov 2026)**, one small map
+per report (a melee map whose script runs the case a second into the game):
 
-- Assigning `GetLocalizedString` to a `constant` variable crashes.
-- Destroying a trigger whose threads are still waiting can corrupt the
-  handle stack and often crashes.
-- `MultiboardSetRowCount` is only safe when changing the count by one
-  at a time.
-- `CreateQuest` during map initialization can crash.
-- `SetItemPosition` crashes in some situations (`CreateItem` plus
-  `RemoveItem` is the reported workaround).
+| Report | On 1.27b | Fix |
+| --- | --- | --- |
+| `ExecuteFunc` naming a function that takes parameters | **Crashes**: access violation reading `0x21` at game.dll+`0x91B5EA` (the VM reads arguments nobody pushed). Blizzard.j functions too (`ClearTextMessagesBJ`) | **execute-func-guard** refuses the call |
+| `ExecuteFunc` with a missing name, a native's name, or a function that returns a value | Fine: the first two are ignored, the last runs | — |
+| `GetLocalizedString` in a `constant` global | **Crashes** while the map loads (reading `0x2858` at game.dll+`0x91AF8B`). Not `constant` nor `GetLocalizedString` in particular: any native returning a string in any global's initial value (`I2S` too). Integer natives there are fine | **global-string-guard**: the string is null instead |
+| Destroying a trigger whose threads are waiting | Fine: the waiting threads resume and finish | — |
+| `MultiboardSetRowCount` changed by more than one | Fine: 1 → 12 → 1, 0 rows and columns, 30 × 9, an item kept from a removed row | — |
+| `CreateQuest` during map initialization | Fine (in `main`, before `InitBlizzard`) | — |
+| `SetItemPosition` | Fine on a held item, a removed one, off the map and a dead owner's | — |
+
+The two crashes: `ExecuteFunc` (`0x1FE090`) looks the name up
+(`0x1DD520` → `0x915F60`) and runs it in a new thread with no arguments.
+Every native that returns a string goes through `CreateJassString`
+(`0x1F7F60` → `0x1DD4B0` → `0x90C760`), which adds the text to the table of
+`JassVM::Get(CGameWar3.vm_index)`; while the globals block runs, that VM is
+still null, and `0x91AF80` reads `[vm + JassVM.strings]`. Both patches:
+`architecture.md`, "Patches".
+
+## Command card button positions
+
+1.28's note ("Fixed command cards to be hidden again with special coordinates
+(0, -11) and (-2147483648, -2147483648) within CommandFunc.txt; invalid
+coordinates will now be ignored") and a Blizzard post from Dec 2016 ("We
+intended to fix all the negative coordinates that cause maps to crash")
+describe two bugs, and only one is in 1.27b. **Checked in game (Nov 2026)**,
+with `Buttonpos` values in `CustomKeys.txt` of (-1, 0), (-5, -5), (9, 0),
+(0, 7), (-100, 2) and (100000, 100000): no crash.
+
+- **1.27b:** every setter of a button's position stores x only if it's at
+  most 3 and y only if it's at most 2, as unsigned numbers, so negatives are
+  dropped too (`0x3CA1A0`, which `CommandFunc.txt`'s `Buttonpos` reaches
+  through `0x377220`; `0x36B470`; `0x373A90`, `0x373AB0`, `0x373AD0`). A bad
+  value leaves the default: (-100, 2) put the Peasant at (0, 2). The same
+  check drops (0, -11) and (INT_MIN, INT_MIN), the two positions maps used to
+  hide a button, so such a button shows up instead of hiding. 1.28 brought
+  them back.
+- **1.26a:** the setters store any value (`0x2F19E0`, `0x2F1A00`,
+  `0x2F4710`), and the card places a button by indexing its grid with it
+  unchecked (on 1.27b `0x3AA430`: the row array at `[card+0x154]`, 16 bytes
+  a row, the cells at `+8`, 4 bytes each), so a bad position reads outside
+  the grid: the crash Blizzard fixed in 1.27a.
+
+**Fixed in Tome (command-card-guard).** `CCommandCard::PlaceButton`
+(`0x3AA430`; 1.26a `0x36D3E0`) skips a button whose position is outside the
+grid, which is how the card leaves out a button it doesn't show. On 1.27b
+the setters that `CommandFunc.txt`, `CustomKeys.txt` and abilities' buttons
+go through (`0x3CA1A0`, both paths of `0x36B470`) keep the two hiding
+positions, as 1.28 does; `0x373A90`-`0x373AF0`, single-coordinate setters
+with the same checks, have no callers. On 1.26a every bad position is left
+off the card (1.28 would put it at its default; 1.26a's setters keep no
+default). Checked in game on both builds with `CustomKeys.txt` (Attack at
+(0, -11), Move at (INT_MIN, INT_MIN): both hidden; Patrol at (9, 9): at
+(0, 0) on 1.27b, as without the patch, left out on 1.26a). Only the local player's card changes:
+nothing goes over the network. Whether a hidden button's hotkey still works
+wasn't checked.
 
 ## Stretched picture on widescreen
 
@@ -357,10 +460,100 @@ click area sat further from the middle of the screen than the unit (at
 16:10, a peasant at 75% of the width answered a click about 100 px further
 out, and near the sides off screen, so a building's larger area got the
 click). Checked at 1600 × 1000 on Booty Bay: a click on empty ground there
-selects nothing, and a peasant at 98% of the width selects. **Still open:** the 2D UI
-(console, top bar, command card, minimap) stays stretched, and the
-minimap's camera box keeps its 4:3 size. Like 1.29, a wider window sees more
-of the map in multiplayer.
+selects nothing, and a peasant at 98% of the width selects.
+
+**The 2D UI: fixed in Tome too (Nov 2026, same patch and setting).** The
+game converts UI units to the screen as if it were always 0.8 wide; the
+patch gives those conversions the window's width, so the UI's units are
+square and its root spans the window. Everything 2D keeps its shape (round
+minimap icons, square command buttons, unstretched text), and what the game
+anchors to the screen's edges goes to the window's edges, as in 1.29: the
+minimap and the menu buttons at the left, the resource bar and the command
+card at the right. The console's art is laid out again in pieces (the
+minimap's end at the left edge, the portrait's arch, info panel and inventory
+centered, the command card at the right edge, wall between, and slots in the
+top bar each side of the clock), and the portrait, info panel, life and mana
+text, clock and inventory cover move to the middle. The world view then fills
+the window at its own shape. Clicks land where things are drawn (checked: a
+peasant selected by clicking it, a command card button at 97% of the width),
+and the cursor is drawn at the pointer: until Nov 2026 its frame (a
+full-screen sprite) was stretched like the menus' art, so it was drawn a
+third further from the left edge than the pointer at 16:9.
+The menus fill the window as in 1.29 (Nov 2026): the border on the window's
+edges, the left panels on its left and the right panels (behind the buttons)
+on its right, each in proportion, with the 3D background filling the
+window. Before, those panels (models drawn for 4:3) were stretched across
+the window, a third too wide at 16:9, under buttons that weren't. The
+loading screen and the score screen, each one piece of art with frames
+placed on it, are laid out at 4:3 in the middle of the window, with the same
+art stretched, blurred and darkened filling the sides: stretched itself,
+the art left the frames off their places (the loading screen's minimap
+preview off its border). Checked at 1280 x 720 on the main menu, Single
+Player, Campaign, Options (and its Video page), Custom Game, LAN, LAN game
+creation and the lobby, the loading screen, the score screen and in a game.
+**A second pass over everything a wide window shows (Nov 2026).** Checked at
+1280 x 720, 2520 x 1080 (21:9) and 1280 x 1024 (5:4), against 4:3 and against
+the unpatched game, on the menus (single player, campaign, custom campaign,
+load game, replays, custom game, options, LAN, the Battle.net error), the
+loading and score screens, the credits, a campaign's briefing and
+cinematics, movies, a melee game with a hero and its panels, the quest log,
+message log, script dialog, multiboard, leaderboard, timer dialogs, game
+messages, tooltips, the Esc menu, a replay and Tome's own menu:
+
+- **The camera's vertical angle.** The game's `Perspective` spreads the field
+  of view over the viewport's diagonal. With the 2D part the world frame
+  (always 0.45 UI units high) is as wide as the window, so its aspect
+  grew (1.85 at 4:3, 2.47 at 16:9, 3.2 at 21:9) and the vertical angle shrank
+  with it: a 16:9 window saw 4% more than 4:3 at the sides and 22% less above
+  and below (38% less at 21:9), the picture zoomed in, where 1.29 shows more.
+  The world camera now keeps the vertical angle the same viewport has at 4:3
+  (`widescreen::wide_projection`, from the aspect and the UI's width) and
+  only widens: 33% more at the sides at 16:9, as the old fix did. Picking
+  follows (checked: a peasant, the gold mine and the town hall at the
+  middle and off to the sides selected where clicked), and the minimap's
+  camera box (computed from the same camera) widens with it, which was the
+  open "box keeps its 4:3 size" item.
+- **Cinematic mode's bars.** `CinematicPanel.fdf` makes its top and bottom
+  borders 0.8 wide, the top one from the left edge and the bottom one to the
+  right edge: in a wider UI each covered part of the window (the speaker's
+  panel hung on black, the credits and every campaign cinematic). They're
+  held by both sides of the panel, which fills the window.
+- **The campaign screen's fade.** Its sliding doors (`SlidingDoors`, a flat
+  full-screen model) went to the middle in proportion, so the screen faded
+  in from a black 4:3 box with the menu showing beside it; they're stretched
+  across the window like Battle.net's doors (`kWarpedFrames`).
+
+**Still open:**
+
+- The enhanced-options mod's HUD scale below 100% in a window wider than 4:3:
+  its camera options (field of view, zoom, angle) work with the widescreen
+  camera (checked), but the HUD scale lays the console out for a UI 0.8
+  wide (`kWidth` in its `hud.cpp`: the room it leaves at each side, the
+  portrait's and the clock's places) while the UI is wider, so at 80% and 60%
+  the hero's portrait sits left of its arch and the console is off-center.
+  At 4:3 it's right. Needs the mod to use the UI's real width (and to count
+  Tome's shift of the console's middle), not Tome.
+- Changing the setting applies to the 2D UI from the next screen (the next
+  menu screen or game), not at once: text keeps the layout it was made with.
+- Not reached from a test: the allies dialog (it needs allies), Battle.net's
+  friends, clan and tournament panes. Checked since: Battle.net's login, home,
+  chat, profile, custom games, create game, standard game and its lobby
+  against a PvPGN server (with pvpgn-connect); the credits of both editions
+  played to the end; both editions' campaign loading screens and
+  cinematics; Direct3D as well as OpenGL; a resize during a movie (the movie
+  window keeps its size and the game's window comes back as it was).
+- The e2e test's fixed click positions (the mod menu in safe mode, the LAN
+  game's row) follow the UI's width, so the suite runs at any window shape
+  (`TEST_WIDTH=800 TEST_HEIGHT=450 make e2e`, a 16:9 window, passes). The
+  two-instance test at 1056 x 552 doesn't: both games' windows land mostly
+  off the screen (`E2E_SHOTS=<folder>` takes screenshots of both) and the
+  client's click on the game's row misses; at larger sizes it is also slow
+  and sometimes hangs under software rendering. The Reign of Chaos
+  two-instance test failed to join in about a third of the runs while the
+  machine was busy and passed 4 of 4 on a quiet one: a timing race in the
+  test, not seen on The Frozen Throne.
+
+Like 1.29, a wider window sees more of the map in multiplayer.
 
 ## Multiplayer cheating
 
@@ -526,20 +719,22 @@ MIDI device).
    closes the exploit for players who download maps from others.
 2. **Measure the memhack on this build** with a test map, to settle
    whether 1.27b still lets scripts write memory.
-3. **Port the cheap 1.28 crash fixes:** ignore invalid command card
-   coordinates. (Path traversal in `PreloadGenEnd` and every other native that
-   takes a file path is already handled by the path-sanitizer patch, above.)
+3. ~~**Port the 1.28 command card fix**~~ Done (command-card-guard; see
+   "Command card button positions"). (Path traversal in `PreloadGenEnd` and
+   every other native that takes a file path is already handled by the
+   path-sanitizer patch, above.)
 4. **Raise the hashtable and game cache limits** as 1.29.1 did, if a
    mod needs them (it changes game behaviour, so every player needs
    the same mod).
 
-## Further hardening (surveyed Nov 2026, not yet done)
+## Further hardening (surveyed Nov 2026)
 
 A survey of the game's remaining attack surface for malicious maps,
 downloaded files, and (for private/Battle.net servers) the network. Roughly
 most-valuable first. Each needs reverse engineering on 1.27b before it can be
-built; none is implemented yet. The three built-in guards above (memhack,
-path, BLP) plus the path-length limits are what exists today.
+built; items marked done have been. The built-in guards above (memhack,
+path, BLP, the JASS token and command card guards) plus the path-length
+limits are what exists today.
 
 ### Parsers of untrusted bytes with no guard yet
 
@@ -550,11 +745,20 @@ path, BLP) plus the path-length limits are what exists today.
    refuses `\..\`, `\..` and `..\` in it itself), so the "inside the game
    folder" worry is milder than feared, and the
    path-sanitizer's `..`/rooted/device/length checks keep a write inside those
-   folders. Still worth doing for defence in depth: refuse writes to script or
-   executable extensions (`.j`, `.ai`, `.pld` aside from the intended preload,
-   `.bat`, `.vbs`, `.exe`, `.dll`), and never let a relative name reach
-   `tome\` or `TOME_HOME`. Also test 8.3 short names (`GAME~1.DLL`) and
-   trailing-dot/space tricks against the guard.
+   folders. **Done (Nov 2026) for defence in depth:** the writes also refuse
+   a name a program or script would have (`path_guard::is_executable_name`:
+   `.exe`, `.dll`, `.bat`, `.cmd`, `.vbs`, `.js`, `.ps1`, `.lnk`, `.reg`,
+   Miles' `.mix`/`.asi`/`.flt`/`.m3d`, ..., after the trailing dots and spaces
+   Windows drops, so `x.bat. ` too), and a component of only dots and spaces
+   with two dots or more counts as `..`. 8.3 short names are no way around
+   either: `GAME~1.DLL` has the extension; a long name whose short name
+   would have one (`x.exe1` is also `X~1.EXE`, `x.mixer` `X~1.MIX`: an
+   extension is cut to three characters there) is refused too; and a short
+   name can only name something inside the folder the write is rooted in,
+   which already keeps it out of `tome\` (unit tests, and one write in the
+   e2e map). Game scripts
+   (`.j`, `.ai`, `.pld`) aren't refused: `Preloader` runs a file of any name,
+   and maps write `.pld` files on purpose.
 2. **TGA image guard.** Browsing the Custom Game list parses each map's
    minimap and preview images before a game ever starts. A `CBLPFile`-style
    guard for TGA (and a check of the JPEG stream inside a JPEG BLP, which the
@@ -573,11 +777,9 @@ path, BLP) plus the path-length limits are what exists today.
    how old, is unknown — no FreeType strings found). `tests/game` loads
    game.dll without running it, so it could host a direct fuzzer over these
    parsers (slow under Wine, but it would find real bugs).
-5. **Replays (`.w3g`) and saves (`.w3z`), and LAN map downloads.** Files
-   players receive from others. For LAN downloads, check where the client
-   stores a downloaded map and whether the host-supplied name is cleaned
-   (path traversal by a malicious host is the classic bug). Replays feed the
-   same action parser as live network play (#6).
+5. **Replays (`.w3g`) and saves (`.w3z`).** Files players receive from
+   others. Replays feed the same action parser as live network play (#6).
+   (LAN map downloads: done, lan-map-guard; "Map downloads from a host".)
 6. **Network actions from other players.** A modified client can send
    malformed action blocks (selection counts, slots, handle ids). Tome already
    hooks the action dispatch for events, so a validation layer could sit there;
@@ -593,12 +795,13 @@ path, BLP) plus the path-length limits are what exists today.
 
 ### JASS runtime crashes (forum-reported, unverified on 1.27b)
 
-8. `ExecuteFunc` with a missing/parameterized function; destroying a trigger
-   with waiting threads; `MultiboardSetRowCount` jumps; `CreateQuest` during
-   init; `SetItemPosition`; the JASS scanner's long string literal overrun
-   noted above; and the 1.28 command-card coordinate fix (item 3 in the list above).
-   The path sanitizer's `BindNative`-wrapper method covers the native ones
-   cheaply — one table line each.
+8. ~~JASS runtime crashes~~ Checked on 1.27b (Nov 2026): `ExecuteFunc` on
+   a function with parameters and a string native in a global's initial
+   value crash, and are fixed (execute-func-guard, global-string-guard); the
+   other reports don't crash on 1.27b ("JASS natives that crash or
+   misbehave"). The JASS scanner's long string literal overrun (above) and
+   the command card positions are fixed too (jass-token-guard,
+   command-card-guard).
 9. **Other typecasts.** Confirm the memhack guard is the only JASS→memory
    gateway left: check the hashtable `Save*Handle`/`Load*Handle` + `Convert*`
    tricks to see whether loading into a mismatched handle type is refused on
@@ -606,12 +809,13 @@ path, BLP) plus the path-length limits are what exists today.
 
 ### Tome's own surface
 
-10. **`TomeLogString`/`TomeLogInteger` flooding and log forgery.** A map can
-    call these in a loop with no cap, and the map's text is logged raw, so it
-    can fill the disk and forge `[ERROR]` lines (`tome.log` has no size cap in
-    `log.cpp`). Give the map-facing natives a `LogBudget` like the handshake's,
-    replace control characters, and cap `tome.log`. Grow `fuzz_jass` (or a new
-    target) to cover Tome-native arguments (`BlzFrame*`, huge strings, bad ids).
+10. ~~**`TomeLogString`/`TomeLogInteger` flooding and log forgery.**~~ Done
+    (Nov 2026): each map load logs at most 1000 of the map's lines, its
+    strings are cut to 1000 bytes with control characters replaced, and
+    `tome.log` keeps only warnings and errors past 32 MiB, nothing past
+    33 MiB (`core/log_guard.*`, unit and host tests; `architecture.md`,
+    "Natives"). Still open: a fuzz target over Tome-native arguments
+    (`BlzFrame*`, huge strings, bad ids).
 
 ### Process-level mitigations (weigh against the stability-first rule)
 
@@ -623,6 +827,9 @@ path, BLP) plus the path-length limits are what exists today.
     images). Not viable: ACG (would break Tome's own hooks and mod loading),
     strict handles (may break the game). Each should be off-by-default or
     individually tested, per the stability-first rule.
+    **Heap termination: done** (Nov 2026) as a setting, off by default
+    (Tome > Settings > Stop on Memory Corruption, `architecture.md`,
+    "Settings"); the image-load policy is still open.
 
 ## Sources
 

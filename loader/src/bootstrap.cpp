@@ -181,6 +181,25 @@ void start_exit_watch() {
     if (thread) CloseHandle(thread);
 }
 
+// The harden_heap setting (Tome > Settings, Stop on Memory Corruption): Windows
+// then ends the process when a heap function finds the heap corrupted,
+// instead of carrying on (war3.exe is linked for Windows XP, so it doesn't
+// get this by default). Process-wide, for every heap, and it can't be undone,
+// so it's read once per start. The process ends through the system's
+// critical-failure path (STATUS_HEAP_CORRUPTION, 0xC0000374), which may skip
+// exception filters: then there's no Tome crash report, only Windows' own
+// (event log, Error Reporting). Not checked on Windows yet.
+void harden_heap() {
+    if (!tome_settings::harden_heap_at_start()) return;
+    if (!HeapSetInformation(nullptr, HeapEnableTerminationOnCorruption, nullptr, 0)) {
+        TOME_WARN("Stop on memory corruption: HeapSetInformation failed (error %lu)", GetLastError());
+    } else if (running_on_wine()) {
+        TOME_INFO("Stop on memory corruption: set, but Wine's heap doesn't act on it");
+    } else {
+        TOME_INFO("Stop on memory corruption: on (the process ends if a heap is found corrupted)");
+    }
+}
+
 DWORD bootstrap() {
     // Until log::open succeeds, TOME_* lines go to the debugger only.
     if (!g_paths_ok) {
@@ -289,7 +308,13 @@ DWORD bootstrap() {
         } else if (g_events_ok) {
             TOME_ERROR("Multiplayer handshake unavailable: %s", g_handshake_report.c_str());
         }
-        if (g_patches_ok) TOME_INFO("Patches: %s", g_patches_report.c_str());
+        // A warning when the player turned some off: fixes, often for
+        // vulnerabilities, aren't in force.
+        if (g_patches_ok && patches::count(patches::State::Off)) {
+            TOME_WARN("Patches: %s", g_patches_report.c_str());
+        } else if (g_patches_ok) {
+            TOME_INFO("Patches: %s", g_patches_report.c_str());
+        }
         if (g_objects_ok) {
             TOME_INFO("Game objects: %s", g_objects_report.c_str());
         } else if (!g_objects_report.empty()) {
@@ -327,7 +352,8 @@ DWORD bootstrap() {
     mods_ready::set();
     overlay::log_probe();
 
-    tome_settings::init(g_paths);
+    tome_settings::init();
+    harden_heap();
     HWND window = find_game_window(60000);
     if (window && main_thread::install(window)) {
         TOME_INFO("Main-thread dispatcher installed on the game window (main thread %lu)",
@@ -338,9 +364,16 @@ DWORD bootstrap() {
         start_exit_watch();
         // Mods enabled above may have asked for a main menu that already exists.
         main_thread::post(frames::catch_up);
+        // The first refresh above ran before the dispatcher, so its
+        // TOME_EVENT_MODS_CHANGED waited (ModManager::locked): the mods it
+        // enabled had no list in tome_mod_enable (it's made after them).
+        main_thread::post([] { events::fire_mods_changed(); });
         main_thread::post([] { patches::background_mute_start(g_paths.tome_dir); });
     } else {
         TOME_WARN("No game window to attach to; mod changes will apply off the main thread");
+        // Then the events fire where the list changes, the first refresh's here.
+        mods.fire_events_without_dispatcher();
+        events::fire_mods_changed();
     }
     start_watcher(g_paths, [] {
         if (mod_manager().poll_changed()) {
@@ -381,6 +414,9 @@ void start_bootstrap(HMODULE self) {
         g_safe_mode = safe_mode_reason(g_paths);
         mod_manager().set_safe_mode(g_safe_mode);
     }
+    // Which built-in patches the player turned off: -tomenopatch counts even
+    // without Tome's folders (no settings file then).
+    tome_settings::load(g_paths_ok ? &g_paths : nullptr);
     HMODULE game = GetModuleHandleW(L"game.dll");
     g_game_loaded_at_attach = game != nullptr;
 
@@ -394,9 +430,11 @@ void start_bootstrap(HMODULE self) {
         if (g_early_verified) {
             g_early_hooks_ok = natives::install_hooks(reinterpret_cast<uintptr_t>(game), *g_early_build,
                                                       g_early_hooks_report);
-            // Built-in fixes (always on, independent of events and of Tome's
-            // folders): applied to whichever ones fit this build. See patches.h.
-            g_patches_ok = patches::install(reinterpret_cast<uintptr_t>(game), *g_early_build, g_patches_report);
+            // Built-in fixes (independent of events and of Tome's folders):
+            // applied to whichever ones fit this build, but those the player
+            // turned off. See patches.h.
+            g_patches_ok = patches::install(reinterpret_cast<uintptr_t>(game), *g_early_build, g_patches_report,
+                                            tome_settings::patch_off);
             // After the patches: they set up the hook engine (and may wrap natives, which jass_call then calls).
             g_objects_ok = objects::install(reinterpret_cast<uintptr_t>(game), *g_early_build, g_objects_report);
             g_sound_wait_ok = mods_ready::install_sound_wait(g_sound_wait_report);

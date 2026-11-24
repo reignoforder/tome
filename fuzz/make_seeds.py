@@ -39,6 +39,18 @@ for text in [
 ]:
     add("handshake", text)
 
+# Mods' messages: "<sender><value as 4 bytes><mission>\t<key>" per action.
+def netmsg_line(sender, part, count, mission, key):
+    return bytes([sender]) + struct.pack("<i", part | count << 8) + mission.encode() + b"\t" + key.encode()
+add("netmsg", netmsg_line(1, 0, 1, "1 1 hello", "aGVsbG8="))
+add("netmsg", netmsg_line(1, 0, 2, "1 2 my-mod", "A" * 252) + b"\n" + netmsg_line(1, 1, 2, "1 2 my-mod", "AAAA"))
+add("netmsg", netmsg_line(2, 0, 1, "1 3 hello", ""))
+add("lobbymsg", b"\x01[Tome] Msg 1 1 hello 1/1: aGVsbG8=")
+add("lobbymsg", b"\x01[Tome] Msg 1 2 my-mod 1/2: " + b"A" * 128 + b"\n\x01[Tome] Msg 1 2 my-mod 2/2: AAAA")
+add("lobbymsg", b"\x02[Tome] Msg 1 3 hello 1/1: ")
+add("desync", b"\xff\n" + bytes([2]) + b"1 1 local-mod\t0000000000000007\n" + bytes([3]) + b"1 1 local-mod\t0000000000000008")
+add("desync", bytes([2]) + b"1 2 my-mod\t00000000deadbeef\n\xff\n\xff\n")
+
 for text in ["/tome list", "/tome enable hello", "/tome disable my-mod", "/tome reload", "/tome logs warn 20", "/Hello  some  args ",
              "/x\targ", "/tome help"]:
     add("chat", text)
@@ -72,6 +84,11 @@ for path in sorted(glob.glob(os.path.join(ROOT, "sdk/examples/*/*.json")) +
                    glob.glob(os.path.join(ROOT, "tests/e2e/mods/*/tome.mod.json"))):
     add("json", open(path, "rb").read())
 add("json", '{"a": [1, 2.5e3, -0, true, false, null, "\\u00e9\\n"], "b": {}}')
+# A mod's own mapping file (tome.mod.json "mappings").
+add("json", '{"schema": 2, "name": "1.27b", "symbols": {'
+            '"CUnit::Foo": {"kind": "function", "rva": "0x100", "conv": "thiscall", "sig": "int(void* this)", '
+            '"bytes": "55 8b ec ?? 83"}, "Foo.size": {"kind": "offset", "value": 8}, '
+            '"Foo.call": {"kind": "call", "rva": "0x200", "target": "CUnit::Foo"}}}')
 
 add("jass", "globals\nunit G\nendglobals\nfunction f takes nothing returns nothing\n"
             "    local integer G\n    set G = 1\nendfunction\n")
@@ -129,6 +146,9 @@ add("update", "# release keys\n11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=\n")
 add("wasm_layout", b"(Hunit;RS)Hunit;\n" + bytes([5, 0, 16, 0]) + b"abcde" + bytes(8) + b"xyz")
 add("wasm_layout", b"(ISC)V\n" + bytes(12))
 add("wasm_layout", b"()C")
+add("wasm_hooks", b"void(CUnit* this, float amount)")
+add("wasm_hooks", b"int(unsigned int flags, CItem* item)")
+add("wasm_hooks", b"void(const char* text, ...)")
 
 # WebAssembly modules (fuzz_wamr): small ones made here for what Tome's
 # configuration turns on (loops for the budget, memory growth, tables and

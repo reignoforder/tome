@@ -6,13 +6,18 @@ add_executable(tome_tests
     test_background_mute.cpp
     test_blp.cpp
     test_chat.cpp
+    test_command_card.cpp
     test_command_line.cpp
     test_context_restore.cpp
     test_crash_report.cpp
     test_debug_script.cpp
+    test_desync.cpp
     test_frames.cpp
+    test_game_clock.cpp
     test_game_lock.cpp
     test_handshake.cpp
+    test_netmsg.cpp
+    test_lobbymsg.cpp
     test_hash.cpp
     test_hash_cache.cpp
     test_hooks.cpp
@@ -20,10 +25,13 @@ add_executable(tome_tests
     test_jass.cpp
     test_json.cpp
     test_keys.cpp
+    test_log_guard.cpp
     test_log_view.cpp
     test_main_menu_fdf.cpp
     test_mappings.cpp
     test_metadata.cpp
+    test_metadata_check.cpp
+    test_mod_list.cpp
     test_mod_menu_model.cpp
     test_mod_state.cpp
     test_movie_decoder.cpp
@@ -31,12 +39,15 @@ add_executable(tome_tests
     test_package.cpp
     test_path_guard.cpp
     test_popup.cpp
+    test_profile.cpp
     test_resolver.cpp
     test_rtti.cpp
     test_settings.cpp
     test_signature.cpp
     test_text.cpp
+    test_timers.cpp
     test_tome_hpp.cpp
+    test_tome_settings.cpp
     test_objects.cpp
     test_units.cpp
     test_update_check.cpp
@@ -44,6 +55,7 @@ add_executable(tome_tests
     test_verify.cpp
     test_wasm_abi.cpp
     test_wasm_alloc.cpp
+    test_wasm_hooks.cpp
     test_wasm_layout.cpp
     test_version.cpp
     test_widescreen.cpp
@@ -53,6 +65,7 @@ add_executable(tome_tests
 target_link_libraries(tome_tests PRIVATE tome_core)
 # For checking the mapping files against the local install, if present.
 target_compile_definitions(tome_tests PRIVATE TOME_TEST_GAME_DIR="${TOME_GAME_DIR}")
+target_compile_definitions(tome_tests PRIVATE TOME_TEST_WASM_GAME_HEADER="${CMAKE_SOURCE_DIR}/sdk/include/tome/tome_wasm_game.h")
 target_compile_definitions(tome_tests PRIVATE TOME_TEST_RELEASE_KEYS="${CMAKE_SOURCE_DIR}/loader/release-keys.txt")
 target_compile_options(tome_tests PRIVATE -Wall -Wextra -fno-exceptions -fno-rtti)
 target_link_options(tome_tests PRIVATE -static)
@@ -66,27 +79,74 @@ tome_add_mod(hook_b SOURCES e2e/mods/hook-b/hook_b.c METADATA e2e/mods/hook-b/to
 tome_add_mod(crash SOURCES e2e/mods/crash/crash.c METADATA e2e/mods/crash/tome.mod.json)
 set_target_properties(hook_a PROPERTIES OUTPUT_NAME hook-a)
 set_target_properties(hook_b PROPERTIES OUTPUT_NAME hook-b)
+# sync-test's code; tools/e2e-multiplayer.sh puts it next to the fixture's assets.
+# A Wasm mod for tests/host/test_wasm.cpp that exercises the C runtime's lobby and
+# hook callbacks (built when a Wasm toolchain was found, sdk/CMakeLists.txt).
+if(TARGET hello_wasm)
+    tome_add_wasm_mod(wasm_runtime_probe SOURCES wasm/runtime-probe/runtime_probe.c
+        METADATA wasm/runtime-probe/tome.mod.json FOLDER wasm-runtime-probe NO_CHECK)  # it hooks functions only its test maps
+endif()
+if(TARGET hello_wasm_rs)
+    tome_add_rust_mod(wasm_runtime_probe_rs WASM CRATE wasm/runtime-probe-rs METADATA tome.mod.json
+        FOLDER wasm-runtime-probe-rs NO_CHECK)
+endif()
+tome_add_mod(sync_test SOURCES e2e/mods/sync-test/sync_test.c METADATA e2e/mods/sync-test/tome.mod.json FOLDER sync-test)
+set_target_properties(sync_test PROPERTIES OUTPUT_NAME sync-test)
 
 # The hook engine and the crash guard on real code in this process: the
 # Windows side of loader/src/hooks.cpp and guard.cpp, compiled in directly
-# (they only need the log).
+# (they only need the log). Compiled once for both suites below.
+add_library(tome_hook_runtime_loader OBJECT
+    ../loader/src/guard.cpp
+    ../loader/src/hooks.cpp
+    ../loader/src/log.cpp
+    ../loader/src/mod_mappings.cpp
+    ../loader/src/patch.cpp
+    ../loader/src/shade.cpp
+    ../loader/src/paths.cpp
+    ../loader/src/unwind.cpp
+)
+target_link_libraries(tome_hook_runtime_loader PUBLIC tome_core)
+target_include_directories(tome_hook_runtime_loader PUBLIC ../loader/src)
+target_compile_definitions(tome_hook_runtime_loader PUBLIC UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_compile_options(tome_hook_runtime_loader PRIVATE -Wall -Wextra -fno-exceptions -fno-rtti)
+
 add_executable(tome_hook_runtime_tests
     main.cpp
     test_guard.cpp
     test_hook_runtime.cpp
-    ../loader/src/guard.cpp
-    ../loader/src/hooks.cpp
-    ../loader/src/log.cpp
-    ../loader/src/patch.cpp
-    ../loader/src/paths.cpp
-    ../loader/src/unwind.cpp
 )
-target_link_libraries(tome_hook_runtime_tests PRIVATE tome_core)
-target_include_directories(tome_hook_runtime_tests PRIVATE ../loader/src)
-target_compile_definitions(tome_hook_runtime_tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_link_libraries(tome_hook_runtime_tests PRIVATE tome_hook_runtime_loader)
 target_compile_options(tome_hook_runtime_tests PRIVATE -Wall -Wextra -fno-exceptions -fno-rtti)
 target_link_options(tome_hook_runtime_tests PRIVATE -static)
 add_test(NAME tome_hook_runtime_tests COMMAND tome_hook_runtime_tests)
+
+# A fake shade.dll (shade/fake_shade.cpp): Shade's hook natives on Windows,
+# for Tome's Shade paths (loader/src/shade.*). Loaded by path, by the tests
+# that want it.
+add_library(fake_shade SHARED shade/fake_shade.cpp)
+set_target_properties(fake_shade PROPERTIES OUTPUT_NAME shade PREFIX "" LIBRARY_OUTPUT_DIRECTORY
+    ${CMAKE_CURRENT_BINARY_DIR}/fake-shade RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/fake-shade)
+target_link_libraries(fake_shade PRIVATE tome_core)
+target_include_directories(fake_shade PRIVATE ../loader/src)
+target_compile_definitions(fake_shade PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_compile_options(fake_shade PRIVATE -Wall -Wextra -fno-exceptions -fno-rtti)
+target_link_options(fake_shade PRIVATE -static -Wl,--kill-at)  # ShadeVersion, not ShadeVersion@0
+
+# The same suite again as under Shade, with its own tests (test_shade.cpp).
+add_executable(tome_hook_runtime_shade_tests
+    main.cpp
+    test_guard.cpp
+    test_hook_runtime.cpp
+    test_shade.cpp
+)
+target_link_libraries(tome_hook_runtime_shade_tests PRIVATE tome_hook_runtime_loader)
+target_include_directories(tome_hook_runtime_shade_tests PRIVATE .)
+target_compile_definitions(tome_hook_runtime_shade_tests PRIVATE TOME_TEST_FAKE_SHADE="$<TARGET_FILE:fake_shade>")
+target_compile_options(tome_hook_runtime_shade_tests PRIVATE -Wall -Wextra -fno-exceptions -fno-rtti)
+target_link_options(tome_hook_runtime_shade_tests PRIVATE -static)
+add_dependencies(tome_hook_runtime_shade_tests fake_shade)
+add_test(NAME tome_hook_runtime_shade_tests COMMAND tome_hook_runtime_shade_tests)
 
 # The loader itself (tome_runtime: everything in tome.mix but DllMain) driven
 # in this process against a fake game image, with the fixture mods in a
@@ -95,12 +155,15 @@ add_test(NAME tome_hook_runtime_tests COMMAND tome_hook_runtime_tests)
 add_executable(tome_host_tests
     host/host_main.cpp
     host/harness.cpp
+    host/signing.cpp
     host/test_api.cpp
     host/test_chat.cpp
     host/test_crash.cpp
     host/test_lifecycle.cpp
     host/test_manager.cpp
     host/test_mods.cpp
+    host/test_sdk_features.cpp
+    host/test_shade.cpp
     host/test_wasm.cpp
 )
 target_link_libraries(tome_host_tests PRIVATE tome_testing tome_runtime monocypher)  # monocypher: signs mods in tests
@@ -108,16 +171,17 @@ target_include_directories(tome_host_tests PRIVATE .)
 target_compile_definitions(tome_host_tests PRIVATE
     TOME_TEST_BUILD_DIR="${CMAKE_BINARY_DIR}"
     TOME_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    TOME_TEST_FAKE_SHADE="$<TARGET_FILE:fake_shade>"
 )
 target_compile_options(tome_host_tests PRIVATE -Wall -Wextra -fno-exceptions -fno-rtti)
 target_link_options(tome_host_tests PRIVATE -static)
-add_dependencies(tome_host_tests hook_a hook_b crash hello hello_cpp)
+add_dependencies(tome_host_tests hook_a hook_b crash hello hello_cpp fake_shade)
 if(TARGET hello_wasm)
-    add_dependencies(tome_host_tests hello_wasm)
+    add_dependencies(tome_host_tests hello_wasm wasm_runtime_probe)
     target_compile_definitions(tome_host_tests PRIVATE TOME_TEST_WASM_EXAMPLE=1)
 endif()
 if(TARGET hello_wasm_rs)
-    add_dependencies(tome_host_tests hello_wasm_rs)
+    add_dependencies(tome_host_tests hello_wasm_rs wasm_runtime_probe_rs)
     target_compile_definitions(tome_host_tests PRIVATE TOME_TEST_WASM_RUST_EXAMPLE=1)
 endif()
 # Signed by sdk/support/tome_sign.py with a public test-only key
@@ -178,6 +242,19 @@ target_compile_options(tome_game_tests PRIVATE -Wall -Wextra -fno-exceptions -fn
 target_link_options(tome_game_tests PRIVATE -static)
 add_dependencies(tome_game_tests hook_a hook_b crash)
 add_test(NAME tome_game_tests COMMAND tome_game_tests)
+
+# The tests' own sources build at -O1 (about half the compile time of the
+# Release -O3, most of a cold build being test code). Only theirs: the
+# loader sources compiled in (tome_hook_runtime_loader) and the libraries
+# they link (tome_core, tome_runtime) keep the flags tome.mix ships with, so
+# the code under test is the shipped code. Not in Debug (-O0).
+if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+    foreach(target tome_tests tome_hook_runtime_tests tome_hook_runtime_shade_tests tome_host_tests tome_game_tests)
+        get_target_property(sources ${target} SOURCES)
+        list(FILTER sources EXCLUDE REGEX "^\\.\\./")
+        set_property(SOURCE ${sources} APPEND PROPERTY COMPILE_OPTIONS -O1)
+    endforeach()
+endif()
 
 # Tome's tools for mod makers (loader/src/testing): tome_test.dll on mods of
 # every kind, and tome-check on broken fixtures (it checks every mod this

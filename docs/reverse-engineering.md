@@ -74,9 +74,27 @@ Everything below is about 1.27b; RVAs in this document are 1.27b's.
     `0x4C5CF0` without reloading it. A hook must give back the caller's
     ecx and edx, and pass its eax into the original (the hook engine does:
     `architecture.md`, hooks).
-- **Not mapped (no use in Tome):** COptionsMenu::SetPanel and ::Save,
-  CBattleNetGateways::LoadRegistry, CSlider::SetValue, CameraPresets (not a
-  table in 1.26a), CrashHandler::*, Scheduler::SetPeriod,
+- **Mapped for mods:** COptionsMenu::SetPanel (`0x55F950`; 1.26a's tab
+  cases in COptionsMenu::OnEvent call it through one-line wrappers,
+  `0x55FA70`/`0x55FA80`/`0x55FA90`, where 1.27b inlines them),
+  COptionsMenu::Save (`0x55F4E0`, the third call of the OK handler
+  `0x55FAA0`, as in 1.27b's) and Scheduler::SetPeriod (`0x62B040`, called
+  only by Options::ApplyValue's maxfps case).
+- **The 2D UI's coordinates** (widescreen): the six conversions are at
+  `0x4C6480` (NDCToDDC), `0x4C64B0` (NDCToDDCRect), `0x4C64E0` (DDCToNDC),
+  `0x4C6510` (DDCToNDCRect), `0x4C6540` (DDCToNDCWidth) and `0x4C6580`
+  (NDCToDDCWidth), the heights' twins after each Width one. x87: they
+  `fmul`/`fdiv QWORD` by doubles, `DDCWidth` `0x8768B0` (0.8f widened,
+  `0x3FE99999A0000000`) and 0.6 at `0x93C218`; the Rect forms load the 0.8
+  once (`fld QWORD`, then `fmul st(1),st`). Found from
+  `CScreenFrame::UpdateScreenRect` (`0x60A140`, the layout vtable's slot
+  `+0x4` as in 1.27b), which calls NDCToDDCRect. `C44Matrix::Ortho` is
+  `0x7B6250` (`ret 0x18`, called by the sprite camera's setup `0x4E7010`),
+  `CScreenFrame::GetCurrent` `0x60A030` (`.data 0xACE754`, set once by
+  `0x60A210`), `CInfoPanel.inventory_cover` `+0x14C` (stored before the
+  `SetPointAbsolute` call at `0x371615`).
+- **Not mapped (no use in Tome):** CSpriteFrame.view, CBattleNetGateways::LoadRegistry,
+  CSlider::SetValue, CameraPresets (not a table in 1.26a), CrashHandler::*,
   CGxDeviceD3d::WndProc.
 
 ## How Tome gets in
@@ -309,15 +327,23 @@ exploit by forcing a cross-type shadow's `desc+0x10` to the global's type-id.
   that many harmless shadows before the one that matters.
 - `JassScanner::nextToken` `0x9249D0` (AFTER, the `endfunction` token
   `0x115`): writes the saved descriptors back, newest first. It stores each
-  character of a token at `[[this+8]+n]` with no bound: a ~4000-character
-  string literal writes past that heap buffer (access violation at
-  `0x924AE4`, seen in game; docs/known-bugs.md, "Long string literal").
+  character of a token at `[[this+8]+n]` with a length check that never
+  fires: a string literal over 2100 characters writes past that heap buffer
+  (access violation at `0x924AE4` with ~4000, seen in game; next section).
 - `Jass::compile` `0x9146F0` (BEFORE and AFTER): drops the list. A script
   that stops inside a function never reaches its `endfunction`, and the next
   compile's first one would write into the old compile's freed symbols. This
   is a safety net. In game, the parser recovers from a syntax error or a
   missing `endfunction` and still reaches a later `endfunction`, and a script
   that ends inside a function crashes 1.27b itself, with or without Tome.
+
+Both functions are reserved (mods can't hook them), so their mappings have
+a `size`, the length to the `int3` padding after them: `Jass::compile`
+`0x102` (1.26a `0x458900`, `0x10A`) and `JassScanner::nextToken` `0x5C8`
+(1.26a `0x45FF30`, `0x5F4`), which takes in its `switch`'s jump table
+(`jmp [ebx*4+0x924EC0]`, 1.26a `[eax*4+0x46044C]`) at its end. A linear
+disassembly that stops at the first `ret` past every branch target ends
+`nextToken` in the middle: the table's cases end in `ret`s too.
 
 Restoring when the scanner hands out `endfunction` isn't too early: the
 e2e map's functions end with `return <local>` and `set <local> = 7` right
@@ -329,6 +355,41 @@ before the loading screen (the guard logs each restore twice). The map scan in `
 (`jass::scan_shadow_exploit`) logs the same pattern at map load, including
 locals that shadow a `common.j` or `Blizzard.j` global. See
 `docs/known-bugs.md` and `docs/architecture.md`, "Patches".
+
+### The scanner's token buffers and a stopped parse
+
+The scanner (`JassScanner`, constructor `0x9246A0`, `thiscall(files, a1,
+a2, a3, capacity)`, `ret 0x14`; 1.26a `0x460570`) is a flex-style DFA.
+`capacity` (`JassScanner.capacity`, `+0xC`; `Jass::compile` passes `0x834`,
+2100) sizes two heap buffers of `capacity + 1` bytes: `[this+0x98]` the
+text read so far (the current token at its start, NUL-terminated after
+`nextToken`, its length at `+0xC4`) and `[this+8]` the DFA state after each
+character. It reads characters through its vtable (`+0` the next character
+or -1, `+4` wrap at the end: nonzero, no more input), so a test can make one
+on a buffer of its own and call `nextToken` (`tests/game`,
+`game_jass_token_guard_stops_long_tokens`).
+
+`nextToken`'s character loop (`0x924A68`) checks `esi`, the token's length,
+against the capacity: `cmp esi, [edi+0xC]; jl next; cmp [edi+0x1C], 0; jne
+0x924BF1`, and `0x924BF1` returns -2. But `nextToken` sets `[edi+0x1C]` to 0
+when it starts (`0x9249F3`), so the loop goes on and writes each further
+character at `[[edi+0x98]+esi]` (`0x924AA5`) and its state at
+`[[edi+8]+esi+1]` (`0x924AE4`): a heap overrun from `war3map.j`. 1.26a has
+the same code (`0x45FFD0`, exit `0x460166`). jass-token-guard makes the `jne`
+(`JassScanner::nextToken.overflow_check`, `0x924A6D`; 1.26a `0x45FFD5`) a
+`jmp`.
+
+The parser (`JassParser::parse`, `0x922A50`, `thiscall(context)`, `ret 4`;
+1.26a `0x464460`) takes -2 from the scanner (`0x922B96`, `0x922C17`) as
+fatal and returns 1 (`0x924250`). Its caller `0x913C30` builds the parser
+on its stack (constructor `0x91E9A0`, which sets `+0x38` but not `+0x34`)
+and after a failed parse destroys the root node at `+0x34`
+(`JassParser.root`, set only when the whole script parsed, `0x923F3B`)
+if it isn't null: `[[root]](root, 0)` at `0x913D52`. After a stopped parse
+that is stack garbage, and the game crashed (a breakpoint in `0xCC` fill,
+seen in game). jass-token-guard zeroes it in a BEFORE handler on the parser;
+the failed compile then sends a `-loadfile` map back to the main menu (the
+compile runs three times on the way, each logged).
 
 `0x9121D0` is a specialized ident-node ctor, *not* the general var-ref: it
 reads a string-id counter off a singleton's `+0xB8`, which earlier misled a
@@ -347,7 +408,7 @@ static reading of `+0xB8` as "the type". GetType `0x91B340`/SetType
 | CLayoutFrame::SetPoint | `0x111600` | `void __thiscall(int point, CLayoutFrame* rel, int relPoint, float x, float y, int update)`, `ret 0x18`, 347 callers. **Call on `frame + 0xB4`** and pass `other + 0xB4`. Anchors are stored at `[layout + point*4 + 8]`; setting a point replaces that point's anchor. |
 | Frame points | | 1.31's FRAMEPOINT numbering: TOPLEFT 0, TOP 1, TOPRIGHT 2, LEFT 3, CENTER 4, RIGHT 5, BOTTOMLEFT 6, BOTTOM 7, BOTTOMRIGHT 8. |
 | Show / Hide | vtable `+0xD4` / `+0xD0` | Both `__thiscall()`. **Hide sets bit 0** of `[frame+0xB0]` (it is a *hidden* flag) and marks children with bit 1 ("hidden by parent"); Show clears it. **Show also shows every child**, so hide sub-frames after showing a parent. Visible frames read `0x2C`, hidden ones `0x2D`. |
-| Destroy | vtable `+0xD8` | `__thiscall(int flags)`; CreateFrame's helper calls it with 1 when a frame fails to initialize, and CGlueMgr::SetScreen and CGameWar3::Reset destroy screens and the in-game UI with it: the deleting destructor. Not called by Tome yet. |
+| Destroy | vtable `+0xD8` | `__thiscall(int flags)`; CreateFrame's helper calls it with 1 when a frame fails to initialize, and CGlueMgr::SetScreen and CGameWar3::Reset destroy screens and the in-game UI with it: the deleting destructor. Tome calls it with 1 for frames mods made (`frame_destroy`, `BlzDestroyFrame`; verified on 1.27b's disassembly): CFrame's is `0xF55D0`, which runs the base teardown `0xECCB0`, then frees `+0x160`. With the flag set and a parent at `+0x20` it unlinks the frame from the parent's child list (`0xF1010(0, 0, 1)` → `0xF05A0`, which also destroys the list's node, the reference that keeps the frame alive); it destroys the child frame at `+0x38` through the same slot, clears `0xD47820`–`0xD4782C` (the game's hover and capture frames, each through its own vtable slot) and the focus `0xD47830` where they are this frame, removes it from the name table (`0xF1B70`, the entry at `+0x4C`) and frees its listeners (`+0x2C`, `+0x30`). So the name and context are free again afterwards, and the pointer is dead. Not mapped for 1.26a (`CFrame.vtable.Destroy` is optional; `frame_destroy` says UNAVAILABLE there). |
 | Setup | vtable `+0xDC` | `int __thiscall(int, int)`. CreateFrame calls it on every new frame after construction (failure → `+0xD8(1)`). CMainMenu's override binds its buttons; CGameUI has none. |
 | CLayoutFrame::SetWidth | `0x1116C0` | `void __thiscall(float width)` on `frame+0xB4`: stores `+0x58`, then tail-calls the layout update `0x111390` (`ret 4`). SetHeight is `0x111520` (`+0x5C`). GetWidth/GetHeight are the layout vtable's `+0x18`/`+0x1C` (results on the x87 stack). |
 | `0x0F07B0` | | `__thiscall(byte value, int force)`. Writes a byte at `+0xAC` on the frame and recursively on its children, then calls vtable `+0xA4`. Likely alpha/fade; not needed so far. |
@@ -370,6 +431,7 @@ Frame classes in RTTI include `CFrame`, `CLayoutFrame`, `CTextFrame`,
 | CTextFrame | `0x6FA8B9C0` (secondary `0x6FA8BAD4`, +0xB4) |
 | CCheckBox | `0x6FA8C1F4` |
 | CSpriteFrame | `0x6FA8B214` (secondary `0x6FA8B304`) |
+| CHighlightFrame | `0x6FA8B744` (1.26a `0x6F96F974`; a sprite frame: highlights, and the layer that dims a glue screen behind a dialog) |
 | CMainMenu | `0x6FAB1894` (secondary `0x6FAB197C`, +0xB4) |
 | COptionsMenu | `0x6FAA7170` |
 | CSinglePlayerMenu | `0x6FAB19E8` |
@@ -471,6 +533,17 @@ glow when a hero gains a point whether the button shows or not, so
 Enhanced Options hides them again each frame. Checked in game: hidden and
 shown twice, with a Paladin that had a point to spend.
 
+**Health bars** (`healthbars`, `0x2B`, the Gameplay panel's Always Show
+Health Bars): applying the option, and the game UI as it's built, store it
+at `CGameUI.healthbars`. Names of the functions guessed.
+
+| What | 1.27b | 1.26a | Notes |
+|------|-------|-------|-------|
+| CGameUI.healthbars | `+0x1D8` | `+0x1D8` | int: the option. HealthBars::Update inverts the health bar keys with it: on, bars show unless a key is held. |
+| HealthBars::Update | `0x386620` | `0x39B2D0` | `void __thiscall()`, plain `ret`. A per-frame update of an in-game UI object (called from `0x385FDC` on its own `this`; not the CGameUI, class not known). Reads the keys into its flags: friendly bars (`+0x180`) while key 2 (Alt) or `0x112` is down, enemy bars (`+0x17C`) while 2 or `0x113` is; both inverted when `CGameUI::Get(1, 0)`'s `+0x1D8` is on. With neither, hides every shown bar but the hovered unit's (`0x390320`); else `0x38E4E0` runs HealthBars::Consider on an eighth of the units each frame. |
+| HealthBars::Consider | `0x397B90` | `0x37D0D0` | `void __fastcall(CUnit* unit, int friendly, int enemy)`, `ret 4`. Shows a living, visible unit's bar if it isn't shown yet (`+0x280` bit `0x100`) and its owner is allied to the local player (or `+0x60` bit 1) when friendly, or not when enemy: CUnit::SetHealthBarShown(1, hovered), then lists it among the shown bars. |
+| CUnit::SetHealthBarShown | `0x654E20` | `0x2C7460` | `void __thiscall(int shown, int hovered)`, `ret 8`. Shows or hides the unit's health bar (made on first use at `+0x50`). Every path ends here: HealthBars::Consider, hiding all, and the hovered unit's. |
+
 **Controls** (`CControl` and its subclasses: CHECKBOX, SLIDER, POPUPMENU):
 
 | What | RVA | Notes |
@@ -503,7 +576,9 @@ work on the local player's camera, `CGameUI+0x254` (`0x36B190` returns it),
 through GameCamera::SetField (`0x362ED0`, `void __thiscall(int field, float
 value, float duration, int)`, `ret 0x10`) and GetField (`0x360740`, float
 on the x87 stack, `ret 4`). Fields as common.j numbers them: 0 target
-distance (1650), 1 far z (5000), 2 angle of attack, ... The classic mouse
+distance (1650), 1 far z (5000), 2 angle of attack (304: 56 degrees below
+the horizon), 3 field of view (70), ...; SetField takes degrees, GetField
+gives radians. The classic mouse
 wheel steps through four zoom levels, `.rdata 0xA9F4E0` (heights 160,
 angles 304/311/318/325, distances 1650/1600/1500/1400), loaded with movaps at
 `0x35EAA2` and `0x360122`: it only zooms in from the default. CGameUI::Get
@@ -582,6 +657,28 @@ command)`, `ret 8`. Abilities without a cooldown return 0; those with one
 bit `0x200` of `+0x20` is set and `0x400` isn't, and keep the cooldown's
 length at `+0xB0`. Checked in game: Divine Shield showed 35 to 0, Dust of
 Appearance 20 to 0.
+
+**Button positions.** A `CCommandButtonData`'s column and row are at `+0x59C`
+and `+0x5A0` (`CCommandButtonData.x`, `.y`). `0x3ACAF0`, which
+`CCommandCard::AddButton` runs on a command's existing data before it
+stores the new values, resets both to 0, so a coordinate it drops ends up
+0 (a Patrol button at (9, 9) shows at (0, 0)). The card places a button with `CCommandCard::PlaceButton`
+(`0x3AA430`, `thiscall(data)`, `ret 4`; one caller, `0x3AAED6`, which skips
+the call for a button it doesn't show): it indexes the grid with them
+unchecked (the row at `[+0x154] + 16 * y`, the cell's button at `[row+8] +
+4 * x`), moves to the next free cell while the cell's button has a nonzero
+`+0x94`, then fills it (`0x3AA2F0`). The setters on 1.27b store a
+coordinate only if it's at most 3 (x) or 2 (y), unsigned:
+`CCommandCard::AddButton` `0x3CA1A0` (`thiscall`, nine arguments, `ret
+0x24`; x and y the sixth and seventh; adds or updates a command's data in
+the card's table at `+0x160`; reached from abilities through `0x377260` ->
+`0x372A40`, and from `0x36B6D0`), `CGameUI::SetCommandButtonPos` `0x36B470`
+(`thiscall(a, b, {x, y}*)`, `ret 0xC`, from `0x375F20`; for a button on the
+card, `0x3B5F20` gives the `CCommandButton`, data at `+0x190`, otherwise
+`0x3B60F0` gives the data), and `0x373A90`/`0x373AB0`/`0x373AD0`/`0x373AF0`
+(one coordinate each, no callers found). 1.26a's (`0x2F19E0`, `0x2F1A00`,
+`0x2F4710`) store any value, and its `PlaceButton` (`0x36D3E0`) reads past
+the grid. command-card-guard: `docs/architecture.md`, "Patches".
 
 ### Frame scale and the in-game UI's layout
 
@@ -1147,10 +1244,48 @@ block at `client + index * 0x304`: `+0x278` its state (3 and up: in a game),
 | CPlayerWar3 race | `+0x260` | `GetPlayerRace` (`0x2017C0`, found from the native table's name string) maps the handle with `0x1EDE10` and returns this int, or 1 for no player: 1 human, 2 orc, 3 undead, 4 night elf. The player array's length is `CGameWar3+0x54` (`CGameWar3.player_count`). |
 
 Net ids in a LAN lobby: the host had 128 and the joining player 129 (the
-second of `0x3299A0`'s lists), so scan every byte, not 0–63. Not found: which
-net id the host has, as seen by a client, in general. Candidates: the
-per-player flag at `+0x3C` of a player entry (`0x32B800` tests it for the
-local player before enabling a button), or the lowest id from 128.
+second of `0x3299A0`'s lists), so scan every byte, not 0–63.
+
+**Who hosts** (Nov 2026; `NetGetPlayerNumber`). The game's router hands out
+player numbers from 1, and a game is created with its creator in it: the
+`CNetEventGameCreate` handler (`0x32DF40`) sets the host flag (`+0x28C`) and
+adds the local player with the number the event carries (`+0x18`; the
+single player path `0x32AF10` passes 1 itself). `CNetEventGameJoin`
+(`0x32DFE0`) adds a joining player the same way without the flag, and
+`CNetEventPlayerJoin` (`0x32E230`) the others. In the lobby, player number n
+is net id `0x80 | (n - 1)` (`0x3245C0`, `ret 8`: entry `+0x18` the number,
+`+0x19` the name (16 bytes), `+0x36` the net id). When the game starts the
+entries move to the first list under their game slots (`0x32FF80` from
+`0x32CF10`, which also moves the local id), keeping their numbers. So the
+host is the player whose number is 1: net id 128 in the lobby, its slot in
+the game. `NetGetPlayerNumber` (`0x32B5F0`, `fastcall(id, net_index)`, the
+number in al, 0 for none) gives a net id's number, and `0x32B790` the
+reverse (inlined on 1.26a; its `NetGetPlayerNumber` is `0x53ED90`). Lobby
+slots (`0x29FEA0`'s table, `+0x18`: slots at `+8`, 9 bytes each) hold the
+number in their first byte. A replay plays on net client 1 (`+0x610`), where
+number 1 is the recorded game's host.
+
+Checked in LAN games between two instances (`tools/e2e-multiplayer.sh`): the
+host is 128 in the lobby on both sides, player 0 in the game on both sides,
+and player 0 in the replay. The Battle.net provider (`NetProviderBNET`)
+differs from the LAN one (`NetProviderLTCP`) only in the transport; player
+numbers come from the shared router (`NetRouter.cpp`) and client code, and a
+Battle.net game is hosted by its creator's game like a LAN one, so the host
+is player 1 there too. Not checked by running a Battle.net game. A game
+hosted by a bot (GHost-like hosts) numbers players its own way; Tome warns
+when it hosts under another number, and clients answer every sender.
+
+**Senders can't be faked.** A lobby line's sender (`CNetEventLobby.sender`,
+`+0x15`) is what the host's router saw: the send path (`0x32CA60`) takes the
+sender from the local client (`NetClient.local_id`, `+0x2DC`), and a client
+that set it to 128 for one send (`TOME_DEBUG_LOBBY_AS`, as a modified client
+could) still reached the host as 129 (checked in the LAN test, on 1.27b and
+1.26a: 1.26a's client chain, block size and id offset are the same, through
+`NetClient::Registry` `0x53F340`; on 1.27b it's `0x32AEE0`, a thunk that
+calls `0x06C180` with `0xD`, the registry entry of the chain above: client
+`[[entry + 0x10] + 0x8]`). Lines reach
+other players through the host, so they get the same sender. A modified
+host can still claim anything; it's the host.
 
 ### Esc menu (in games)
 
@@ -1182,6 +1317,28 @@ in its own panel, so it doesn't happen there).
 | CGameUI::SetMode | `0x374260` | `void __thiscall(void* mode, int push)`, `ret 8`. The current mode is at `+0x1B4`; with push = 1 the old one goes on a stack at `+0x1B8`, which `0x3745F0` pops (Return to Game). |
 | CGameUI.esc_menu | `+0x228` | The CEscMenu, made by `0x39D7E0` once per game. Its main panel is at `+0x18`. |
 | CEscMenu::Reset | `0x3CDD10` | `void __thiscall()`: options panel to state 0, main panel to SetPanel(1). F10 and the Menu button (`0x36FD99`) call it, then SetMode(esc_menu, 1). |
+
+The menu's mode (`0x3CF230`, `void __thiscall(int mode)`, `ret 4`; the
+shown panel object at `+0x14`) picks among its panel objects: 0 the main
+panel (`+0x18`), 1 and 2 Save Game and Load Game (`+0x20`), 3 Options
+(`CEscMenu.options_panel`, `+0x1C`). Reset's "state 0" is that mode 0.
+
+The Options panel (`CEscMenuOptionsPanel`, `EscMenuOptionsPanel.fdf`) is a
+list (Gameplay, Video, Sound, Network, Previous Menu) and four sub-panels
+that share an OK/Cancel bar. Its OnEvent (slot 3, `0x3BD5A0`) switches on
+the command: 0 Gameplay, 1 Sound, 2 Video and 3 Network load their panel's
+controls and call SetPanel with 2, 4, 3 and 5; 4 is Previous Menu; 9 OK;
+10 Cancel (Esc too, through the key handler `0x3BF4A0`); 5–8 are its
+sliders and menus. Going back (`0x3C2D40`; Previous Menu, and the end of
+OK and Cancel) goes from a sub-panel (2–5) to the list and from the list
+to the Esc menu's main panel; for any other panel number it does nothing.
+The box doesn't change size between them (0.288 × 0.384, `EscMenuBackdrop`).
+
+| What | 1.27b | 1.26a | Notes |
+|------|-------|-------|-------|
+| CEscMenuOptionsPanel::SetPanel | `0x3CF8A0` | `0x344D60` | `void __thiscall(int panel)`, `ret 4`. 1 the list (`+0x174`), 2 Gameplay (`+0x18C`), 3 Video (`+0x1C0`), 4 Sound (`+0x1F4`), 5 Network (`+0x21C`); a sub-panel also shows the OK/Cancel bar (`+0x22C`). Hides the others (vtable `+0xD0`), shows its own (`+0xD4`), stores the number at `+0x168`; returns at once if it's already shown. Another number is only stored, which leaves room for a mod's panel; OK and Cancel do nothing for it, so the mod goes back itself (SetPanel(1)). |
+| CEscMenuOptionsPanel::OnOK | `0x3C2810` | `0x36D600` | `int __thiscall()`, plain `ret`: stores the shown sub-panel's controls (2–5), then goes back (`0x3C2D40`). |
+| CEscMenuOptionsPanel::OnCancel | `0x3BC9D0` | `0x36D660` | `int __thiscall()`, plain `ret`: puts the shown sub-panel's controls back (2–5), then goes back. Esc calls it too. |
 
 ### Edit boxes
 
@@ -1301,6 +1458,17 @@ doesn't: it sets up a projection of its own (below), which kept the 4:3
 one, so units answered clicks further from the middle of the screen than
 they were drawn.
 
+The world frame (`CGameUI+0x3BC`) is the area between the top bar and the
+console, always 0.13 to 0.58 high (0.45) and, with the 2D part, as wide as the
+window. Its camera therefore gets `aspect` 1.78 at exactly 4:3, 2.47 at 16:9
+and 3.2 at 21:9, and since Perspective spreads `fov` over the diagonal
+(`t = tan(fov / 2 / sqrt(aspect^2 + 1))`), the vertical angle shrinks as the
+window widens: `m[5]` 3.24, 4.29, 5.43 for a 70 degree camera. The widescreen
+patch sets `m[5]` back to the 4:3 value and `m[0] = m[5] / aspect` for the world
+camera (the minimap's camera box, `0x3C0810`, is the frustum of the same
+world frame camera on the ground, through `CSpriteFrame::SetupCamera` and the
+transform readers `0x137270`/`0x137180`, so it follows).
+
 Every camera reaches Perspective through the wrapper `0x1ADE90`, which has
 three callers. Counted per 2 s at 16:9 by hooking the wrapper:
 
@@ -1316,6 +1484,128 @@ WorldView::SetupCamera runs, or CSpriteFrame::SetupCamera for the world
 frame (part of the `0x0F64E0` count above). That one uses the world
 frame's rect, not WorldView's, but the same (4/3) / window aspect applies:
 the UI space is stretched the same way whatever the rect.
+
+### The 2D UI's coordinates (for the widescreen patch)
+
+UI units ("DDC": 0.8 x 0.6) become the screen's 0..1 ("NDC") through eight
+small functions that divide or multiply by the constants at `.rdata
+0xAA9328` (0.8) and `0xAA9324` (0.6): `DDCToNDCRect` `0x8B37A0` and
+`NDCToDDCRect` `0x8B3850` (fastcall `(in, out)`, rects `{left, bottom,
+right, top}`, plain ret), `DDCToNDC` `0x8B37F0` and `NDCToDDC` `0x8B38A0`
+(fastcall `(x_out, y_out, x, y)`, either out may be null, `ret 8`),
+`DDCToNDCWidth` `0x8B3840` and `NDCToDDCWidth` `0x8B38F0` (stdcall, st0,
+`ret 4`), and the heights' twins `0x8B3830`, `0x8B38E0`. Giving the x ones
+the window's width in UI units (0.6 x aspect) makes the UI square and the
+root the whole window; text and the mouse follow. The x ones read 0.8 through
+one `[disp32]` operand each (two in the Rect forms; `DDCWidth` in the
+mapping), which the widescreen patch points at its own float. About a dozen places read
+0.8 inline (`0x2B5873`, `0x363AB6`, `0x374DA2`, `0x3D9536`, ...); the ones
+checked clamp tooltips to the screen or pick a color, nothing that lays out.
+
+- **Roots.** `CScreenFrame::UpdateScreenRect` (`0x11DFF0`) sets a screen
+  frame's rect to `NDCToDDCRect({0, 0, 1, 1})` (`.rdata 0xA8DD90`) through
+  the layout's vtable `+0xC`. It's slot `+0x4` of the *layout's* vtable
+  (`this` = frame + `CFrame.layout`; `CScreenFrame` `0xA8DD24`, also
+  `CGlueMgr` and `CGameUI`), which is `+0xEC` of the frame's primary vtable
+  read past its end: calling it there passes the wrong `this`.
+  `CScreenFrame::GetCurrent` (`0x11DD60`) returns the current screen frame
+  (`.data 0xD47BB4`, set by `0x11E060`; the game UI sets itself at
+  `0x36FFA9`).
+- **Orthographic projections.** `C44Matrix::Ortho` (`0x126D50`, thiscall
+  `(m, left, right, bottom, top, near, far)`, `ret 0x18`). The UI's own 2D
+  pass builds `(0, 0.8, 0, 0.6, 0, 500)` at `0x193532` once per frame;
+  `0x12A3F0` builds pixel-space ones (`0, width, 0, height`). A sprite
+  frame's flat camera (`0x1ADDFC`, in CCamera::SetupProjection) is centered
+  on its view: `CSpriteFrame.view` (`+0x12C`, `{x0, y0, height, width}`, the
+  whole screen for menu models) gives `(-width/2, width/2, -0.3, 0.3)`, and
+  the eye sits at the view's middle, so a model made for 0..0.8 lands at
+  0..0.8 of a wider screen (the loading screen squeezed to the left).
+  `(-width/2, 0.8 - width/2)` stretches it across as the game draws it.
+  The cursor is such a frame too: `CCursorFrame` (vtable `0xA8DA14`, 1.26a
+  `0x97063C`; `CCursorFrame.vtable`) fills the screen and draws its model
+  at the pointer, in the same units as the rest of the UI. Stretched like a
+  menu model, it was drawn `width / 0.8` times as far from the left edge as
+  the pointer, so it's left as it is. A sprite frame's model is placed from
+  the root's left edge, while its flat camera is centered on its own frame:
+  a model in a frame that doesn't start at the root's left edge is drawn
+  that much further right.
+- **Clipping.** Every frame class's render virtual (slot `+0x24`,
+  `0xECF70`) asks the frame for a clip (slot `+0xB8`; a sprite frame
+  (`0x0F5E50`, 1.26a `0x606BD0`) clips when bit `0x8` of `+0xC` is set: its
+  rect and the current clip's intersection). A frame that clips makes it the
+  current clip (the render state's `+0x8..+0x14`, UI units) and the
+  viewport: `DDCToNDCRect` into `.data 0xD478C0` (1.26a `0xACE644`) at
+  `0xED0D7`, then `GxXformSetViewport` `0x1371F0` (1.26a `0x5265E0`;
+  stdcall `(x0, x1, y0, y1, near, far)`, fractions of the window, `ret
+  0x18`; the device's vtable `+0x4C`, 1.26a `+0x48`, whose base setter
+  keeps them at `CGxDevice.viewport`, `+0xE4`; the device is
+  `GxDevice.instance`, `.data 0xD52EB8`, 1.26a `0xACBD40`). After its children it puts the
+  previous clip back the same way (`0xED2A1`). The roots clip, so a root's
+  rect is the viewport its frames are drawn in. A flat sprite camera isn't
+  clipped by its frame: its projection places the model in the frame's
+  rect over the whole viewport (a loading screen's art: `(-width/2,
+  width/2)` over the window). The glue screens' sprite layers
+  (`CGlueMgr.sprite_*`) live as long as the glue manager, across screens.
+- **Drawing a sprite frame.** Slot `+0x2C` draws: CSpriteFrame `0xF73E0`
+  (1.26a `0x60EC00`) runs `CSpriteFrame::SetupCamera` and queues each model
+  instance (`+0x174` count, `+0x178` array) into the scene at `+0x180`;
+  CModelFrame (a MODEL frame, vtable `0xA8B454`) `0xF8200` does the same
+  for its models (`+0x16C`, `+0x170`). Slot `+0x30`
+  (`CSpriteFrame.vtable.Render`) renders them with the projection last set
+  up: `CSpriteFrame::Render` `0xF72F0` (1.26a `0x60EA80`),
+  `CModelFrame::Render` `0xF81B0` (1.26a `0x621700`). Calling SetupCamera
+  and Render again draws the frame again with another camera (and, with
+  GxXformSetViewport, in another part of the window). Alpha:
+  `CFrame.alpha` (`+0xAC`, a byte) goes to what the frame draws through
+  `CFrame.vtable.ApplyAlpha` (`+0xA4`: CSpriteFrame `0xF7260`, through
+  `0x1ACAB0` with property 6; CModelFrame `0xF8150`, through `0x187E30`).
+  A layout's rect: `CLayoutFrame.vtable.GetRect` (`+0x10`, `{bottom, left,
+  top, right}`). The loading screen's art is a CSpriteFrame
+  (`LoadingMeleeBackground`, `Load-Multiplayer-<race>.mdl`), the score
+  screen's three CModelFrames, all filling the screen's frame.
+- **Points.** A point is an object with a vtable: one relative to a frame
+  (made by `0x11E3C0`) holds the relative `CLayoutFrame*` at `+4`, the
+  relative point at `+8`, x and y at `+0xC`, `+0x10`; one relative to the
+  screen (`0x11E380`, from `CLayoutFrame::SetPointAbsolute` `0x111590`,
+  `thiscall(point, x, y, update)`) holds x at `+4`, so it can't be read as
+  the other kind. The in-game callers of `0x111590`: the inventory cover
+  (`0x39E94A`) and tooltips clamped to the screen (`0x392707`, `0x395AC2`,
+  `0x395B23`, `0x3C948C`). The two kinds' vtables: `0xA8DDD0` relative to
+  a frame (`CLayoutFrame.relative_point_vtable`), `0xA8DDBC` relative to
+  the screen; 1.26a `0x97076C` (`0x629490`) and `0x970758` (`0x629460`).
+  Slot `+0xC` returns which kind (the pool it goes back to, `0x11E300`).
+- **The console** (`UI\FrameDef\UI\ConsoleUI.fdf`): nine `CSimpleTexture`
+  regions anchored to the console, the race's tiles `ConsoleTexture01..04`
+  (512 x 512, the fourth 64 wide, drawn 0.256 and 0.032 wide). Top: tile 1 at
+  TOPLEFT 0, tile 2's first 0.087 at 0.256, its last 0.053 at TOPRIGHT
+  -0.288, tile 3 at -0.032, tile 4 at 0. Bottom: tile 1 at BOTTOMLEFT 0, tile
+  2's lower part (from v 0.4140625, 0.15 high) at 0.256, tile 3 at BOTTOMRIGHT
+  -0.032, tile 4 at 0, all others from v 0.3125, 0.176 high. A texture's
+  coordinates are at `+0xC4`, eight floats (u, v of each corner). In the
+  art: tile 1 is the minimap's box and buttons, a pillar, and the portrait's
+  arch from u 0.82; tile 2 the arch's end and the info panel's opening; tile
+  3 the inventory's six slots (to u 0.31), wall and the command card's
+  frame. A width of 0, or clearing a region's points, doesn't stop it
+  drawing where it was; moving it does.
+- **Where the console's parts hang** (at 4:3): the command card at the
+  console's BOTTOMRIGHT -0.0074; the info panel (`CInfoBar`) at its
+  BOTTOMLEFT 0.3094, the inventory's buttons on the info panel's TOPRIGHT
+  +0.0188; the inventory's cover (`CInfoPanel.inventory_cover`, `+0x14C`,
+  0.128 x 0.175) with its BOTTOMRIGHT at x 0.6 of the screen; the life and
+  mana text (made at `0x3D9128` with the first selection, the font string at
+  `+0x240` of its owner) at the console's BOTTOMLEFT (0.2145, 0.0283); the
+  minimap's buttons at its BOTTOMLEFT 0.1544; the portrait (`CPortraitButton`)
+  at its layer's BOTTOMLEFT 0.2075; the clock (`CTimeOfDayIndicator`) at its
+  layer's BOTTOMLEFT (0, 0), its model drawn at the top middle from there; the
+  clock's cover at its layer's TOP; the chat box from BOTTOMLEFT 0.2 to
+  BOTTOMRIGHT -0.2; two strings at the resource bar's TOPRIGHT -0.417 and
+  -0.3613 (under the clock).
+- **Menus** are full-screen sprite models (`MainMenu.fdf`'s `MainMenuFrame`
+  fills the root; the panels, chains and background are models in frames
+  that fill it) with frames on them; the logo and the buttons' faces are
+  models with their own extent. On the loading screen (`Loading.fdf`) the
+  background and the bar (`LoadingBar`, held by its BOTTOMLEFT only) are
+  such models.
 
 ## Crash handler
 
@@ -1360,10 +1650,35 @@ call sites in game.dll:
 | 501 / 506 / 507 | SStrCopy / SStrLen / SStrDup |
 | 578 | SStrPrintf |
 
+## Map downloads (for the lan-map-guard patch)
+
+Found from the string `Maps\Download\` (Nov 2026). The map transfer is a
+small file-transfer service in the network library: `0x32BDB0` registers it
+through `0x96A680` → `0x97B820` with the extension list `.w3m;.w3x`
+(`+0x2DA`), the search folder `Maps\` (`+0x3DE`) and the download folder
+`Maps\Download\` (`+0x4E2`), each 0x104 bytes, guarded by a
+`CRITICAL_SECTION` at `+0x2C2` (`0x956D0`/`0x96320` are Enter/Leave). A
+transfer record (`0x987730`) has the path at `+0xC`, the local path found or
+written at `+0x110`, the size at `+0x214`, the checksum at `+0x21C`, the
+buffer at `+0x238` and the bytes received at `+0x23C`.
+
+| What | 1.27b | 1.26a | Notes |
+|------|-------|-------|-------|
+| MapTransfer::IsValidName | `0x979000` | `0x656D70` | `int __thiscall(this, const char* name)`, `ret 4`. 0 if `0x91F00` says the path is absolute (`/` first, `X:`, or `\\`), if it has one of `*/:><\|&+^?"` (`0x91EC0`), if its base name (`0x91D30`: after the last `\` or `/`) has `\/*/:><\|&+^?"` or is a device (`0x91B60`: the part before the last dot against `nul con prn aux com1-9 lpt1-9`, table at `.data 0xCD6EF8`), or if its extension isn't in the list (`0x9788F0`). `..` passes. |
+| Client: start a transfer | `0x989260` | | Parses the host's message (`0x97C750`: path, size up to `0x8000000`, checksums), calls IsValidName on the path, and makes a transfer record with it. |
+| Host: offer a file | `0x985280` | | Calls IsValidName on the host's own path, `0x978D80` reads the file. |
+| Find the map locally | `0x9789E0` | | Game folder (`0x91C20`) + the path as sent, checked by size and checksum (`0x978F20`, through Storm's `SFileOpenFileEx`); then the base name searched under each folder in `+0x3DE` (`0x978CE0`). |
+| Write the download | `0x979090` | | Game folder + `Maps\Download\` + the base name of the path (`0x91D30`), `CreateFile(GENERIC_WRITE, CREATE_ALWAYS)` (`0x93770`). Called from the last part's handler (`0x988276`) once the size and checksum match. |
+
+So a host's path is used as sent only for the first lookup; the written file
+always lands in `Maps\Download\` under its base name.
+
 ## BLP textures (for the BLP guard)
 
 The game decodes BLP1 textures in one place: `CBLPFile::Open` (RVA
-`0x8E9790`, `int __thiscall(this, const char* name, void* context)`, `ret 8`).
+`0x8E9790`, `int __thiscall(this, const char* name, void* context)`, `ret 8`;
+`0x9F` bytes to the `int3` padding, its mapping's `size`; 1.26a `0x78A800`,
+`0x9E`).
 It loads the whole file, stores the buffer pointer at `this+0x4A4` and the
 file length at `this+0x4A8`, copies a fixed `0x127`-dword header to `this+8`,
 then checks the magic (`"BLP1"` = `0x31504C42`). On a wrong magic it returns 0

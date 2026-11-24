@@ -35,3 +35,20 @@ TEST(command_line_has_flag) {
     CHECK(!command_line::has_flag(L"-tomesafe -window", L"-tomesafe"));
     CHECK(!command_line::has_flag(L"", L"-tomesafe"));
 }
+
+TEST(command_line_list_values) {
+    auto v = command_line::list_values(L"war3.exe -TomeNoPatch=Widescreen,blp-guard -window", L"-tomenopatch");
+    CHECK_EQ(v.size(), size_t(2));
+    CHECK(v[0] == "widescreen" && v[1] == "blp-guard");
+    // Repeatable, spaces trimmed (in quotes), empty items dropped.
+    v = command_line::list_values(L"war3.exe -tomenopatch=a,,b \"-tomenopatch= c , d\" -tomenopatch=", L"-tomenopatch");
+    CHECK_EQ(v.size(), size_t(4));
+    CHECK(v.size() == 4 && v[0] == "a" && v[1] == "b" && v[2] == "c" && v[3] == "d");
+    // Non-ASCII characters can't match an ASCII name.
+    v = command_line::list_values(L"war3.exe -tomenopatch=blé", L"-tomenopatch");
+    CHECK(v.size() == 1 && v[0] == "bl?");
+    // Neither the bare option, another option it starts, nor the program's own path.
+    CHECK(command_line::list_values(L"war3.exe -tomenopatch -tomenopatches=x", L"-tomenopatch").empty());
+    CHECK(command_line::list_values(L"-tomenopatch=x -window", L"-tomenopatch").empty());
+    CHECK(command_line::list_values(L"", L"-tomenopatch").empty());
+}

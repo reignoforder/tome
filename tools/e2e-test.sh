@@ -55,6 +55,9 @@ MODS="$HOME_DIR/tome/mods"
 STATE="$HOME_DIR/tome/state.json"
 LOG="$HOME_DIR/tome/tome.log"
 mkdir -p "$MODS"
+# Every launch with Stop on Memory Corruption on (Tome > Settings, off by
+# default): the game must run through the whole test with it.
+printf '{"harden_heap": true}\n' >"$HOME_DIR/tome/settings.json"
 TOME_HOME_WIN="$(winepath -w "$HOME_DIR" 2>/dev/null)"
 [[ -n "$TOME_HOME_WIN" ]] || die "winepath couldn't convert $HOME_DIR"
 WINE_PID=""
@@ -298,6 +301,31 @@ check_count() {
     fail "$3 (expected $2 log lines matching: $1, got $(count "$1"))"
 }
 
+# check_cinematic_borders: the dumps of CinematicPanel, CinematicTopBorder and
+# CinematicBottomBorder (debug script dump:) say the borders span the panel:
+# from its left edge to its right edge (they're 0.8 wide in the game's FDF,
+# which in a UI wider than 4:3 left the bottom border's left part and the top
+# border's right part missing). The raw log: log_from hides "Debug" lines (a
+# test mustn't pass on the script's own echoes), and a dump is a result.
+check_cinematic_borders() {
+    local deadline dumps panel top bottom
+    deadline=$(deadline)
+    while ((SECONDS < deadline)); do
+        grep -aq 'Debug dump CinematicBottomBorder: ' "$LOG" 2>/dev/null && break
+        sleep 0.2
+    done
+    dumps="$(grep -aE 'Debug dump Cinematic(Panel|TopBorder|BottomBorder): ' "$LOG" 2>/dev/null)"
+    panel="$(sed -n 's/.*Debug dump CinematicPanel: left \([0-9.]*\) .* right \([0-9.]*\) .*/\1 \2/p' <<<"$dumps" | head -n 1)"
+    top="$(sed -n 's/.*Debug dump CinematicTopBorder: left \([0-9.]*\) .* right \([0-9.]*\) .*/\1 \2/p' <<<"$dumps" | head -n 1)"
+    bottom="$(sed -n 's/.*Debug dump CinematicBottomBorder: left \([0-9.]*\) .* right \([0-9.]*\) .*/\1 \2/p' <<<"$dumps" | head -n 1)"
+    UI_WIDTH="${panel#* }"  # the UI's width in UI units (0.8305 for the default window)
+    if [[ -n "$panel" && "$panel" == "$top" && "$panel" == "$bottom" ]]; then
+        pass "the cinematic panel's borders span the panel (left and right: $panel)"
+    else
+        fail "the cinematic panel's borders span the panel (panel '$panel', top '$top', bottom '$bottom')"
+    fi
+}
+
 # probe_sequence <n>: the hook handlers that ran during hook-b's nth probe
 # call of RCString::GetText, in order, then what the call returned.
 probe_sequence() {
@@ -390,12 +418,12 @@ check "Assets at startup: $ASSET_FILES files from 3 mods \(0 overridden" "mods' 
 check "Asset probe .*: [0-9]+ bytes, fnv1a $PROBE_HASH" "the game reads the mod's texture instead of its own"
 check "Bootstrap complete" "bootstrap finished" 15
 if [[ "$GAME_VERSION" == 1.27b ]]; then
-    check "Patches: [0-9]+ applied, 0 skipped: memhack-guard applied.*path-sanitizer applied.*blp-guard applied.*d3d-reset-lights applied.*gl-context-restore applied.*background-mute applied.*widescreen applied.*ambient-sound applied" "every built-in patch applied"
+    check "Patches: [0-9]+ applied, 0 skipped: memhack-guard applied.*path-sanitizer applied.*blp-guard applied.*d3d-reset-lights applied.*gl-context-restore applied.*background-mute applied.*widescreen applied.*ambient-sound applied.*lan-map-guard applied.*jass-token-guard applied.*command-card-guard applied \\(.*keeps the hiding positions" "every built-in patch applied"
 else
     # Another build may leave a patch out: for want of its symbols
     # (mappings/<version>.json), or its variant for that build says why.
     for patch in memhack-guard path-sanitizer blp-guard d3d-reset-lights gl-context-restore background-mute widescreen \
-        ambient-sound; do
+        ambient-sound lan-map-guard jass-token-guard command-card-guard; do
         check "Patches: .*$patch (applied|skipped \(${GAME_VERSION//./\\.} has no mapping for|skipped \(not for ${GAME_VERSION//./\\.}: )" \
             "$patch applied (or not for this build)"
     done
@@ -403,9 +431,12 @@ else
 fi
 check "Game objects: 31 of 31 properties mapped; jass_call learns the natives" "every game object property mapped"
 check_absent "blp-guard.*unclamped" "the BLP header-copy clamp was applied"
+check "Tome settings: .*stop on memory corruption on" "the heap setting read"
+check "Stop on memory corruption: (on|set, but Wine's heap doesn't act on it)" "heap termination on corruption set"
 check "Main-thread dispatcher installed" "main-thread dispatcher installed"
 check "Events: hooked screens, map load, game start and end, frames, game ticks, shutdown, chat, pause, units, spells, damage, experience, players, resources, keys, menus, dialogs, levels and saved games" "event hooks installed"
 check "\[hello\] 100 ticks" "tick events reach mods"
+check "\[hello\] the host is player 0" "host_player: the local player hosts a single player game"
 check "\[hello-cpp\] loaded \(Tome [0-9.]+, Warcraft III ${GAME_VERSION//./\\.}, game\.dll at 0x[0-9a-f]{8}\)" "a C++ mod loaded"
 check "\[hello-cpp\] CTextFrame::SetText is a thiscall function at 0x[0-9a-f]{8} \(void\(CTextFrame\* this" \
     "a C++ mod resolved a mapped name"
@@ -420,12 +451,16 @@ if ((WASM)); then
     check "\[hello-wasm\] enabled" "and enabled"
     check "\[hello-wasm\] main menu: SinglePlayerButton found" "a Wasm mod got a frame handle on the main menu"
     check "\[hello-wasm\] 100 ticks" "events reach a Wasm mod"
+    check "\[hello-wasm\] first CGlueMgr::SetScreen after enable: screen [0-9]+" \
+        "a typed hook in C Wasm read the game function's arguments"
 fi
 if ((WASMRS)); then
     check "\[hello-wasm-rs\] loaded, Warcraft III ${GAME_VERSION//./\\.}" "the Rust Wasm example loaded (game info)"
     check "\[hello-wasm-rs\] enabled" "and enabled"
     check "\[hello-wasm-rs\] main menu: SinglePlayerButton found" "a Rust Wasm closure got a frame handle"
     check "\[hello-wasm-rs\] 100 ticks" "events reach a Rust Wasm closure"
+    check "\[hello-wasm-rs\] first CGlueMgr::SetScreen after enable: screen [0-9]+" \
+        "a typed hook in Rust Wasm read the game function's arguments"
 fi
 if ((RUST)); then
     check "\[hello-rs\] loaded \(Tome [0-9.]+, Warcraft III ${GAME_VERSION//./\\.}, game\.dll at 0x[0-9a-f]{8}\)" "a Rust mod loaded"
@@ -441,7 +476,7 @@ MAIN_TID=$(grep -oE "main thread [0-9]+" "$LOG" | head -n 1 | grep -oE "[0-9]+$"
 
 if ((${#MAP_ARG[@]})); then
     echo "JASS natives (map script)"
-    check "bound $((21 + RUST * 4 + WASM * 5 + WASMRS * 4)) Tome natives" "natives bound when the map loaded" 45
+    check "bound $((22 + RUST * 4 + WASM * 5 + WASMRS * 4)) Tome natives" "natives bound when the map loaded" 45
     check "\[hello\] HelloLog\(42\) called from JASS" "integer argument" 30
     check "\[hello\] HelloLogReal\(2\.5\) called from JASS" "real argument and real return value"
     check "\[hello\] HelloLog\(1001\) called from JASS" "TomeIsLoaded() returned true"
@@ -461,6 +496,8 @@ if ((${#MAP_ARG[@]})); then
         check "path-sanitizer: refused $native\(\"\.\.\\\\" "$native refused a name outside the data folder"
     done
     check "path-sanitizer: refused AddSpecialEffect\(\"C:" "AddSpecialEffect refused an absolute path"
+    check "path-sanitizer: refused PreloadGenEnd\(\"TomeE2E-escape\.bat\. \"\) -- names a program or script" \
+        "PreloadGenEnd refused a program's name"
     check_absent "path-sanitizer: refused AddSpecialEffect\(\"\"" "an empty model name isn't refused"
     check "BlzLoadTOCFile: refused" "BlzLoadTOCFile refused a TOC outside the data folder"
     check "path-sanitizer: refused PreloadGenEnd\(\"longpath\\\\a+\.\.\.\"\) -- too long" \
@@ -475,10 +512,17 @@ if ((${#MAP_ARG[@]})); then
         check "\[map\] TomeLogInteger\($n\)" "refused call $n returned false or null"
     done
     check "\[map\] TomeLogInteger\(9609\)" "the script carried on after the refused calls"
-    if compgen -G "$GAME/../TomeE2E-escape*" >/dev/null; then
-        fail "a file was written outside the game folder"
+    check "global-string-guard: a native returned a string before the map script's string table exists" \
+        "a string native in a global's initial value is caught"
+    check "\[map\] TomeLogInteger\(9701\)" "it gave the global null instead of crashing the map load"
+    check "execute-func-guard: refused ExecuteFunc\(\"TomeE2ETakesArg\"\)" "ExecuteFunc on a map function with parameters refused"
+    check "execute-func-guard: refused ExecuteFunc\(\"ClearTextMessagesBJ\"\)" "and on a Blizzard.j one"
+    check_absent "\[map\] TomeLogInteger\(979[0-9]\)" "the refused function didn't run"
+    check "\[map\] TomeLogInteger\(9702\)" "the script carried on after the refused ExecuteFunc calls"
+    if compgen -G "$GAME/../TomeE2E-escape*" >/dev/null || compgen -G "$GAME/CustomMapData/TomeE2E-escape*" >/dev/null; then
+        fail "a file was written outside the game folder, or a refused one inside it"
     else
-        pass "nothing was written outside the game folder"
+        pass "nothing was written outside the game folder, nor a refused name inside it"
     fi
     echo "game events (-loadfile)"
     check "\[hello\] map load: .+ \(Maps\\\\TomeE2E\\\\e2e\.w3m\)" "map load event with the map's name and path"
@@ -767,6 +811,7 @@ REMAINING=$(find "$MODS" -mindepth 1 -maxdepth 1 -type d ! -name config | wc -l)
 ROC_ONLY=0; [[ "$EDITION" == roc ]] && ROC_ONLY=1
 ACTIVE=$(( (${#MAP_ARG[@]} ? 5 : 6) + WASM + WASMRS + ROC_ONLY ))
 check "Mods: $REMAINING installed, $ACTIVE active" "mod list refreshed"
+check "\[hello\] mods changed: $REMAINING installed, $ACTIVE active" "TOME_EVENT_MODS_CHANGED: a mod hears it, and list_mods agrees"
 if ! tail -n 5 "$LOG" | grep -q "needs-ghost"; then pass "removed mod gone from the list"; else fail "removed mod still listed"; fi
 
 echo ".tome packages"
@@ -800,7 +845,7 @@ if [[ -f "$BUILD/packages/hello.tome" ]]; then
     repack "$BUILD/packages/hello.tome" "$WORK/hello-pkg.tome"
     mv -f "$WORK/hello-pkg.tome" "$MODS/hello-pkg.tome"
     check "Unpacked hello-pkg\.tome" "a .tome is unpacked" 10
-    check "hello +error: the folder hello has the same id and is used instead" "a folder wins over a package with its id" 10
+    check "hello +([^ ]+ +)?error: the folder hello has the same id and is used instead" "a folder wins over a package with its id" 10
     # Without the folder, the package's copy runs.
     before=$(count "\[hello\] loaded \(Tome")
     mv "$MODS/hello" "$WORK/hello-folder"
@@ -842,8 +887,23 @@ if ((${#MAP_ARG[@]})); then
     # Once the loaded game runs, a movie queued with "-movie" plays as the
     # mission is quit, skipped with Esc (TOME_DEBUG_SKIP_MOVIES: no frames
     # are presented during a movie, so the script can't).
-    TOME_DEBUG_CLICKS="wait:TomeLogInteger(8604);settle;type:-movie;wait:e2e: movie queued;\
-key:F10;settle;click:EndGameButton;settle;click:QuitButton;wait:skipping the movie;wait:Screen: score screen" \
+    # An install without its Movies folder (renamed or removed to skip the
+    # intros) has nothing to play: that part is skipped, not failed.
+    MOVIES=1
+    [[ -e "$GAME/Movies" ]] || MOVIES=0
+    if ((MOVIES)); then
+        MOVIE_INPUT="type:-movie;wait:e2e: movie queued;"
+        MOVIE_WAIT="wait:skipping the movie;"
+    else
+        echo "movie: skipped (the game has no Movies folder)"
+        MOVIE_INPUT="" MOVIE_WAIT=""
+    fi
+    # dump: the cinematic panel's frames (hidden outside cinematics, laid out in
+    # every game): the widescreen patch holds the two borders by both sides of
+    # the panel, so they end where it does however wide the window is.
+    TOME_DEBUG_CLICKS="wait:TomeLogInteger(8604);settle;dump:CinematicPanel;dump:CinematicTopBorder;\
+dump:CinematicBottomBorder;${MOVIE_INPUT}\
+key:F10;settle;click:EndGameButton;settle;click:QuitButton;${MOVIE_WAIT}wait:Screen: score screen" \
         launch
     check "hello +1\.0\.0 +disabled" "hello starts disabled" 30
     check "\[map\] TomeLogInteger\(0\)" "map still loads; disabled native returned 0" 45
@@ -858,8 +918,11 @@ key:F10;settle;click:EndGameButton;settle;click:QuitButton;wait:skipping the mov
     check "\[hello\] loaded a saved game: Save\\\\.+\\\\TomeE2E\.w3z" "loaded event with the saved game's path" 30
     check_count "Game started: " 2 "the loaded game started" 30
     check "\[map\] TomeLogInteger\(8604\)" "the loaded game's timers run (and don't load again)" 15
-    check "movie-frame-length: blizzard\.ax patched" "a movie (queued by the map, played as it ends): blizzard.ax patched" 30
-    check "Debug: skipping the movie" "the movie played, and was skipped" 15
+    check_cinematic_borders
+    if ((MOVIES)); then
+        check "movie-frame-length: blizzard\.ax patched" "a movie (queued by the map, played as it ends): blizzard.ax patched" 30
+        check "Debug: skipping the movie" "the movie played, and was skipped" 15
+    fi
     check "Screen: score screen" "the game goes on after the movie" 20
     stop_game
 fi
@@ -1027,6 +1090,9 @@ type:/tome disable hello;wait:[hello] disabled;type:/hello ignored;frames:5;\
 type:/tome enable hello;wait:[hello] game start: ;settle;type:/tome nonsense;wait:Chat command: /tome nonsense;\
 type:/tome logs 3;wait:/tome logs: showed ;\
 key:Esc;wait:pressed Esc;click:HelloButton,13;until:[hello] Hello button clicked (2);\
+type:/hellodestroy;wait:[hello] /hellodestroy: ;type:/hellodestroy click;wait:Chat command: /hellodestroy click;\
+click:HelloButton,13;until:[hello] destroying the button from its click;settle;\
+type:/hellodestroy gone;wait:[hello] /hellodestroy gone: ;\
 key:F10;wait:game paused by;settle;click:TomeEscModsButton;until:Mod menu opened in game;\
 key:Esc;until:Mod menu closed in game;settle;key:Esc;wait:game resumed by;settle;\
 key:Ctrl+F10;wait:Mod menu opened in game;settle;click:TomeEscModsFooter3;until:Mod menu closed in game;settle;\
@@ -1057,6 +1123,9 @@ check "/tome logs: showed 3 lines" "/tome logs shows the end of tome.log" 10
 check_absent "Hello, ignored" "a disabled mod's command doesn't run"
 check "\[hello\] .+ pressed Esc" "Esc event (sent whether or not the map listens)"
 check "\[hello\] Hello button clicked \(2\)" "click on an in-game button" 10
+check "\[hello\] /hellodestroy: ok" "frames made through Tome are destroyed, and their names are free again" 10
+check "\[hello\] destroying the button from its click: 0" "a button can be destroyed from its own click callback" 10
+check "\[hello\] /hellodestroy gone: yes" "and it's gone once the click is over" 10
 check "Esc menu set up; Mods button added" "the Esc menu has a Mods button"
 check "\[hello\] game paused by .+" "the Esc menu pauses a single player game: pause event with the player" 10
 check "\[hello\] game resumed by .+" "and closing it resumes" 10
@@ -1120,16 +1189,26 @@ touch "$HOME_DIR/tome/safe"
 # keeps the mouse path to Tome's buttons tested. until: clicks the toggle
 # again while the panel is still lowering (it drops clicks then).
 SAVED_MAP_ARG=("${MAP_ARG[@]}")
-MAP_ARG=(-tomesafe)
+# Built-in patches turned off, one by its setting, one for this start only.
+printf '{"harden_heap": true, "patch.background-mute": false}\n' >"$HOME_DIR/tome/settings.json"
+MAP_ARG=(-tomesafe -TomeNoPatch=ambient-sound,no-such-patch)
 # Three starts before this one stopped short of the main menu: a crash loop
 # turns safe mode on too.
-STARTS=3 TOME_DEBUG_CLICKS="wait:Screen ready: main menu;0.874,0.84;until:Mod menu opened;settle;\
-0.447,0.227;until:Mod menu: enabling hello" launch
+# The positions are fractions of the window as measured at the default window
+# (UI 0.8305 wide); the Mods button hangs from the right edge and the panel
+# from the left, so in a wider window they move with the edges.
+MODS_X="$(awk -v w="${UI_WIDTH:-0.8305}" 'BEGIN { printf "%.4f", 1 - (1 - 0.874) * 0.8305 / w }')"
+TOGGLE_X="$(awk -v w="${UI_WIDTH:-0.8305}" 'BEGIN { printf "%.4f", 0.447 * 0.8305 / w }')"
+STARTS=3 TOME_DEBUG_CLICKS="wait:Screen ready: main menu;$MODS_X,0.84;until:Mod menu opened;settle;\
+$TOGGLE_X,0.227;until:Mod menu: enabling hello" launch
 MAP_ARG=("${SAVED_MAP_ARG[@]}")
 check "Safe mode \(-tomesafe, tome/safe, the last 3 starts didn't reach the main menu\): no mod starts this session" \
     "-tomesafe, tome/safe and a crash loop turn safe mode on" 30
 check "Startup check: the last 3 start\(s\) didn't reach the main menu" "the crash loop is logged"
 check "Assets at startup: no mod assets" "no mod assets mounted"
+check "Patches: .*, 2 turned off: .*background-mute off \(turned off in Tome > Settings\).*ambient-sound off \(turned off by -tomenopatch\)" \
+    "patches turned off in the settings and by -tomenopatch aren't applied"
+check "[]] -tomenopatch: no built-in patch \"no-such-patch\"" "an unknown -tomenopatch name is logged"
 check "hello +1\.0\.0 +disabled: safe mode" "mods are listed as disabled by safe mode" 15
 check_absent "\[hello\] loaded" "no mod DLL loaded"
 check "Mod menu: enabling hello" "the mod menu enables a mod despite safe mode" 15

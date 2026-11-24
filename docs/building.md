@@ -104,6 +104,7 @@ the log's `Tome <version> starting` line says when it's one.
 | `TOME_DEBUG_UPDATE_URL` | The URL the update check asks instead of GitHub's (`http://` allowed), e.g. a local file server with a `{"tag_name": "v9.9.9"}` reply. Developer builds never ask or check without it, so tests don't see the first start's question. The release's `SHA256SUMS` and `.sig` are fetched from `<tag>/` next to it. |
 | `TOME_DEBUG_RELEASE_KEY` | One more public key (base64) the update check accepts release signatures from, for a test server's releases. |
 | `TOME_DEBUG_SKIP_MOVIES=1` | Skip each movie with Esc as it starts (a movie presents no frames, so `TOME_DEBUG_CLICKS` can't). Used by the e2e test. |
+| `TOME_DEBUG_LOBBY_AS` | A net id (1.27b): a lobby client's first handshake reply goes out with its local id set to this one, as a modified client could send it, to check the host sees the real sender. Used by the two-instance LAN test. |
 | `TOME_DEBUG_EXIT=1` | Exit the way the game's menu does (mods disabled and unloaded) once `tome/debug-exit` appears, so a `--coverage` build writes its counters (`tools/coverage.sh`). |
 | `TOME_DEBUG_CLICKS` | Simulated input for tests, paced by the game rather than a clock: `click:FrameName` clicks a named button, `x,y;...` clicks at a position (fractions of the window), `type:text` types a chat line, `text:abc` types characters (no Enter), `key:Ctrl+J` presses a key, `wait:text` waits for a `tome.log` line containing the text, `until:text` repeats the last action until such a line, `frames:n` waits n frames, `settle` waits until no UI animation runs. See `loader/src/core/debug_script.h`. Used by the e2e test. |
 
@@ -161,3 +162,33 @@ it's skipped.
 `make game` (`tools/game.sh start`) runs the build the same way, on your
 screen, from `build/test-env/game/`; put mods to try in its `tome/mods/`.
 `tools/game.sh shot file.png` takes a screenshot of the game's display.
+
+## Looking at the UI in another window shape
+
+`TEST_WIDTH` and `TEST_HEIGHT` set the game's window for `tools/game.sh`,
+the e2e tests and `tools/ui-shots.sh` (the default is 800x600; 1056x552
+makes a 1280x720 screen, about 16:9; 2296x912 is 21:9; 1056x856 is 5:4).
+The e2e tests follow the window's shape (their fixed click positions scale
+with the UI's width), so `TEST_WIDTH=800 TEST_HEIGHT=450 make e2e` runs the
+whole suite on a 16:9 window; the two-instance test is slow at large sizes.
+
+`tools/ui-shots.sh` scripts screenshots of the UI with `TOME_DEBUG_CLICKS`
+and an ImageMagick `import` of the game's display, into `build/shots/`:
+
+```sh
+tools/ui-shots.sh seq menus 2 "wait:Screen ready: main menu;settle;dump:menusM1;frames:30;\
+    click:SinglePlayerButton;wait:Screen ready: single player;settle;dump:menusM2"
+tools/ui-shots.sh sheet build/shots/menus.png 2 build/shots/menus-1.png build/shots/menus-2.png
+```
+
+`dump:<name>M<i>` marks a place to photograph; `dump:<Frame>` also logs the
+rectangle of a named frame in UI units, to check a layout by numbers
+(`Debug dump CinematicBottomBorder: left 0.0000 ... right 1.1125`).
+`tools/ui-shots.sh map` makes a showcase map from `(2)BootyBay.w3m`
+(`tools/showcase-map.py`): `SHOWCASE=1 tools/ui-shots.sh seq ...` starts it,
+and chat commands put a hero, a multiboard, a leaderboard, timers, quests,
+a dialog, a cinematic with fades, the hidden interface or the victory screen
+on screen (the script lists them, with the number each logs when done).
+`timed` takes a shot every few seconds, for a movie (no script step runs
+while one plays). The test folder links `Movies.off` as `Movies` when the
+install has its movies renamed to skip them.

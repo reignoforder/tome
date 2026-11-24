@@ -93,6 +93,8 @@ impl Event {
     pub const PLAYER_RESOURCE: Event = Event(67);
     pub const DAY: Event = Event(68);
     pub const NIGHT: Event = Event(69);
+    /// The installed mods changed ([`crate::Tome::list_mods`]). No fields.
+    pub const MODS_CHANGED: Event = Event(70);
 
     /// The constant's name ("MAP_LOAD"), or None for one this version doesn't know.
     pub fn name(self) -> Option<&'static str> {
@@ -166,6 +168,7 @@ impl Event {
             67 => "PLAYER_RESOURCE",
             68 => "DAY",
             69 => "NIGHT",
+            70 => "MODS_CHANGED",
             _ => return None,
         })
     }
@@ -175,7 +178,8 @@ impl Event {
         match self.0 {
             i32::MIN..=5 => 5,
             6..=45 => 8,
-            _ => 12,
+            46..=69 => 12,
+            _ => 20,
         }
     }
 }

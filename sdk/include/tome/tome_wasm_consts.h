@@ -4,8 +4,13 @@
 
 /* tome.h's enums for WebAssembly mods (tome_wasm.h). */
 
-#define TOME_API_VERSION 16
+#define TOME_API_VERSION 21
 #define TOME_POPUP_CLOSED (-1)
+#define TOME_NET_MAX_MESSAGE 1024
+#define TOME_LOBBY_MAX_MESSAGE 1024
+#define TOME_LOBBY_EVERYONE (-1)
+#define TOME_START_ALLOW 1
+#define TOME_START_REFUSE 0
 
 typedef enum tome_result {
     TOME_OK = 0,
@@ -270,7 +275,14 @@ typedef enum tome_event {
      * it across one: amount = the time of day in hours. Checked every game
      * tick. */
     TOME_EVENT_DAY = 68,
-    TOME_EVENT_NIGHT = 69
+    TOME_EVENT_NIGHT = 69,
+    /* API version 20: what list_mods returns changed: a mod was installed,
+     * removed, updated, turned on or off, allowed, or stopped by an error.
+     * On any screen, once Tome has applied the change; also right after
+     * the change that enabled the listening mod itself, Tome's first look
+     * at startup included (once the game's window is up: list_mods has
+     * nothing in tome_mod_enable then). No fields. */
+    TOME_EVENT_MODS_CHANGED = 70
 } tome_event;
 
 /* tome_event_info.resource for TOME_EVENT_PLAYER_RESOURCE (the JASS
@@ -311,6 +323,39 @@ typedef enum tome_chat_recipient {
     TOME_CHAT_OBSERVERS = 2,  /* observers or referees */
     TOME_CHAT_PRIVATE = 3
 } tome_chat_recipient;
+
+/*
+ * When a module's hook runs relative to the game's function (tome_hook): BEFORE
+ * may change number arguments or skip the function, AFTER may change the result.
+ * Handlers run on the game's main thread. (Raw DLL hooks also have a REPLACE
+ * phase; a module can't use it.)
+ */
+typedef enum tome_hook_phase {
+    TOME_HOOK_BEFORE = 1,
+    TOME_HOOK_AFTER = 3
+} tome_hook_phase;
+
+/*
+ * Timers (API version 19). A timer runs `fn` on the main thread after a
+ * delay, once or again and again, on one of two clocks:
+ *   TOME_CLOCK_REAL  real time, checked once per frame drawn (in menus,
+ *                    loading screens and games). For UI.
+ *   TOME_CLOCK_GAME  game time, as GAME_TICK counts it: only in a game,
+ *                    follows the game speed, stops while the game is paused,
+ *                    and the timer ends with the game. It fires in a game
+ *                    step, after that step's GAME_TICK handlers: in the same
+ *                    step on every player's computer, if every computer
+ *                    started it in the same step (from GAME_START, a
+ *                    GAME_TICK, a game event, another game timer or a
+ *                    net_send message; not from a TICK, a click or a key).
+ * A timer fires at most once per frame or step: one that falls behind (an
+ * interval shorter than a frame) fires once and goes on from then, never
+ * in a burst.
+ */
+typedef enum tome_clock {
+    TOME_CLOCK_REAL = 0,
+    TOME_CLOCK_GAME = 1
+} tome_clock;
 
 /*
  * Game objects (API version 16).
@@ -408,3 +453,26 @@ typedef enum tome_property {
     TOME_PROPERTY_ATTACK_COOLDOWN = 30, /* attack_cooldown: units; get (seconds between attacks) */
     TOME_PROPERTY_ATTACK_RANGE = 31     /* attack_range: units; get */
 } tome_property;
+
+/* API version 20: which kind of version version_compare and version_match read. */
+typedef enum tome_version_kind {
+    /* Semantic versions: mods' "version", "depends" and the like, and
+     * Tome's own (tome_api.tome_version). "1.2.3", "1.0.0-beta.1"; ranges
+     * "*", "1.2.3", ">=1.2 <2", "^1.2", "~1.2", "1.2" (1.2.x), "a || b". */
+    TOME_VERSION_MOD = 0,
+    /* Game versions: tome.mod.json "game". The game binary's four-part
+     * version ("1.27.1.7085", tome_game_info.file_version) or a known name
+     * ("1.27b"); ranges "*", ">=1.26a <1.28", "1.27" (1.27.x.x), "a || b". */
+    TOME_VERSION_GAME = 1
+} tome_version_kind;
+
+/* API version 20: tome_mod_info.state. */
+typedef enum tome_mod_state {
+    TOME_MOD_ACTIVE = 0,    /* running */
+    TOME_MOD_DISABLED = 1,  /* turned off by the player, or safe mode (reason "safe mode") */
+    TOME_MOD_APPROVAL = 2,  /* its code waits for the player to allow it (the mod menu) */
+    TOME_MOD_WAITING = 3,   /* held off by a multiplayer game until it ends */
+    /* Can't run: tome.mod.json can't be read, a dependency is missing, it's
+     * for another game or Tome, its DLL failed or crashed... (reason) */
+    TOME_MOD_ERROR = 4
+} tome_mod_state;

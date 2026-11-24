@@ -7,7 +7,7 @@
   "description": "A sandboxed Tome mod in Rust, from sdk/templates/rust-wasm.",
   "authors": ["You"],
   "game": "1.27b",
-  "tome": ">=0.1.0 <0.2.0",
+  "tome": ">=0.2.0 <0.3.0",
   "wasm": "my_rust_wasm_mod.wasm",
   "sync": "client",
   "natives": ["native MyRustWasmModAdd takes integer a, integer b returns integer"]

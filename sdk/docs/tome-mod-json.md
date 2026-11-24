@@ -23,7 +23,7 @@ completes the fields and flags mistakes as you type. Tome ignores `$schema`.
   "license": "MIT",
   "icon": "icon.blp",
   "game": "1.27b",
-  "tome": ">=0.1.0 <0.2.0",
+  "tome": ">=0.2.0 <0.3.0",
   "depends": { "ui-lib": "^1.0" },
   "entry": "hp-bars.dll",
   "requires": ["CTextFrame::SetText"],
@@ -52,7 +52,7 @@ and can't leave it: no absolute paths, drive letters or `..`.
 | `icon` | path | A `.blp` or `.tga`, shown in the mod list. |
 | `game` **\*** | game range | The game builds the mod works on, e.g. `"1.27b"`. Tome doesn't load it on others. |
 | `edition` | `"roc"` or `"tft"` | The one game the mod is for: Reign of Chaos or The Frozen Throne. Tome doesn't load it in the other. Leave it out for a mod that works in both (most do: one `game.dll` runs both). |
-| `tome` **\*** | version range | The Tome versions it works with, e.g. `">=0.1.0 <0.2.0"`. |
+| `tome` **\*** | version range | The Tome versions it works with, e.g. `">=0.2.0 <0.3.0"`. |
 | `depends` | `{ id: range }` | Mods that must be installed and enabled. They load first, and when one is disabled, this mod is disabled first. |
 | `recommends` | `{ id: range }` | A warning when one is missing. |
 | `conflicts` | `{ id: range }` | A warning when both run. |
@@ -60,7 +60,8 @@ and can't leave it: no absolute paths, drive letters or `..`.
 | `entry` | path, or `{ game range: path }` | The DLL (32-bit). A map is checked in order and the first matching range wins, for different DLLs per build. Leave it out for a mod without code. |
 | `wasm` | path | **Experimental.** A WebAssembly module (`.wasm`) Tome runs sandboxed, instead of a DLL: it can only use Tome's imports (`docs/wasm-mods.md` in Tome's repository). Not with `entry`. |
 | `assets` | path | A folder of game files the mod adds or replaces (textures, models, FDF, `Blizzard.j`...), merged into the game's files. Default: `assets`. |
-| `requires` | list of strings | What the mod can't work without: names from the mapping database (`"CTextFrame::SetText"`) and game object properties as `"property:<name>"` (`"property:mana"`; the names are in `tome.h`'s `tome_property`). Tome won't load the mod on a build where one isn't mapped, or on a Tome that doesn't know the property. |
+| `mappings` | path | A folder of the mod's own mapping files, one per game build (below). Default: `mappings`. |
+| `requires` | list of strings | What the mod can't work without: names from the mapping database (`"CTextFrame::SetText"`), from a mod's own mapping file as `"<mod id>/<name>"` (`"mymod/CUnit::Foo"`: its own, or another installed mod's), and game object properties as `"property:<name>"` (`"property:mana"`; the names are in `tome.h`'s `tome_property`). Tome won't load the mod on a build where one isn't mapped, or on a Tome that doesn't know the property. |
 | `natives` | list of strings | The JASS natives the mod provides, declared as a map declares them: `"native MyLog takes integer value returns nothing"`. Register their code in `tome_mod_enable`. |
 | `provides` | list of ids | Other ids this mod stands in for in other mods' `depends`. |
 | `sync` **\*** | `"client"` or `"required"` | `client`: only matters to this player. `required`: every player in a multiplayer game needs the same version. The lobby checks it, and a running game keeps it from changing. |
@@ -86,6 +87,67 @@ older Tome.
   its common name. Known names: `1.24e`, `1.26a`, `1.27a` and `1.27b`. A
   range can use `*`, comparators, partial versions (`1.27` is 1.27.x.x) and
   `||`. Tome runs on 1.27b today.
+
+### Mappings: hooking functions Tome doesn't map
+
+`hook` and `resolve` take the names in Tome's mapping database. For a
+function Tome doesn't map yet, a mod can map it itself: a file per build in
+its `mappings` folder, named after the build (`mappings/1.27b.json`,
+`mappings/1.26a.json`), in the format of Tome's own files (`mappings/` in
+Tome's repository; `docs/architecture.md`, "Mapping database"):
+
+```json
+{
+  "schema": 2,
+  "symbols": {
+    "CUnit::Foo": {
+      "kind": "function", "rva": "0x00123450", "conv": "thiscall",
+      "sig": "int(void* this, int amount)",
+      "bytes": "55 8b ec 83 ec 10 56 8b f1"
+    },
+    "CUnit.foo_count": { "kind": "offset", "value": "0x1A4" }
+  }
+}
+```
+
+- Its symbols go by `"<mod id>/<name>"`: `api->hook(mod, "mymod/CUnit::Foo",
+  ...)`, `api->resolve("mymod/CUnit.foo_count")`. Any mod can use them, so a
+  library mod can map functions for others (who list it in `depends`).
+- The header Tome's files have (`name`, `file_version`, `pe_timestamp`,
+  `size_of_image`, `sha256`) is optional: the file's name says the build.
+  A field that is there must be that build's, so a file copied into the
+  wrong name is refused rather than patching the wrong code.
+- A function needs `bytes`: its first bytes (5 to 64, `??` for any byte,
+  not first). Tome checks the whole file against the game when it reads it
+  (every function's `bytes`, every `call`'s target, every `import`'s slot),
+  so a file with one wrong symbol doesn't load, and what `resolve` returns
+  was checked. The `bytes` must cover whole instructions past the first 5
+  bytes, since those are what a hook moves. A function may also have a
+  `size`, its length in bytes (optional).
+- No file for the running build means the mod maps nothing there; list
+  what it can't do without in `requires` so Tome says so instead of loading
+  it. A file with an error stops the mod from loading, and the Details page
+  shows the error.
+- If Tome (or another mod) maps the same function, both names share one
+  hook, as long as they pass the arguments the same way (`conv` and the
+  sizes in `sig`). A mapping that disagrees, or a hook that would overlap
+  another one's first bytes, fails, and `tome.log` says why. Functions
+  Tome's built-in fixes use stay off limits under any name, and so does
+  every place inside them.
+- A mapping file decides where other mods' hooks go, so it counts as code:
+  a mod with one (even with no DLL) waits until the player allows it, and
+  a changed one asks again like a changed DLL. Until then, and while the
+  mod is off, its names map nothing (`hook` fails with "not mapped now",
+  saying why).
+- A file changed while the game runs applies to what comes after: new
+  `resolve` and `hook` calls get the new addresses, while hooks already in
+  place stay where they are (the mods that use the file aren't reloaded),
+  and `unhook` by the name removes them there too.
+- Multiplayer games compare a `"required"` mod's own mapping file, and
+  those of the mods it names in `depends` or in `requires`
+  (`"lib/Name"`): a mod that hooks a library's names should name the
+  library in one of them, so players with different library files are
+  told, even if the library itself is `"sync": "client"`.
 
 ### Keybinds
 

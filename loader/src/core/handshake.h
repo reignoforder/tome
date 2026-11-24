@@ -6,14 +6,19 @@
 // is the portable part; loader/src/handshake.cpp reads the game and calls it.
 //
 // In the lobby, the host sends its set as chat lines to each player who
-// joins, and Tome clients answer the host with theirs. Tome hides those lines
-// on both sides; a player without Tome sees the host's (readable) lines. The
-// host refuses to start while a player's set differs or hasn't arrived.
+// joins, and Tome clients answer the host with theirs. A host with an empty
+// set sends nothing; a client whose set isn't empty then sends it to the
+// host unasked (after Lobby::kHostWait), so a difference the host can't see
+// from its side (a patch off only on the client) still counts. Tome hides
+// those lines on both sides; a player without Tome sees them (readable).
+// The host refuses to start while a player's set differs or hasn't arrived.
 //
-// A client can't tell which player hosts (the game doesn't say where Tome
-// can read it), so it answers every player who sends a set and says so when
-// more than one did: a player pretending to host can't divert the replies the
-// real host checks, only add a note.
+// A client knows the host by its net id where the build maps it (the game's
+// router gives a game's creator player number 1: set_host), and counts only
+// the host's set. It answers every player who sends a set all the same, so a
+// player pretending to host can't divert the replies the real host checks;
+// it only gets a note naming it. Without the mapping, a second sender is
+// noted, since the client can't tell which one hosts.
 //
 // In a game, every player with required mods sends one SyncStoredInteger
 // action per mod right after the start. Actions reach every player and are
@@ -21,6 +26,7 @@
 // sets and says who differs.
 
 #include <map>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -41,6 +47,15 @@ struct SyncMod {
 using ModSet = std::vector<SyncMod>;
 
 void sort(ModSet& set);
+
+// Whether `mod` is a patch_not_in_force entry.
+bool is_patch(const SyncMod& mod);
+
+// A built-in patch that changes what map scripts do (patches::Patch::sync)
+// and isn't in force here: in the set like a required mod, so players
+// differ when one runs without it. "patch:<name> off #0"; the ':' keeps it
+// apart from every mod id.
+SyncMod patch_not_in_force(std::string_view name);
 
 // "hello 1.0.0 #1a2b3c4d"
 std::string describe(const SyncMod& mod);
@@ -147,15 +162,36 @@ public:
     // the lobby (people, not computers). `now`: seconds, any clock.
     void update(bool host, const ModSet& local, const std::vector<LobbyPlayer>& others, double now);
 
+    // Client: the host's net id (the player whose number is 1, which a
+    // game's creator always is: NetGetPlayerNumber), or -1 if unknown.
+    // Known, only the host's set counts: another player who sends one is
+    // named in a note and ignored (it still gets a reply, so a wrong id
+    // can't keep the real host from starting). Unknown, a second sender is
+    // noted, since a client can't tell which one hosts.
+    void set_host(int id) { host_id_ = id; }
+
     // A Tome line (is_tome_line) from player `from`.
     void receive(int from, std::string_view text);
 
     // Host: whether the game may start. If not, `problems` says why, one
-    // line per player.
-    bool can_start(std::vector<std::string>& problems) const;
+    // line per player, and `only_patches` (if given) whether every
+    // difference is a built-in patch (is_patch): those only matter on maps
+    // that use what the patch closes.
+    bool can_start(std::vector<std::string>& problems, bool* only_patches = nullptr) const;
 
     std::vector<Outgoing> take_outgoing();
     std::vector<std::string> take_notes();
+
+    // For mods' lobby messages (lobbymsg.h): whether this client hosts; the
+    // host's net id as the game says it (set_host: NetGetPlayerNumber; -1
+    // if the build doesn't map it, since "the only player who sent a set"
+    // could be any player); and whether player `id` runs Tome as far as
+    // this side can tell (host: their reply arrived; client: it's that host
+    // and its set arrived). A line to a player without Tome would show in
+    // their chat.
+    bool hosting() const { return host_; }
+    int host_id() const { return host_ ? -1 : host_id_; }
+    bool runs_tome(int id) const;
 
     // A client gives up waiting for the host's set after this many seconds.
     static constexpr double kHostWait = 5.0;
@@ -166,6 +202,7 @@ private:
         bool announced = false;  // host: our current set went to this player
         bool answered = false;   // host: their reply arrived
         ModSet set;              // host: their reply
+        std::string noted;       // host: the last note about their reply
         Assembler assembler;
     };
 
@@ -185,8 +222,30 @@ private:
     // host's; each sender gets our replies.
     std::map<int, ModSet> claims_;
     bool warned_no_host_ = false;
+    bool volunteered_ = false;  // client: our set went to the known host unasked (it sent none)
+    int host_id_ = -1;
+    std::set<int> ignored_;  // client: non-hosts whose sets were ignored (noted once each)
     std::vector<Outgoing> outgoing_;
     std::vector<std::string> notes_;
+};
+
+// The host may start a refused game anyway: a second press of Start within
+// kWindow seconds of a refusal, with the same problems, goes through. A
+// problem that changed in between (a player joined, a set arrived) needs a
+// new refusal first, so the host overrides only what it was shown.
+class StartOverride {
+public:
+    // A press of Start at `now` (seconds) that `problems` (non-empty)
+    // would refuse: true to start anyway.
+    bool press(const std::vector<std::string>& problems, double now);
+    void reset() { armed_ = false; }
+
+    static constexpr double kWindow = 10.0;
+
+private:
+    bool armed_ = false;
+    double at_ = 0;
+    std::vector<std::string> refused_;
 };
 
 // --- in games: SyncStoredInteger actions ---------------------------------------------

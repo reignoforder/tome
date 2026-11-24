@@ -16,9 +16,10 @@ use std::rc::Rc;
 
 use crate::events::EventInfo;
 use crate::natives::{Args, Ret, RetKind};
-use crate::{Error, Frame, Level, Result, UiEvent};
+use crate::{Error, Frame, HookCall, Level, LobbyMessage, LobbyStart, Result, UiEvent};
 
 type MessageFn = Rc<dyn Fn(&str, &[u8])>;
+type NetFn = Rc<dyn Fn(i32, &[u8], bool)>;
 
 #[derive(Clone)]
 pub(crate) enum Callback {
@@ -28,7 +29,13 @@ pub(crate) enum Callback {
     Click(Rc<dyn Fn(Frame)>),
     Popup(Rc<dyn Fn(u32, Option<usize>)>),
     Message(MessageFn),
+    Net(NetFn),
     Native(Rc<dyn Fn(&Args) -> Ret>),
+    Timer(Rc<dyn Fn(u32)>),
+    Checksum(Rc<dyn Fn() -> u64>),
+    Hook(Rc<dyn Fn(&mut HookCall)>),
+    Lobby(Rc<dyn Fn(&LobbyMessage)>),
+    LobbyStart(Rc<dyn Fn() -> LobbyStart>),
 }
 
 // A block from tome_buffer: 8-aligned (events hold doubles), with a byte
@@ -53,6 +60,13 @@ struct State {
     // A native's string result, until the next native returns (Tome
     // copies it as the native returns).
     result: Option<CString>,
+    // Running timers' callback ids, by timer id (timer_stop forgets one).
+    timers: HashMap<u32, u32>,
+    // A checksum's block, with the answer in it: Tome reads it after the
+    // callback returns, so it lives until the next callback.
+    answer: Option<Buffer>,
+    // The checksum Tome calls (one at a time: registering again replaces it).
+    checksum: Option<u32>,
 }
 
 thread_local! {
@@ -95,6 +109,27 @@ pub(crate) fn register(callback: Callback, register: impl FnOnce(u32) -> i32) ->
 
 pub(crate) fn forget(id: u32) {
     STATE.with(|s| s.borrow_mut().callbacks.remove(&id));
+}
+
+/// The checksum is now callback `id` (None: removed): the one before goes.
+pub(crate) fn replace_checksum(id: Option<u32>) {
+    let old = STATE.with(|s| core::mem::replace(&mut s.borrow_mut().checksum, id));
+    if let Some(old) = old.filter(|&old| Some(old) != id) {
+        forget(old);
+    }
+}
+
+/// Timer `timer` calls back through callback `id`.
+pub(crate) fn note_timer(timer: u32, id: u32) {
+    STATE.with(|s| s.borrow_mut().timers.insert(timer, id));
+}
+
+/// Timer `timer` won't call back any more: its closure goes.
+pub(crate) fn forget_timer(timer: u32) {
+    let id = STATE.with(|s| s.borrow_mut().timers.remove(&timer));
+    if let Some(id) = id {
+        forget(id);
+    }
 }
 
 fn lookup(id: u32) -> Option<Callback> {
@@ -145,9 +180,10 @@ pub fn buffer(size: u32) -> usize {
 }
 
 pub fn callback(id: u32, addr: usize, len: u32) {
-    let _block = take_pending(addr);
+    let mut block = take_pending(addr);
+    STATE.with(|s| s.borrow_mut().answer = None);
     let Some(callback) = lookup(id) else { return };
-    // Tome's copy, alive until this returns (_block, or Tome's own memory).
+    // Tome's copy, alive until this returns (block, or Tome's own memory).
     let data = unsafe { bytes(addr, len) };
     match callback {
         Callback::Text(f) => f(&String::from_utf8_lossy(data)),
@@ -178,7 +214,76 @@ pub fn callback(id: u32, addr: usize, len: u32) {
             }
             f(&String::from_utf8_lossy(&data[4..4 + n]), &data[4 + n..])
         }
+        Callback::Net(f) => {
+            // [player][replay][data]
+            if let (Some(player), Some(replay)) = (word(data, 0), word(data, 4)) {
+                f(player as i32, &data[8..], replay != 0)
+            }
+        }
+        Callback::Hook(f) => {
+            // [flags][result][arguments...]: changed in place, and Tome reads
+            // the block after this returns, so it lives until the next callback.
+            let words = (len / 4) as usize;
+            if words < 2 || addr % 4 != 0 {
+                return;
+            }
+            let call = unsafe { core::slice::from_raw_parts_mut(addr as *mut u32, words) };
+            f(&mut HookCall { words: call });
+            let kept = block.take();
+            STATE.with(|s| s.borrow_mut().answer = kept);
+        }
+        Callback::Lobby(f) => {
+            // [player][from host][data]
+            if let (Some(player), Some(from_host)) = (word(data, 0), word(data, 4)) {
+                f(&LobbyMessage { player: player as i32, from_host: from_host != 0, data: &data[8..] })
+            }
+        }
+        Callback::LobbyStart(f) => {
+            // The block is [verdict][reason, NUL-terminated], zeros when it
+            // comes (refuse quietly); Tome reads it after this returns.
+            if len < 8 {
+                return;
+            }
+            let (verdict, reason) = match f() {
+                LobbyStart::Allow => (crate::consts::TOME_START_ALLOW, String::new()),
+                LobbyStart::Refuse(reason) => (crate::consts::TOME_START_REFUSE, reason),
+            };
+            let room = len as usize - 5; // a byte stays 0 for the NUL
+            let mut end = reason.len().min(room);
+            while !reason.is_char_boundary(end) {
+                end -= 1;
+            }
+            let out = addr as *mut u8;
+            unsafe {
+                core::ptr::copy_nonoverlapping(verdict.to_le_bytes().as_ptr(), out, 4);
+                core::ptr::copy_nonoverlapping(reason.as_ptr(), out.add(4), end);
+                *out.add(4 + end) = 0;
+            }
+            let kept = block.take();
+            STATE.with(|s| s.borrow_mut().answer = kept);
+        }
         Callback::Native(_) => {}
+        Callback::Timer(f) => {
+            // [timer][state]: 0 it fires again, 1 for the last time, 2 it
+            // ended without firing (its game ended).
+            let (Some(timer), Some(state)) = (word(data, 0), word(data, 4)) else { return };
+            if state != 0 {
+                forget_timer(timer);
+            }
+            if state != 2 {
+                f(timer)
+            }
+        }
+        Callback::Checksum(f) => {
+            // The hash goes back in the block (Tome reads it after this returns).
+            if len < 8 {
+                return;
+            }
+            let hash = f().to_le_bytes();
+            unsafe { core::ptr::copy_nonoverlapping(hash.as_ptr(), addr as *mut u8, 8) };
+            let kept = block.take();
+            STATE.with(|s| s.borrow_mut().answer = kept);
+        }
     }
 }
 
@@ -259,6 +364,8 @@ pub fn disable(f: impl FnOnce()) {
     STATE.with(|s| {
         let mut s = s.borrow_mut();
         s.callbacks.clear();
+        s.timers.clear();
+        s.checksum = None;
         s.result = None;
     });
 }
@@ -321,6 +428,116 @@ mod tests {
         calls.set(None);
         callback(id, closed.as_ptr() as usize, 8);
         assert_eq!(calls.get(), None);
+    }
+
+    #[test]
+    fn a_timer_is_forgotten_after_its_last_call() {
+        let calls = Rc::new(Cell::new(0));
+        let c = calls.clone();
+        let id = register(Callback::Timer(Rc::new(move |_| c.set(c.get() + 1))), |_| 0).unwrap();
+        note_timer(9, id);
+        let again: [u8; 8] = [9, 0, 0, 0, 0, 0, 0, 0];
+        let last: [u8; 8] = [9, 0, 0, 0, 1, 0, 0, 0];
+        callback(id, again.as_ptr() as usize, 8);
+        callback(id, last.as_ptr() as usize, 8);
+        callback(id, again.as_ptr() as usize, 8);
+        assert_eq!(calls.get(), 2);
+        // Ended with its game: forgotten, not called.
+        let c = calls.clone();
+        let id = register(Callback::Timer(Rc::new(move |_| c.set(c.get() + 1))), |_| 0).unwrap();
+        note_timer(10, id);
+        let ended: [u8; 8] = [10, 0, 0, 0, 2, 0, 0, 0];
+        callback(id, ended.as_ptr() as usize, 8);
+        assert_eq!(calls.get(), 2);
+        assert!(lookup(id).is_none());
+    }
+
+    #[test]
+    fn a_checksum_answers_in_its_block() {
+        let id = register(Callback::Checksum(Rc::new(|| 0x0102_0304_0506_0708)), |_| 0).unwrap();
+        let addr = buffer(8);
+        callback(id, addr, 8);
+        let got = unsafe { bytes(addr, 8) };
+        assert_eq!(got, &[8, 7, 6, 5, 4, 3, 2, 1]);
+    }
+
+    #[test]
+    fn a_lobby_start_answers_in_its_block() {
+        let id = register(Callback::LobbyStart(Rc::new(|| LobbyStart::Refuse("not yet".into()))), |_| 0).unwrap();
+        let addr = buffer(256);
+        callback(id, addr, 256);
+        let got = unsafe { bytes(addr, 256) };
+        assert_eq!(&got[..4], &[0, 0, 0, 0]);
+        assert_eq!(&got[4..12], b"not yet\0");
+        let id = register(Callback::LobbyStart(Rc::new(|| LobbyStart::Allow)), |_| 0).unwrap();
+        let addr = buffer(256);
+        callback(id, addr, 256);
+        let got = unsafe { bytes(addr, 256) };
+        assert_eq!(&got[..5], &[1, 0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn a_long_refusal_is_cut_on_a_character() {
+        let long = "é".repeat(200);
+        let id = register(Callback::LobbyStart(Rc::new(move || LobbyStart::Refuse(long.clone()))), |_| 0).unwrap();
+        let addr = buffer(256);
+        callback(id, addr, 256);
+        let got = unsafe { bytes(addr, 256) };
+        let end = got[4..].iter().position(|&b| b == 0).unwrap();
+        assert!(end <= 251);
+        assert!(core::str::from_utf8(&got[4..4 + end]).is_ok());
+    }
+
+    #[test]
+    fn a_lobby_message_has_its_sender_and_data() {
+        let seen = Rc::new(core::cell::Cell::new((0, false, 0usize)));
+        let s = seen.clone();
+        let id = register(
+            Callback::Lobby(Rc::new(move |m: &LobbyMessage| s.set((m.player, m.from_host, m.data.len())))),
+            |_| 0,
+        )
+        .unwrap();
+        let block: [u8; 11] = [7, 0, 0, 0, 1, 0, 0, 0, 9, 9, 9];
+        callback(id, block.as_ptr() as usize, 11);
+        assert_eq!(seen.get(), (7, true, 3));
+    }
+
+    #[test]
+    fn a_hook_changes_its_block_in_place() {
+        let id = register(
+            Callback::Hook(Rc::new(|call: &mut HookCall| {
+                assert_eq!(call.arg_count(), 2);
+                assert_eq!(call.handle(0), 7);
+                let hp = call.float(1);
+                call.set_float(1, hp * 2.0);
+                call.set_result_int(5);
+                call.skip();
+            })),
+            |_| 0,
+        )
+        .unwrap();
+        let addr = buffer(16);
+        let block = unsafe { core::slice::from_raw_parts_mut(addr as *mut u32, 4) };
+        block[2] = 7;
+        block[3] = 1.5f32.to_bits();
+        callback(id, addr, 16);
+        let got = unsafe { core::slice::from_raw_parts(addr as *const u32, 4) };
+        assert_eq!(got[0], 1);
+        assert_eq!(got[1], 5);
+        assert_eq!(f32::from_bits(got[3]), 3.0);
+        assert_eq!(got[2], 7);
+    }
+
+    #[test]
+    fn a_new_checksum_frees_the_one_before() {
+        let first = register(Callback::Checksum(Rc::new(|| 1)), |_| 0).unwrap();
+        replace_checksum(Some(first));
+        let second = register(Callback::Checksum(Rc::new(|| 2)), |_| 0).unwrap();
+        replace_checksum(Some(second));
+        assert!(lookup(first).is_none());
+        assert!(lookup(second).is_some());
+        replace_checksum(None);
+        assert!(lookup(second).is_none());
     }
 
     #[test]

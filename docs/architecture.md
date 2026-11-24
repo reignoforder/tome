@@ -26,7 +26,7 @@ loader/
     log_view.*            /tome logs: tome.log lines as chat lines
     handshake.*           multiplayer handshake: mod-set lines, comparison, lobby state, game report
     game_lock.*           which required mods a multiplayer game locks, and the notes
-    command_line.*        splits the command line like argv (for -tomesafe)
+    command_line.*        splits the command line like argv (for -tomesafe, -tomenopatch)
     hooks.*               argument layouts from mapping signatures; hook chain order and run
     x86.*                 instruction length decoder; moves a function's first instructions
     pe.*                  lays out a PE file like the loader (for the test)
@@ -44,12 +44,16 @@ loader/
     settings.*            config.schema.json subset, settings values, menu steps
     signature.*           tome.sig: Ed25519 signatures of mods (Monocypher), base64
     wasm_abi.*            Wasm mods (wasm-mods.md): checked reads/writes of a module's memory, handles
+    wasm_hooks.*          Wasm mods: which mapped functions a module may hook (from the signature), the handler's block
     wasm_layout.*         Wasm mods: the wasm32 structs Tome writes (events, units...), JASS signatures
     wasm_imports.h        Wasm mods: Tome's import list (WAMR signatures) and the modules' limits
     wasm_alloc.*          Wasm mods: the capped heap WAMR allocates from
     keys.*                key names, declared keybinds, keybinds.json, conflicts
     popup.*               popup layout (rows, paged columns), keys, TomePopup.fdf
     crash_report.*        tome/startups, the crash loop popup, crash report text
+    timers.*              mods' timers: the schedule on the real and game clocks
+    desync.*              desync checks: the checksum actions, comparing players' hashes
+    profile.*             mods' times: by frame, the last 128 frames, /tome perf lines
   src/testing/            the loader without the game, not in tome.mix: the fake game image
                           (fake_game.*; tests/host too), tome_test.dll (tome_test.cpp, for
                           mods' tests) and tome-check (tome_check.cpp); "Testing" below
@@ -59,7 +63,7 @@ loader/
     mappings.*            loads the embedded mapping files, finds the build
     game_build.*, sha256.*  build identification
     patch.*               call-site and pointer patching, verified before writing
-    patches.*             built-in patches (always-on fixes); the registry and version gating
+    patches.*             built-in patches (fixes, on unless the player turns one off); the registry and version gating
     patches/              one file per patch (memhack_guard: the JASS typecast fix;
                           path_sanitizer: file-writing native paths;
                           blp_guard: malformed BLP textures;
@@ -71,6 +75,8 @@ loader/
     mod_manager.*         discovery, state.json, lifecycle, hot reload, crashed mods, safe mode
     mod_handle.h          tome_mod, the handle mods get
     guard.*               crash isolation: an SEH frame around every call into a mod
+    timers.*              mods' timers (API 19): run from frames and game steps
+    desync.*              desync checks (API 19): checksum rounds, sending, telling the player
     crash_handler.*       crash reports for faults outside mod calls (a filter in front of the game's)
     crash_loop.*          counts starts that don't get going; safe mode after a crash loop
     api.*                 the tome_api table given to mods
@@ -206,7 +212,11 @@ logs each error with the symbol's name.
   table slot: `conv`, `sig`, and `target` = `"module!function"`, e.g.
   `"kernel32.dll!GetTickCount"`). Functions, data, calls and imports have
   an `rva` inside the image; offsets and constants have a `value`. Numbers
-  are JSON integers or `"0x…"` strings. `doc` is an optional note.
+  are JSON integers or `"0x…"` strings. `doc` is an optional note. A
+  function may have a `size` (its length in bytes from its RVA, jump tables
+  in it included; at least as long as `bytes`): the functions built-in
+  patches reserve have one, so a mod's name for a place inside one is
+  reserved too (`hooks::is_reserved`).
 - `bytes` is the function's first 5–64 bytes as lowercase hex, `??` for
   bytes the Windows loader relocates (ASLR). `tools/re/signatures.py`
   generates them: at least 16 bytes, extended until the pattern is unique in
@@ -238,6 +248,67 @@ logs each error with the symbol's name.
   signature, run `tools/re/signatures.py … --write` to fill in `bytes`, then
   document it in `reverse-engineering.md`. If Tome itself
   uses it, add a field to `BuildMappings` and a line to `bind_build`.
+
+### Mods' own mappings
+
+A mod can map functions (and any other symbol) Tome doesn't, without
+waiting for a Tome release: `tome.mod.json` `"mappings"` names a folder
+(default `mappings`, used if it exists) with one file per build,
+`<folder>/<build>.json` (`sdk/docs/tome-mod-json.md`, "Mappings").
+
+- **Format:** `mappings::parse_mod_build` (core): the same `symbols` as
+  Tome's files, checked by the same `Parser`; the build header is optional,
+  and a field that's there must equal the running build's (`mod_header`),
+  so a file under the wrong name is refused. RVAs are checked against the
+  running build's `size_of_image`. Fuzzed in `fuzz_json`.
+- **Names:** `"<mod id>/<name>"` (`split_mod_symbol`; Tome's names never
+  have a `/`). The file itself uses the bare names.
+- **Discovery** (`ModManager::read_mappings`, cached by the file's stamp):
+  an error in the file makes the mod invalid, with the error on its Details
+  page. That includes its code: `mod_mappings::verify` runs `verify_code`
+  on the file (every function's `bytes`, every call's target, every
+  import's slot) against game.dll as it was before Tome patched it (the
+  patch functions and the hook manager keep each byte they overwrite,
+  `note_original`), so what `resolve` hands out was checked, as Tome's own
+  file was at startup. DllMain's scan for the startup assets runs before
+  `mod_mappings::init`: it reads the files but checks them on the next
+  scan, and a file that wasn't checked isn't published. `"requires"` entries with a `/` are checked once every mod is read
+  (`check_mod_requires`), against the mod they name (itself or another,
+  e.g. a library), so the order mods are read in doesn't matter; again
+  until none fails, since a mod that fails takes its mappings along; and
+  once more after `declare_natives`, which can fail a mod too.
+- **Publishing:** each refresh hands the tables of the valid mods that are
+  on and allowed to `mod_mappings` (`publish_mappings`, after state.json is
+  read); the others' are withdrawn, with the reason, which a hook by one of
+  their names reports ("not mapped now: the mod lib isn't allowed yet"). A
+  locked mod (multiplayer game lock) keeps the table it runs with. A table is never freed, because
+  `resolve`'s `tome_symbol*` and the hook manager's lookups point into it;
+  only a changed file makes a new one (a table published before, as when
+  a mod was invalid for a while, is reused). `hooks::find_or_install` and
+  `api_resolve` look a name up in Tome's mapping, then here; a mod's name
+  hooked before whose file now maps another address hooks the new one (the
+  old patch keeps its handlers, and `unhook` by the name still reaches
+  them: `hooks::targets_of` lists every place a name hooked); one whose file
+  was withdrawn hooks nothing more. Hooks a mod already has don't move: a
+  changed mapping file doesn't reload the mods that use it. The fake game replaces the check (`mod_mappings::set_verifier`): it
+  writes the file's function bytes and calls' `E8 rel32` into its image
+  (where nothing was written yet, or a mod's file wrote before, never under
+  one of Tome's patches), so
+  `tome-check` and `tome_test` can hook them, then checks all but the
+  imports (its image has no import table).
+- **Checks at hook time:** the function's `bytes` against the code again,
+  as for Tome's names. Built-in patches' reservations hold by address too
+  (`hooks::is_reserved`): a mod's name for a reserved function, or for a
+  place inside one (the function's `size`), is refused.
+- **Approval:** the files are among those `code_hash` covers, and a mapping
+  file alone makes a mod one with code (`CodeKind::Assets`): a library
+  without a DLL waits for approval too, and a replaced package's changed
+  file asks again, since it moves other mods' hooks.
+- **Multiplayer:** `sync_hash` mixes in the mod's own file for this build
+  and those of the mods it names in `"depends"` or in `"requires"`
+  (`"<id>/<name>"`), so players whose library files differ are told even
+  when the library is `"sync": "client"`. A mod that hooks a library's
+  names should name the library in one of them.
 
 ## Mods
 
@@ -364,6 +435,45 @@ logs each error with the symbol's name.
 - Hot reload: a changed DLL is disabled, unloaded, reloaded and re-enabled.
   Its dependents are bounced too.
 - Crashes: see "Crash isolation and safe mode".
+
+### The mod list and versions for mods (API version 20)
+
+For mods that manage other mods (an updater, a mod browser). `list_mods`
+hands out the rows of the mod menu's list: id, name, version, folder,
+files' folder, state (`tome_mod_state`, from `ModStatus::state`), the
+reason it isn't running, whether the player wants it, package, sync,
+restart pending, `provides`. The end of each refresh copies `status_` into
+an immutable snapshot (`core/mod_list.*`, unit-tested: the `tome_mod_info`
+structs and the strings they point to, struct sizes older and newer than
+Tome's) under a lock of its own, never held while taking another, so
+`list_mods` works from any thread and from callbacks that run under the
+mod manager's lock (a mod's enable). A mod's handle keeps the snapshot it
+was last given (`tome_mod::listed_mods`): its strings stay valid until it
+asks again, while refreshes make new ones. When a snapshot differs from the
+last in what mods see, `locked()` posts `TOME_EVENT_MODS_CHANGED` to the
+main thread once the lock is released (handlers may list or toggle mods).
+The first refresh at startup runs on the bootstrap thread before the
+dispatcher exists, and its mods are enabled before its snapshot is made
+(`list_mods` gives them nothing in `tome_mod_enable`): bootstrap posts its
+event once the dispatcher is installed. `mods_dir` is `tome/mods`; a mod installs
+by moving a finished folder or `.tome` in, and the watcher does the rest,
+approval included.
+
+`check_metadata` runs what discovery and the resolver run on an installed
+mod over a release's `tome.mod.json` (`core/metadata_check.*`,
+unit-tested, in the JSON fuzz target): the parse, `compatible()` (the
+resolver's game, edition and Tome check, shared) and `unmet_requires`
+(shared with discovery) against the running build's mappings. Not
+`depends`: that needs the installed set, which the mod has from
+`list_mods`.
+
+`version_compare` and `version_match` are `core/version.*`'s own parser
+and matcher (`compare_versions`, `match_version`): the rules Tome checks
+`tome.mod.json` with, so a mod that picks a release to install agrees with
+the resolver that will run it. Both kinds: semver (`depends`, `tome`) and
+game versions (`game`, with the known names like `1.27b`). Also WebAssembly
+imports, like `check_metadata`; `list_mods` and `mods_dir` aren't
+(pointers, paths). The Rust crate wraps them in `sdk/rust/tome/src/mods.rs`.
 
 ## Packages
 
@@ -575,7 +685,12 @@ calls: a mod's own threads, the game's code, Tome's own code.
   enabled or not**, from `tome.mod.json` `"natives"`.
 - After each InitNatives, Tome binds all of them with the game's BindNative.
 - Built-ins: `TomeIsLoaded`, `TomeLogInteger`, `TomeLogString`, and the
-  frame natives below.
+  frame natives below. A map's log lines are untrusted: each map load logs
+  at most 1000 of them (then one line saying the rest aren't, and at the next
+  map load how many weren't), and a string is cut to 1000 bytes with its
+  control characters replaced by `?`, so it can't forge a line
+  (`core/log_guard.*`). `tome.log` itself stops taking info and debug lines
+  at 32 MiB and everything at 33 MiB, with a notice the first time.
 
 ### Strings and code (API version 6)
 
@@ -745,8 +860,18 @@ menu code uses the same helpers.
   its hidden frame back with `frame_get`.
 - **Disable:** revokers remove the UI callbacks and the clicks (a click on a
   disabled mod's button does nothing) and hide the frames the mod created,
-  if the game still finds them under their names. Frames aren't destroyed;
-  their screen owns them.
+  if the game still finds them under their names. Their screen owns them,
+  unless a mod destroys one (below).
+- **Destroying:** `frame_destroy` (and `BlzDestroyFrame`) calls the frame's
+  destructor (`CFrame.vtable.Destroy`, `reverse-engineering.md`, "Frames")
+  with the unlink flag, for a frame made through Tome only (`g_created`
+  in `frames.cpp`, keyed by pointer and checked against the name and context
+  it registered under, so a pointer the game reuses isn't taken for it).
+  The game unlinks it from its parent and the name table, so its name is
+  free again and every JASS id, Wasm handle and click registration for it
+  fails the existing "does the game still find it" check. Called from a click
+  callback (the game's own click code goes on using the button after the
+  observer returns), it's queued and runs right after (`main_thread::post`).
 - **JASS:** `BlzGetFrameByName`, `BlzCreateFrame`, `BlzFrameSetPoint`,
   `BlzFrameSetText`, `BlzFrameSetVisible`, `BlzLoadTOCFile`, with 1.31's
   names but integer frame ids (the FrameTable index) instead of
@@ -883,9 +1008,10 @@ before adding any handler. Everything runs on the main thread.
 
 `loader/src/patches.*` and `loader/src/patches/`. Patches are Tome's own
 fixes for game bugs and vulnerabilities, compiled into `tome.mix` and applied
-once at startup. Unlike mods they aren't discovered, listed, toggled or
-removed, so a fix like the JASS "memhack" typecast is always in force — the
-reason to make a fix a patch rather than ship it as a mod.
+once at startup. Unlike mods they aren't discovered or removed, and no mod
+can turn them off, so a fix like the JASS "memhack" typecast is in force
+unless the player turns it off — the reason to make a fix a patch rather than
+ship it as a mod.
 
 - **A patch** is a `patches::Patch`: a name, a one-line summary, its
   `variants` (below), the mapping `symbols` it needs, an optional
@@ -898,6 +1024,38 @@ reason to make a fix a patch rather than ship it as a mod.
   **hook manager** (`hooks::find_or_install` + `hooks::add`) with no mod and
   no gate, exactly like Tome's event handlers, at the highest BEFORE / lowest
   AFTER priority so it wraps mods' handlers.
+- **The player can.** Each patch has a setting in Tome > Settings,
+  `patch.<name>` (on by default; `core/tome_settings.*` `with_patches`, after
+  Tome's other settings, titled "Patch: <name>" with the patch's summary;
+  none for a patch with a setting of its own name, widescreen),
+  and `-tomenopatch=<name>[,<name>...]` (any case, repeatable, `all` for
+  every patch; `command_line::list_values`) turns patches off for one start.
+  Patches install in DllMain, before the bootstrap thread reads the
+  settings, so DllMain reads `tome/settings.json` and the option first
+  (`tome_settings::load`, no logging; the option even when Tome's folders
+  can't be found), and `patches::install` asks
+  `tome_settings::patch_off` for each patch before anything else: one turned
+  off is noted as `<name> off (turned off in Tome > Settings | turned off by
+  -tomenopatch)`, counted as "turned off", and neither installed nor
+  reserved. `patches::outcome` keeps what install did with each patch
+  (applied, skipped, off, failed, and why); the "Patches:" line is a
+  warning when one is off, and `tome_settings::init` logs any
+  `-tomenopatch` name that isn't a patch. The menu's description of each
+  switch starts with that outcome ("In force." / "Not in force now: ..."),
+  since the switch itself says what the next start does: a change applies
+  from then (patches aren't uninstalled).
+- **Multiplayer.** A patch that changes what map scripts do (`Patch::sync`:
+  memhack-guard, execute-func-guard, global-string-guard, jass-token-guard,
+  path-sanitizer) desyncs a game when players differ on it. Each one not in
+  force joins the handshake's set like a required mod,
+  `patch:<name> off #0` (`handshake::patch_not_in_force`; the `:` keeps it
+  apart from mod ids), so the host refuses to start and the in-game report
+  names the player. A host with such a patch off also waits for an answer
+  from players without Tome, as with a required mod; a client with one off
+  sends its set to a quiet host unasked (below). A player without Tome
+  next to a host with every patch in force isn't detected: nothing in the
+  lobby tells it from a Tome player with nothing to report. Either way the host
+  can start anyway by pressing Start again (below).
 - **Mods can't disable a patch.** A patch lists the functions it `reserve`s
   (and each variant those only it hooks, e.g. memhack-guard's constructor);
   `patches::install` calls `hooks::reserve(name)` for each once the patch is
@@ -1015,20 +1173,98 @@ reason to make a fix a patch rather than ship it as a mod.
   the slots; `RestoreState` enables them again. Skipped outside Wine
   (`needed`). Reserves nothing.
 - **widescreen** (`patches/widescreen.cpp`, `docs/known-bugs.md`,
-  "Stretched picture on widescreen"): the world view is built for 4:3 and
-  stretched to any other window shape. An AFTER handler on
-  `C44Matrix::Perspective` scales the projection's x term (or, narrower
-  than 4:3, its y term) by the client area's aspect against 4:3
-  (`core/widescreen.*`, unit-tested), so more of the map shows instead.
-  Only while `WorldView::SetupCamera` runs, or `CSpriteFrame::SetupCamera`
-  for the world frame (`CGameUI.world_frame`: unit picking builds its own
-  projection there) (BEFORE/AFTER handlers on both):
-  3D models in UI frames and the main menu's 3D background stay as they
-  are, matching their stretched 2D art. The window size comes from
-  `main_thread::client_size` (kept from `WM_SIZE`), not a call per frame.
-  The player can turn it off (Tome >
-  Settings > Widescreen, on by default); it's checked every frame. Only
-  the 3D view: the UI is still stretched. Reserves nothing.
+  "Stretched picture on widescreen"; addresses in `docs/reverse-engineering.md`,
+  "The 2D UI's coordinates"): 1.27b lays everything out for 4:3 and stretches
+  it to the window. Two parts.
+  - The 2D UI, where its symbols are mapped (1.27b and 1.26a; otherwise
+    skipped and reported). The six UI-to-screen conversions (`DDCToNDC`,
+    `NDCToDDC` and their `Rect` and `Width` forms, which divide or multiply x
+    by the 0.8 at `DDCWidth`) get the window's width in UI units instead
+    (`widescreen::ui_width`: 0.6 x the aspect): their `[disp32]` operands
+    (found by `widescreen::constant_operands`, one or two per function: eight
+    on 1.27b, six on 1.26a) point at a float of Tome's (1.27b), or a double
+    (1.26a's x87 code reads 0.8f widened to a double), set on each new screen and each `WM_SIZE`
+    (`main_thread::set_size_hook`), so they run as the game's code with no
+    hook; `DDCWidth` itself stays (other code reads it). UI units are square and the
+    root is the whole window: every frame and text keeps its shape, frames
+    anchored to the screen's edges go to the window's edges (1.29's layout),
+    and the mouse follows. In a game, `follow_ui` lays the rest out again on
+    every frame (from the world camera's setup): the console's bottom tiles go
+    off the screen (moved by -10; neither a width of 0 nor clearing their
+    points stopped them drawing) and Tome's pieces replace them
+    (`widescreen::console_layout`, `console_fdf`, unit-tested: SIMPLEFRAMEs
+    from `UI\FrameDef\UI\TomeWideConsole.fdf` in Tome's overlay, made with
+    `CreateSimpleFrame` as the console's children, shown and hidden with it);
+    the cinematic panel's two borders (`CinematicTopBorder`,
+    `CinematicBottomBorder`, 0.8 wide in the FDF) are held by both sides of
+    the panel instead, looked up by name each frame (`follow_cinematic_borders`);
+    whatever the game put in the middle of a 4:3 screen moves to the middle
+    (frames on the bottom corners of the console, the second console and the
+    portrait's and minimap's layers between x 0.19 and 0.61 at 4:3, the clock,
+    two strings off the resource bar, the inventory cover, which the game
+    places on the screen rather than on a frame and gets re-anchored); each
+    change is made from what the game last set, so nothing moves twice and
+    what the game builds later (the life and mana text) is caught. The
+    middle moves only once the console's four bottom tiles are found: a map
+    with its own `ConsoleUI.fdf` (no such tiles after 30 frames) keeps its
+    console and middle as it made them. Points are read only if they're
+    relative to a frame (`CLayoutFrame.relative_point_vtable`; one relative
+    to the screen holds x where the frame would be). The menus fill the
+    window as in 1.29: their frames go to the window's edges as the game
+    anchors them, and their panels, the glue manager's sprite layers (models
+    made for 4:3), are drawn in proportion on their side: BEFORE
+    `C44Matrix::Ortho`, the top-left layer's flat camera is left as it is
+    (the model at the window's left), the top-right one's moves so the model
+    ends at the window's right (`CGlueMgr.sprite_top_left`,
+    `sprite_top_right`), and another full-screen model on a menu (Battle.net's
+    center panel) goes to the middle. The loading and score screens (one
+    piece of art each, with frames placed on it) are laid out at 4:3 in the
+    middle: the screen's frame (`CGlueMgr.screen`) and its full-screen models
+    drawn flat are held by their corners in a box 0.8 wide (a model boxed
+    itself gets its camera moved by the box's margin: it's placed from the
+    root's left edge, its camera from its frame's). Behind the art, the
+    window's sides show the same art stretched and darkened: BEFORE
+    `CSpriteFrame::Render` and `CModelFrame::Render`, the first model in a
+    frame whose rect is the box (`CLayoutFrame.vtable.GetRect`) is rendered
+    into each side (`GxXformSetViewport`, put back from `CGxDevice.viewport`)
+    with a camera that stretches it over the window, 24 times, shifted
+    across a disc and at alphas that average the copies at 40% brightness
+    (`CFrame.alpha`, `CFrame.vtable.ApplyAlpha`): a blur. Then it's set up
+    again for the game's own render in the box. The root stays the
+    window: the mouse, the cursor, and the game's UI (made under the loading
+    screen). Frames are changed only
+    while the game uses them (a model while its camera is set up, the
+    screen's frame while it's current), since a screen's models may be freed
+    before the next screen is made. The box is latched with the setting in
+    BEFORE `CGlueMgr::SetScreen`. Until boxed (their first frame), full-screen models (a sprite frame whose
+    corners are its parent's, up to the root; `fills_parent`) get the game's
+    0.8 across their flat camera (BEFORE `C44Matrix::Ortho`), so they're
+    stretched as the game draws them and the frames on them line up. The
+    cursor's frame (`CCursorFrame.vtable`) fills the screen too but is left
+    alone: its model is drawn at the pointer. Roots
+    take the screen's width again before and after `CGlueMgr::SetScreen` and,
+    in a game, after the setting changes (`CLayoutFrame.vtable.UpdateScreenRect`).
+  - The 3D view. With the 2D part the world frame is the window's shape and
+    its camera follows, but the game's `Perspective` would spread the fov
+    over the wider diagonal (the world frame is 0.45 units high at any
+    width) and zoom the picture in, so the same AFTER handler on
+    `C44Matrix::Perspective` sets the projection's x and y terms from the
+    vertical angle the viewport has at 4:3 (`widescreen::wide_projection`):
+    the view grows at the sides only, and the minimap's camera box (the
+    frustum on the ground, from the same world frame camera) follows.
+    Otherwise (not mapped, or narrower than 4:3) the handler scales the x term
+    (or, narrower than 4:3, the y term) by the client area's aspect against 4:3
+    (`core/widescreen.*`). Either way only while `WorldView::SetupCamera`
+    runs or `CSpriteFrame::SetupCamera` for the world frame (unit picking),
+    so picking and drawing agree.
+
+  The window size comes from `main_thread::client_size` (kept from
+  `WM_SIZE`). The player can turn it off (Tome > Settings > Widescreen, on by
+  default). The 2D part latches the setting at each `CGlueMgr::SetScreen`
+  and follows from the next screen (the next menu screen, or the next game):
+  text is laid out as it's made and keeps that layout, so changing the width
+  under it scrambled the top bar. The 3D-only fallback follows every frame.
+  At 4:3 nothing changes. Reserves nothing.
 - **gl-context-restore** (`patches/gl_context_restore.cpp`,
   `docs/known-bugs.md`, "Under Wine"): with the OpenGL renderer in
   fullscreen under Wine, coming back from Alt+Tab leaves most textures
@@ -1090,11 +1326,15 @@ reason to make a fix a patch rather than ship it as a mod.
   reads each path through `RCString::GetText` (bound by the patch itself),
   and either calls the real native or, for a name that
   `path_guard::is_unsafe` rejects (absolute, drive or NTFS stream `:`,
-  UNC/rooted, any `..` component, a reserved DOS device name, a name over
-  `kMaxPathLen` (259, `MAX_PATH` less its NUL: the game would truncate a
-  longer one, and one of ~4000 characters crashes `PreloadGenEnd`); empty,
-  for the writes), skips the call and returns 0 (nothing / false / 0 / a null
-  handle). `Preload` is never refused (maps use its argument as data, which
+  UNC/rooted, any `..` component or one of only dots and spaces with two
+  dots or more, which Windows' trimming could make `..`, a reserved DOS
+  device name, a name over `kMaxPathLen` (259, `MAX_PATH` less its NUL: the
+  game would truncate a longer one, and one of ~4000 characters crashes
+  `PreloadGenEnd`); for the writes also an empty name and one a program or
+  script would have, `path_guard::is_executable_name`: `.exe`, `.dll`,
+  `.bat`, `.vbs`, `.lnk`, Miles' `.mix`/`.asi`, ..., after the trailing dots
+  and spaces Windows drops), skips the call and returns 0 (nothing / false /
+  0 / a null handle). `Preload` is never refused (maps use its argument as data, which
   `PreloadGenEnd` writes out); an argument that isn't a safe path instead
   makes it refuse the natives that open the preload list's files
   (`PreloadStart`, `PreloadEnd`, `PreloadEndEx`, `PreloadRefresh`) until
@@ -1109,6 +1349,79 @@ reason to make a fix a patch rather than ship it as a mod.
   `INT32_MIN` or REPLACE handler still runs later). It reserves nothing — the threat is
   malicious maps, not mods, and a mod is native code that bypasses any API
   boundary anyway, so reserving `BindNative` would only cost mods a useful hook.
+- **execute-func-guard** (`patches/execute_func_guard.cpp`,
+  `docs/known-bugs.md`): `ExecuteFunc` runs a function with no arguments, so
+  naming one that takes parameters (the map's own or Blizzard.j's) crashes
+  the game in the JASS VM. The same `BindNative` substitution as the path
+  sanitizer binds a wrapper for `ExecuteFunc`. At each map's loading screen
+  it takes the scripts the map script guard reads there (`war3map.j` or
+  `scripts\war3map.j`, `Scripts\common.j`, `Scripts\Blizzard.j` through Storm;
+  `events::set_map_script_hook`), so a big map's scripts are parsed under the
+  loading screen rather than mid-game, and collects the functions that take
+  parameters (`jass::functions_taking_parameters`, unit-tested and fuzzed).
+  Without the events (not mapped) it reads them itself on its first call in
+  each map (`natives::map_load_count`). A call naming one is refused (nothing runs, as for
+  a missing name, which the game already ignores) and logged, the first 20
+  and then every 1000th. If the map's script can't be read, calls go through
+  unchecked. Reserves nothing.
+- **global-string-guard** (`patches/global_string_guard.cpp`,
+  `docs/known-bugs.md`): a native returning a string (`I2S`,
+  `GetLocalizedString`, ...) in a global's initial value crashes the map
+  load: `CreateJassString` adds the string to the VM's table, and while the
+  globals block runs `JassVM::Get(CGameWar3.vm_index)` is still null.
+  `CreateJassString`'s call to `CGameWar3::CreateString`
+  (`CreateJassString.call.create_string`, `patch_call`: no hook on a path
+  every string native takes) goes to a check that makes the same lookup
+  (`JassVM::Get`, `JassVM.strings`) and, with no game, VM or string table,
+  returns 0, the null string; otherwise it calls `CreateString`. The call's
+  byte is `??` in `CreateJassString`'s mapped bytes, so mods can still hook
+  it (their handlers run before the check). Reserves nothing.
+- **lan-map-guard** (`patches/lan_map_guard.cpp`, `docs/known-bugs.md`,
+  "Map downloads from a host"): the map path a game's host sends goes
+  through the map transfer's own check, `MapTransfer::IsValidName`, before
+  the client looks it up under the game folder and, failing that, downloads
+  it. The game refuses absolute paths, `:` and wildcards, extensions other
+  than `.w3m`/`.w3x` and device names compared up to the last dot, but not
+  `..` components or `com1.x.w3x`. An AFTER handler (last priority) also
+  refuses what `path_guard::is_unsafe` refuses, so no transfer is made and
+  the client can't join with that map. Logged like the path sanitizer's
+  refusals (the first 20, then every 1000th). Reserves the function.
+  `tests/game` calls the real check through the guard.
+- **jass-token-guard** (`patches/jass_token_guard.cpp`, `docs/known-bugs.md`,
+  "Long string literal"): the JASS scanner keeps a token in two heap buffers
+  of `JassScanner.capacity` + 1 bytes (2100 + 1), and its length check never
+  fires (its exit also wants a flag `nextToken` clears when it starts), so a
+  string, comment or name over 2100 characters in `war3map.j` writes past
+  them. The check's `jne` (`JassScanner::nextToken.overflow_check`) becomes
+  a `jmp` to the same exit, the scanner's own error return (-2), which stops
+  the parse; the target is read from the instruction and its bytes checked
+  first. That error path crashed by itself: the parser's constructor leaves
+  `JassParser.root` unset and the caller destroys it after a failed parse, so
+  a BEFORE handler on `JassParser::parse` zeroes it. The map's script then
+  doesn't compile and the game goes back to the menu, as for any script
+  that doesn't compile. An AFTER handler on `nextToken` logs the -2. Reserves
+  both functions (memhack-guard also reserves `nextToken`). `tests/game` runs
+  the real scanner on a 3000-character string with its buffers swapped for
+  larger ones: past capacity + 1 without the patch, nothing with it.
+- **command-card-guard** (`patches/command_card_guard.cpp`,
+  `core/command_card.*`, `docs/known-bugs.md`, "Command card button
+  positions"): 1.28's fix. `CCommandCard::PlaceButton` indexes the 4x3 grid
+  with a button's `CCommandButtonData.x`/`.y` unchecked; a BEFORE handler
+  skips it (the button isn't shown) for a position outside the grid. On
+  1.26a, whose setters store any value, that is every bad position (a crash
+  before; logged, the first 20 and then every 1000th); on 1.27b, whose
+  setters drop a coordinate outside the grid, it's the two positions maps
+  hide buttons with, (0, -11) and (INT_MIN, INT_MIN), which the patch makes
+  the setters keep: their store sequences
+  (`CCommandCard::AddButton.pos_check`,
+  `CGameUI::SetCommandButtonPos.pos_check_button` and `.pos_check_data`) are
+  rewritten into a `call [ptr]` (`ff 15`, reaching `tome.mix` at any distance)
+  to a C function that stores what `command_card::stored` says, with NOPs
+  after it. All three sites are compared with the expected bytes before any
+  is written; on a mismatch none is (the report says so) and PlaceButton's
+  check still applies. Reserves `PlaceButton`. Checked in game on both builds
+  with `CustomKeys.txt` (Option.customkeys) moving Attack to (0, -11) and Move
+  to (INT_MIN, INT_MIN): both hidden.
 
 ## Multiplayer handshake
 
@@ -1137,11 +1450,22 @@ report on both sides and in a replay; in `make e2e` since 2026-11-02
     told before). A host without required mods sends nothing, so players
     without Tome see nothing;
   - a client answers each player who sent it a set (`[Tome] My mods 1/1:
-    ...`), and again when its own set changes. It can't tell which player
-    hosts (the game doesn't say where Tome can read it), so it notes when
-    more than one player sent a set; a player pretending to host can add a
-    note but can't divert the replies the real host checks. A client with
-    required mods that gets no set within 5 s is told the host may not run Tome;
+    ...`), and again when its own set changes. It knows the host: the
+    player whose number is 1 (`NetGetPlayerNumber` on every id: the game's
+    router gives a game's creator number 1; `reverse-engineering.md`, "The
+    network client"), and counts only the host's set: another player who
+    sends one is named in a note and ignored. Senders come from the host's
+    router, so a client can't pass for the host (the LAN test sends a line
+    claiming the host's id, `TOME_DEBUG_LOBBY_AS`, and checks the host sees
+    the real one). Such a player still gets a reply, so a host Tome got
+    wrong somewhere could still check its players and start. A host that
+    isn't number 1 logs a warning. On a build without the mapping, the
+    client notes when more than one player sent a set instead. A client with
+    required mods (or a sync patch off) that gets no set within 5 s is told
+    the host (by name) may not run Tome, and, with the host known, sends it
+    its set unasked: a host without required mods and with every patch in
+    force sends nothing, yet must see a client that differs. It then
+    answers with its own set ("none"), and counts the difference at Start;
   - `CGameChatroom::OnChatReceived` (before) hides lines that decode as
     Tome's and passes them on; anything else, "[Tome] ..." typed by a person
     included, shows as usual. Notes go into the lobby's chat area
@@ -1150,7 +1474,11 @@ report on both sides and in a replay; in `make e2e` since 2026-11-02
     player's set differs or hasn't arrived (with required mods of its own),
     listing each player and what differs (missing, extra, different version
     or hash). If the lobby couldn't be read at all, a host with required
-    mods refuses too.
+    mods refuses too. The host can override either: a second press of
+    Start within 10 s, with the same problems, starts anyway, with a
+    warning in the log and the lobby (`handshake::StartOverride`). When
+    only built-in patches differ (`is_patch`), the lines say so: they only
+    desync maps that use what the patches close.
 - **Games:** on the first game tick (not in replays, `NetIsReplay`), each
   player with required mods sends one SyncStoredInteger action per mod
   (game cache `TomeMods`, mission `1`, key `id version #hash`, value the
@@ -1163,6 +1491,10 @@ report on both sides and in a replay; in `make e2e` since 2026-11-02
   who sent nothing counts as having none. Differences are shown with
   `display_text` and logged; in a replay, the recorded players are compared
   with the viewer's mods.
+- **The game's host** (`handshake::host_slot`, `host_player` for mods): in
+  a game, the player slot of player number 1, found on first use (net client
+  0, or 1 in a replay) and logged (`Handshake: the host is player 0 (...)`);
+  -1 outside a game or without `NetGetPlayerNumber`.
 - **Limits on what other players send:** a set of more than `kMaxMods`
   (256) mods is dropped, whether it comes as lobby lines (`Assembler`) or as
   game actions (`GameRecord::add`), so a modified client can't make the
@@ -1232,6 +1564,198 @@ client's with `nsenter -n`. What it took:
   `text:`). The game list's rows have no names: the client clicks the
   first at its position.
 
+
+## Messages between players
+
+API version 18 (`net_send`, `on_net_message`; `loader/src/net_messages.cpp`,
+the wire format in `core/netmsg.*`, unit-tested and fuzzed). A mod's message
+reaches the same mod on every player's computer, the sender's included.
+
+- **The channel:** the game's SyncStoredInteger actions, as the handshake's
+  sets in games (`handshake::send_sync_action`). They reach every player at
+  the same point of the game, in order, and the replay records them, so mods
+  can act on a message alike everywhere (a required mod may change the game
+  in response without a desync). Each action is one part: game cache
+  `TomeNet`, mission `1 <message id> <mod id>`, key up to 189 bytes of the
+  message in base64 (the text fields hold no NUL; 252 characters fit the
+  key's 0x100 bytes), value `part | count << 8`. A message is up to 1024
+  bytes (`TOME_NET_MAX_MESSAGE`), so at most 6 actions.
+- **Receiving:** the handshake's `OnNetSyncStoredInteger` hook hands
+  `TomeNet` actions to `net_messages::receive` and skips the game's own
+  handling (it would store each part in a game cache nothing reads). The
+  sender is the action's player slot, which the host's game stamps
+  (`reverse-engineering.md`, "Senders can't be faked"). The reassembler
+  keeps one message in progress per sender (a player's parts come in a
+  row), drops anything malformed or out of order (logged, 10 per player
+  per game), and never holds more than 1024 bytes per sender. A whole
+  message goes to every `on_net_message` listener of the mod with that id,
+  each under `guard::run` (a crash disables that mod); in a multiplayer
+  game only if that mod is required (no other mod can send there, so such
+  a message is forged: dropped, logged once). Listeners go with
+  the mod's other registrations when it's disabled.
+- **Sending:** only in a game from its first step on (the first
+  `GAME_TICK`; `handshake::game_stepped`), not in a replay (the game sends
+  nothing there), and in a multiplayer game only from a `"sync": "required"` mod:
+  the handshake makes sure every player has those, so every player gets the
+  messages, and no player without Tome fills a game cache with them. At
+  most 16 messages a second per mod (`TOME_ERR_UNAVAILABLE` past that,
+  logged once). Message ids count up per mod. Not at `GAME_START`: the
+  players may not all be in place yet, so the game lock (and with it the
+  required-mods rule) is only final once the first step checks it again,
+  and the handshake sends its own sets then too.
+- **Tests:** `tests/test_netmsg.cpp`, `fuzz/fuzz_netmsg.cpp` (reassembled
+  messages are valid and re-encode to themselves), host tests for the
+  arguments, and the two-instance LAN game (`tools/e2e-multiplayer.sh`):
+  sync-test's `/synctest` sends a line and 1000 bytes from the client and a
+  line from the host, and both sides check each arrives whole from the right
+  player. Not checked: playback in a replay (the test's replay runs without
+  sync-test). For the lobby, before a game, see "Lobby messages".
+
+## Lobby messages
+
+API version 21 (`lobby_send`, `on_lobby_message`, `lobby_players`,
+`lobby_show`, `on_lobby_start`, `lobby_start`; `loader/src/lobby_messages.cpp`, the wire
+format in `core/lobbymsg.*`, unit-tested and fuzzed). For required mods that
+must agree on something with every player before the game starts (the
+Geomancer mod: the seed of the map every player generates).
+
+- **The channel:** lobby chat lines, as the handshake's
+  (`handshake::lobby_send_line`: `NetSendLobbyEvent` to one player), each
+  `[Tome] Msg 1 <message id> <mod id> <part>/<count>: <base64>`, up to 96
+  bytes of the message per line (the longest header and 128 base64
+  characters stay under the 250 a line may have), so a 1 KiB message is up
+  to 11 lines. `before_chat_received` hands every line the handshake doesn't
+  decode to `lobby_messages::receive`, which hides all `[Tome] Msg ` lines,
+  well formed or not (a person can't type one into the chat), reassembles
+  them per sender (`lobbymsg::Reassembler`, as `netmsg`'s) and gives whole
+  ones to the mod they name, if it's required. The sender is the event's
+  sender byte, stamped by the host's router; `from_host` compares it with
+  the host the handshake knows (`Lobby::host_id`).
+- **Who gets them:** only players whose Tome hides them: on the host, those
+  whose handshake reply arrived (`Lobby::runs_tome`); on a client, the host
+  once its set arrived. Players without Tome would see the lines, so they
+  get none; a joined player talks to the host only (it doesn't know who
+  else runs Tome). Not in replays (lobby lines aren't recorded); nothing
+  is sent in games (`net_send` is for that).
+- **The start:** `before_start_game` runs the handshake's checks first;
+  once they let the game start (or the host overrides them), every
+  required mod's `on_lobby_start` callback runs (`start_allowed`), and any
+  refusal skips Start, its reason in the chat. `StartOverride` doesn't
+  apply to mods: a mod refuses because something isn't ready (a player
+  without the map), which a second press doesn't change. `lobby_start`
+  calls `CGameChatroom::StartGame` through its hooks, so the same checks
+  run; it's refused inside an `on_lobby_start` callback (it would recurse).
+- **Limits:** 16 messages a second per mod (each to each recipient), the
+  log budget per sender for malformed lines (`LogBudget(10)`), one message
+  in progress per sender, dropped when the lobby closes.
+- **Trust:** `from_host` and who a client may send to come from the host
+  the game names (NetGetPlayerNumber); without that mapping a client knows
+  no host for mods (`Lobby::host_id` -1), so it sends nothing. A mod's
+  `lobby_start` never overrides or arms the handshake's override (the
+  host's second press), and an `on_lobby_start` callback that fails refuses.
+  `lobby_players` reads the list the half-second poll keeps; a player who
+  leaves drops their message in progress.
+- **Tests:** `tests/test_lobbymsg.cpp`, `fuzz/fuzz_lobbymsg.cpp`,
+  `handshake_lobby_tome_peers` (who runs Tome), host tests for the
+  arguments outside a lobby, and the two-instance LAN game
+  (`tools/e2e-multiplayer.sh`: sync-test's hello and welcome, its note,
+  its hold on the start and its own press).
+## Timers
+
+API version 19 (`timer_start`, `timer_stop`; `loader/src/timers.cpp`, the
+schedule in `core/timers.*`, unit-tested). Two clocks, each the sum of what
+the game reports: real time from the frames' deltas (`PresentFrame`), game
+time from the steps of a game (`OnNetGameTick`, the step's float as
+`GAME_TICK` sees it). Both count whole microseconds (`core/game_clock.*`,
+unit-tested): the step's float and the mods' delays become integers by
+reading their bits, with no floating point. In 32-bit code a float sum goes
+through the x87 FPU, whose rounding follows the thread's precision setting
+(Direct3D sets single precision, `-opengl` leaves double), so two players'
+sums could drift apart and a due time land in different steps; integers
+can't. `events.cpp` keeps the game's count (`GAME_TICK`'s `game_time` is it
+in seconds) and hands it to the timers and the desync rounds. Real-time timers fire from the frame after the
+`TICK` handlers; game-time ones in the step after the `GAME_TICK`
+handlers. Since game time only moves in steps every player's computer takes
+alike, a game timer started from a synced point fires in the same step
+everywhere. A timer fires at most once per frame or step; one that fell
+behind goes on from now, so nothing bursts. A game's timers end with it
+(`GAME_END`), real ones go on. Registration is any thread for real time
+(a mod's first enable is on the bootstrap thread), the main thread for game
+time. A mod still in its `tome_mod_load` or `tome_mod_enable` on another
+thread (the guard would skip the call) keeps its due timers due until it's
+done, so one that fires once isn't lost. One revoker per mod however many
+timers it starts (a mod starting a timer every frame mustn't grow its
+revoker list). The fake game's
+`tome_test_event(TICK)`/`(GAME_TICK)` move the clocks by `delta`
+(`events::dispatch_for_test`), so mods' own tests drive timers too.
+Wasm modules keep a record per timer and free it when the callback block
+says the timer is done (`wasm-mods.md`); `timers_api::set_ended_hook`
+tells `wasm_mods.cpp` of game timers that ended without firing.
+
+## Desync checks
+
+API version 19 (`on_checksum`; `loader/src/desync.cpp`, the wire format and
+the comparison in `core/desync.*`, unit-tested and fuzzed). A lockstep game
+desyncs when one computer computes something the others don't; the game
+then drops players without saying why. A required mod's checksum callback
+returns a hash of its game state; Tome compares it between the players.
+
+- **Rounds:** every 3 s of game time (`desync::kInterval`, in the integer
+  microseconds of `core/game_clock.h`, as the timers count), in the game step
+  that passes a multiple of it (`round_ending`), after the step's
+  `GAME_TICK` handlers and game timers: the same step on every computer.
+  Only in a multiplayer game or its replay (the game lock's rule), from the
+  first step on, and only for running `"sync": "required"` mods (the
+  handshake makes sure every player has them), called by mod id, each under
+  `guard::run`.
+- **The channel:** each hash is one SyncStoredInteger action, like the
+  messages between players: game cache `TomeSum`, mission
+  `1 <round> <mod id>`, key the hash in 16 lowercase hex digits, value 0.
+  The handshake's `OnNetSyncStoredInteger` hook hands them to
+  `desync_api::receive` and skips the game's own handling.
+- **Comparing:** `desync::Checker` keeps this computer's hashes for the
+  last 8 rounds; another player's is compared at once, or waits for this
+  computer's round (at most 8 rounds ahead, 2048 in all: the input is
+  other players'). Rounds this computer passed without a hash for that mod
+  (it doesn't run it) compare nothing. Live, its own actions coming back
+  are skipped; in a replay every recorded player's are compared with the
+  replay's.
+- **Telling:** the first match per mod and player is logged ("matches",
+  so the log shows the checks run); the first difference is logged with
+  both hashes and shown to the player (the mod, the other player's name and
+  the game time); later differences only at debug level. Malformed actions
+  are logged 10 per player per game.
+- **Tests:** `tests/test_desync.cpp`, `fuzz/fuzz_desync.cpp` (what parses
+  re-encodes to itself; what waits stays bounded), host tests for the
+  registration, and the two-instance LAN game: sync-test hashes the
+  messages it got, the same on both computers until the client's
+  `/synctest skew`; both sides check the match first, then the difference.
+
+## Profiling mods
+
+`guard::call` (every call into a mod: lifecycle, natives, hooks, events,
+commands, UI, timers, checksums) reads `QueryPerformanceCounter` around the
+call and gives the mod its own time: the call's, less the guarded calls
+inside it (a thread-local counter), which count for whoever they belong to
+(a mod's publish runs the subscribers' callbacks; a hook handler calls
+the next handler). The game's own function, when a mod's REPLACE handler
+hands on to it (`call_next`, also through Tome's own handlers after it),
+runs under `guard::uncharged`, which adds its time to that counter too
+(`Dispatch::original_handed_on`, `core/hooks.cpp`): the game's work isn't
+the mod's. A game function a mod calls itself, hooked or not, still is.
+Lifecycle calls (`tome_mod_load`, enable, disable, unload; `guard::kLifecycle`)
+count in the calls and total time and in "starting and stopping" on the
+Details page, not in the frames or the slowest call: a slow load isn't a
+slow frame, and would hide the per-frame calls. `tome_mod::profile` (`core/profile.*`, unit-tested) adds
+the times up by frame (`events::frames()`, via
+`guard::set_frame_counter`) in a ring of the last 128 frames, and keeps
+the calls, total time and slowest call (what it was: "event handler
+(tick)") since the DLL was loaded. A mod averaging over 4 ms a frame over a
+full window is named in `tome.log` once. `ModStatus::profile` carries the
+numbers to the Details page ("Time: ...", yellow when slow) and to
+`/tome perf` (the busiest 8 running mods). The cost is two counter reads
+and a lock per call.
+
 ## Hooks
 
 `loader/src/hooks.cpp` (patching, Windows) and `loader/src/core/hooks.cpp`,
@@ -1239,7 +1763,8 @@ client's with `nsenter -n`. What it took:
 API version 4 (`hook`, `unhook`, `hook_call_next` in `tome.h`).
 
 - **Targets are mapped names.** `hook(mod, "CTextFrame::SetText", phase,
-  priority, fn, user)` looks the name up in the mapping database; it must be
+  priority, fn, user)` looks the name up in the mapping database, then in
+  mods' own files (`"<mod id>/<name>"`, "Mods' own mappings" above); it must be
   a `function`, or since API version 9 an `import`. Its `conv` and `sig` give the argument layout
   (`hooks::layout_for`): thiscall puts `this` in ecx, fastcall the first two
   32-bit non-float arguments in ecx/edx, everything else is on the stack.
@@ -1275,6 +1800,18 @@ API version 4 (`hook`, `unhook`, `hook_call_next` in `tome.h`).
   3. a 10-byte stub (`push <Target*>; jmp tome_hook_entry`) is written;
   4. the first 5 bytes become `jmp stub`, written as one 8-byte interlocked
      store when they fit in an aligned qword (usual for function starts).
+- **One function, several names** (Tome's and a mod's, or two mods'): the
+  target is kept by address as well as by name. A second name for a hooked
+  address shares its patch and chain (`add_alias`) if `hooks::same_layout`
+  says both pass the arguments the same way (registers, stack slots,
+  cleanup, kind of result; a float argument may be an int), and its `bytes`
+  match the code, the first 5 compared with what the jmp replaced
+  (`Target::original`). Otherwise it fails and logs both mappings. Each
+  handler keeps the name it hooked by (`Handler::name`), which is what its
+  `tome_hook_call.name` says, and `unhook` by one name leaves the handlers
+  hooked by another. A patch whose moved bytes would overlap another
+  target's, or that starts inside them, is refused (`overlapping`): it
+  would copy the other's jmp, or be bypassed through its trampoline.
 - **Imports** (API version 9, `hooks::install_import`): the same stub, but
   nothing is moved: the "trampoline" is what the import slot held (the
   imported function, or another tool's replacement), and the slot gets the
@@ -1343,11 +1880,92 @@ API version 4 (`hook`, `unhook`, `hook_call_next` in `tome.h`).
   and checks arguments, results and stack balance; others return float and
   double, take 64-bit and variadic arguments, start with short jumps or
   loops, or return within 4 bytes; a thread blocked inside a handler keeps
-  `idle` false until it returns. The e2e fixtures hook-a
+  `idle` false until it returns; two names share a patch, and overlapping
+  patches are refused. Host tests hook a mod's own function on the fake
+  game and an alias of `RCString::GetText`, and check that an alias of a
+  reserved function is refused. The e2e fixtures hook-a
   and hook-b both hook `RCString::GetText`; hook-b calls it on a fake string
   each time it's enabled, and the test checks the order of both mods'
   handlers, hook-a's changed argument reaching the original through
   hook-b's REPLACE, and the chain after disabling and re-enabling hook-a.
+
+### Under Shade
+
+Shade (`../shade`) recompiles the game to C and runs `tome.mix` recompiled
+too, so writing a `jmp` or a call's target into the game's code changes
+nothing there. `loader/src/shade.cpp` finds Shade's natives
+(`GetModuleHandle("shade.dll")`, which exists only under Shade) and the hook
+manager and patch functions use them instead of patching code:
+
+- `hooks::install`: `ShadeOriginal(address)` gives the trampoline (no
+  instructions are moved; the same address before, during and after the
+  hook) and `ShadeMakeStub` the stub, both stored in the `Target` before
+  `ShadeHookPushJump(address, tome_hook_entry, Target*)` makes the function
+  run that stub. Shade's hook is on before that native returns, so a call
+  on another thread can reach the dispatcher at once: it finds the `Target`
+  complete. `ShadeOriginal` is in Shade's natives from version 2; a Shade
+  without it can't hook functions (each hook fails, saying so). The `jmp`
+  is still written, so memory reads as on Windows (and may not cover
+  another hook's start). If writing it fails after Shade hooked the
+  function, `ShadeUnhook` takes the hook off (a warning if it can't) and
+  the `Target` is kept (unregistered) for calls already on their way.
+- `hooks::install_import`: the slot gets a stub from `ShadeMakeStub` (code
+  made at run time can't run under Shade); the slot write itself works.
+- `patch_call`: `ShadeHookCall(site, target)` before the write (Shade reads
+  the call's target from memory), once the page is writable: Shade can't
+  take a redirect back, so none stays behind a failed patch.
+- JASS natives: instead of a thunk written at run time, each slot gets
+  `ShadeMakeStub(tome_native_entry, Slot*)`; `tome_native_entry` (asm in
+  `natives.cpp`) asks `tome_native_route` and either jumps to Tome's own
+  native with the engine's stack frame or returns a mod's guarded result.
+- `patch_bytes` fails ("code patches don't apply under Shade"), so the
+  patches built on it (blp-guard, movie-display-reset, jass-token-guard,
+  command-card-guard's setter rewrites) report that they're off until
+  they're ported to hooks (jass-token-guard fails as a whole and takes its
+  handlers off again; command-card-guard's PlaceButton check, a hook, still
+  applies). `patch_pointer` works on data (vtables)
+  but refuses an address in a module's executable section: a pointer there
+  is an instruction's operand, compiled in, so widescreen's UI part (which
+  repoints operands of the coordinate conversions) reports that it's off
+  ("the UI stays stretched"); its 3D part, hooks only, works.
+- Mods' DLLs load from version 4 of Shade's natives (`shade::can_load_dlls`):
+  Shade runs only recompiled code, so a DLL's code is built apart from the
+  game's (`shade-recomp build-mod`, Shade's design.md "Mods' DLLs") and
+  found by the DLL's SHA-256 when `LoadLibrary` gets the shadow copy. A DLL
+  without it fails to load like a missing file (126); Tome's error then says
+  it must be built, and Shade's log says how. One whose built code Shade
+  can't use fails with 1114, and the error says why it may be
+  (`shade::load_error_hint`).
+- What runs is that library, not the DLL, and it sits outside the mod
+  folder (`$SHADE_MOD_LIBS`, `<data>/mods`), so approval covers it too:
+  `ShadeModCodeHash` gives its SHA-256 (`shade::mod_code_hash`), and the
+  mod's code hash becomes the SHA-256 of
+  `mod_state::built_code_manifest(<files' hash>, <library's hash>)`. Another
+  library for the same DLL is asked about again ("changed"); one that isn't
+  built yet leaves the files' hash, so building it asks again too. A
+  signature covers the mod's files only, so under Shade it allows no
+  update (the mod counts as unsigned). As on Windows, a mod allowed in its
+  own folder (not a package) runs whatever its files are; that includes the
+  library. Shade hashes the library when asked and opens it at the load
+  after, so a library swapped in between runs unasked: whoever can write
+  there can also write the mods folder. Version 3 loaded DLLs without
+  `ShadeModCodeHash`: Tome treats it as a Shade that doesn't. A Shade before
+  version 4 runs no DLLs: such a mod (without a Wasm module) gets an error
+  saying so and never asks for approval. Wasm mods run in either (WAMR's
+  interpreter).
+
+On Windows and Wine nothing changes: `shade::active()` is false.
+
+Tests: `tests/shade/fake_shade.cpp` is a fake `shade.dll` (Shade's natives
+on Windows; each can fail on request, and a hook can catch a call on another
+thread while it goes on). `tome_hook_runtime_shade_tests` loads it and runs
+the whole hook runtime suite plus `tests/test_shade.cpp`; the host test
+`host_shade_natives` calls natives through the Shade stubs,
+`host_shade_refuses_mod_dlls` checks a DLL mod is refused by a version 3
+Shade, `host_shade_loads_mod_dlls` that one runs under version 4 (the
+fake's `FakeShadeSetVersion`), and `host_shade_*built_code*` and
+`host_shade_signature_does_not_allow_built_code` that the built code's hash
+(`FakeShadeSetModCode`) is part of the approval.
 
 ## Mod menu
 
@@ -1422,6 +2040,17 @@ API version 4 (`hook`, `unhook`, `hook_call_next` in `tome.h`).
 
 ## Settings
 
+- **Tome's own** (`core/tome_settings.cpp`, Tome > Settings): Widescreen,
+  Check for Updates, Install Updates Automatically, a switch per built-in
+  patch (Patches, above), and Stop on Memory Corruption (`harden_heap`, off by default): read once at startup, it calls
+  `HeapSetInformation(HeapEnableTerminationOnCorruption)` (`bootstrap.cpp`,
+  `harden_heap`), which `war3.exe` (linked for Windows XP) doesn't get by
+  default. Windows can't undo it in a running process, so a change applies
+  from the next start. The process then ends through Windows' critical
+  failure path (`0xC0000374`), which may skip exception filters, so there may
+  be no Tome crash report, only Windows' own (event log, Error Reporting).
+  Not checked on Windows yet; Wine accepts the call but its heap ignores it
+  (the e2e test runs every launch with it on).
 - `"config"` in `tome.mod.json` names a schema (`core/settings.h`: boolean,
   integer, number with minimum/maximum/step, string with an `enum` or
   `maxLength`; title, description, default). It's read with the metadata;
@@ -1541,7 +2170,7 @@ API version 10: `popup`, `popup_close`, `restart_game`.
   clicks don't reach the menu or the game behind it; the backdrop, title
   and text are its children, anchored at runtime with two points each
   (no SetHeight needed). Buttons are separate `TomePopupButton` frames,
-  one per slot. Frames can't be destroyed, so each screen gets one set,
+  one per slot. Popups' frames aren't destroyed (they're Tome's own), so each screen gets one set,
   with its own range of create contexts (popup = base, slot i = base + 1
   + i), reused by every later popup there; unused slots are hidden.
 - **Layout** (`popup::layout`, unit-tested): up to three options whose
@@ -1923,7 +2552,9 @@ Tome's only connection of its own, and only once the player allows it.
     starts in `tome/startups`): nothing loads, statuses say safe mode, the
     mod menu enables a mod anyway, state.json is unchanged, the main menu
     sets the count back, and no popup offers safe mode (`tome/safe` is
-    there); every other launch starts with no count. The first launch checks
+    there); every other launch starts with no count. The same launch turns
+    a patch off in `tome/settings.json` and one with `-TomeNoPatch=` (with
+    an unknown name, logged): neither is applied. The first launch checks
     that the crash filter went in front of the game's;
   - the asset overlay: a texture override seen through Storm, a TOC and FDF
     from a mod's assets loaded by the map, a `Blizzard.j` override run by

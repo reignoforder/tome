@@ -127,9 +127,13 @@ add_library(tome_core STATIC
     src/core/context_restore.cpp
     src/core/crash_report.cpp
     src/core/debug_script.cpp
+    src/core/desync.cpp
     src/core/frames.cpp
+    src/core/game_clock.cpp
     src/core/game_lock.cpp
     src/core/handshake.cpp
+    src/core/netmsg.cpp
+    src/core/lobbymsg.cpp
     src/core/edition.cpp
     src/core/hash_cache.cpp
     src/core/hooks.cpp
@@ -137,10 +141,13 @@ add_library(tome_core STATIC
     src/core/jass.cpp
     src/core/json.cpp
     src/core/keys.cpp
+    src/core/log_guard.cpp
     src/core/log_view.cpp
     src/core/main_menu_fdf.cpp
     src/core/mappings.cpp
     src/core/metadata.cpp
+    src/core/metadata_check.cpp
+    src/core/mod_list.cpp
     src/core/mod_menu_model.cpp
     src/core/mod_state.cpp
     src/core/movie_decoder.cpp
@@ -150,10 +157,12 @@ add_library(tome_core STATIC
     src/core/path_guard.cpp
     src/core/pe.cpp
     src/core/popup.cpp
+    src/core/profile.cpp
     src/core/resolver.cpp
     src/core/rtti.cpp
     src/core/settings.cpp
     src/core/signature.cpp
+    src/core/timers.cpp
     src/core/tome_settings.cpp
     src/core/units.cpp
     src/core/update_check.cpp
@@ -161,6 +170,7 @@ add_library(tome_core STATIC
     src/core/version.cpp
     src/core/wasm_abi.cpp
     src/core/wasm_alloc.cpp
+    src/core/wasm_hooks.cpp
     src/core/wasm_layout.cpp
     src/core/widescreen.cpp
     src/core/x86.cpp
@@ -183,6 +193,7 @@ add_library(tome_runtime OBJECT
     src/crash_handler.cpp
     src/crash_loop.cpp
     src/debug_input.cpp
+    src/desync.cpp
     src/events.cpp
     src/frames.cpp
     src/game_build.cpp
@@ -195,18 +206,27 @@ add_library(tome_runtime OBJECT
     src/main_thread.cpp
     src/mappings.cpp
     src/mod_manager.cpp
+    src/mod_mappings.cpp
     src/mod_menu.cpp
     src/mods_ready.cpp
+    src/net_messages.cpp
+    src/lobby_messages.cpp
     src/natives.cpp
     src/overlay.cpp
     src/packages.cpp
     src/patch.cpp
+    src/shade.cpp
     src/patches.cpp
     src/patches/ambient_sound.cpp
     src/patches/background_mute.cpp
     src/patches/blp_guard.cpp
+    src/patches/command_card_guard.cpp
     src/patches/d3d_reset_lights.cpp
+    src/patches/execute_func_guard.cpp
     src/patches/gl_context_restore.cpp
+    src/patches/global_string_guard.cpp
+    src/patches/jass_token_guard.cpp
+    src/patches/lan_map_guard.cpp
     src/patches/memhack_guard.cpp
     src/patches/movie_frame_length.cpp
     src/patches/movie_display_reset.cpp
@@ -219,6 +239,7 @@ add_library(tome_runtime OBJECT
     src/settings_api.cpp
     src/sha256.cpp
     src/storm.cpp
+    src/timers.cpp
     src/tome_settings.cpp
     src/units.cpp
     src/update_check.cpp

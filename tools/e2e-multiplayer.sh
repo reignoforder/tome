@@ -35,6 +35,14 @@
 # input waits for log lines and frames, like tools/e2e-test.sh. Needs
 # unprivileged user namespaces, ip (iproute2) and nsenter; without them it
 # says it's skipped.
+#
+# TEST_WIDTH / TEST_HEIGHT pick the window as in tools/test-env.sh, and the
+# client's click on the game's row follows the UI's width, so a wide window
+# works (800x450, 16:9, passes). At 1056x552 both games' windows land mostly
+# off the Xvfb screen (E2E_SHOTS shows it) and the client's click misses: use
+# a size whose window fits. E2E_SHOTS=<folder> takes a screenshot of each
+# instance every E2E_SHOTS_EVERY seconds (default 5) to see where a check
+# that fails was waiting.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -55,6 +63,7 @@ if [[ -z "${TOME_MP_INSIDE:-}" ]]; then
     [[ $# -le 1 ]] || die "usage: tools/e2e-multiplayer.sh [build-dir]"
     env_check
     [[ -f "$BUILD/loader/tome.mix" ]] || die "build first: cmake --build $BUILD"
+    [[ -f "$BUILD/mods/sync-test/sync-test.dll" ]] || die "the sync-test fixture mod isn't built: cmake --build $BUILD"
     grep -qiE '^TOME_DEV:BOOL=(ON|1|TRUE|YES|Y)$' "$BUILD/CMakeCache.txt" 2>/dev/null \
         || die "$BUILD isn't a developer build (the test needs TOME_DEBUG_*): cmake -S . -B $BUILD -DTOME_DEV=ON"
     if ! command -v ip >/dev/null || ! command -v nsenter >/dev/null || ! unshare -rn true 2>/dev/null; then
@@ -88,6 +97,19 @@ if [[ -z "${TOME_MP_INSIDE:-}" ]]; then
 
     env_xvfb; XVFB_PIDS+=("$NEW_XVFB_PID"); HOST_DISPLAY="$NEW_XVFB_DISPLAY"
     env_xvfb; XVFB_PIDS+=("$NEW_XVFB_PID"); CLIENT_DISPLAY="$NEW_XVFB_DISPLAY"
+    # E2E_SHOTS=<folder>: a screenshot of each instance's screen every
+    # E2E_SHOTS_EVERY seconds (default 5), <folder>/host-<n>.png and client-<n>.png,
+    # to see what a check that fails was waiting at.
+    if [[ -n "${E2E_SHOTS:-}" ]]; then
+        mkdir -p "$E2E_SHOTS"
+        for who in host client; do
+            [[ "$who" == host ]] && shot_display="$HOST_DISPLAY" || shot_display="$CLIENT_DISPLAY"
+            (n=0; while sleep "${E2E_SHOTS_EVERY:-5}"; do
+                n=$((n + 1)); DISPLAY="$shot_display" import -window root "$E2E_SHOTS/$who-$n.png" 2>/dev/null
+            done) &
+            XVFB_PIDS+=("$!")
+        done
+    fi
     env_sound
     TOME_MP_INSIDE=1 WORK="$WORK" HOST_DISPLAY="$HOST_DISPLAY" CLIENT_DISPLAY="$CLIENT_DISPLAY" \
         unshare -rn bash "$0" "$BUILD" &
@@ -157,6 +179,7 @@ for who in host client; do
     env_game "$WORK/$who/game" "$BUILD/loader/tome.mix"
     mkdir -p "$WORK/$who/home/tome/mods"
     cp -r "$FIXTURES/sync-test" "$WORK/$who/home/tome/mods/"
+    cp "$BUILD/mods/sync-test/sync-test.dll" "$WORK/$who/home/tome/mods/sync-test/"
     # sync-test declares 1.27b, the default game; on another version both copies declare that one too.
     env_mods_for_game "$WORK/$who/home/tome/mods/sync-test/tome.mod.json"
 done
@@ -185,6 +208,7 @@ launch() {
     [[ -n "$home" ]] || die "winepath couldn't convert $WORK/$who/home"
     (cd "$WORK/$who/game" && WINEPREFIX="$prefix" DISPLAY="$display" TOME_HOME="$home" \
         TOME_DEBUG_CLICKS="$clicks" TOME_DEBUG_APPROVE=sync-test \
+        TOME_DEBUG_LOBBY_AS="$([[ "$who" == client ]] && echo 128)" \
         TOME_DEBUG_EXIT="${E2E_COVERAGE:-0}" WINEDEBUG=err+module \
         exec "${in_ns[@]}" wine war3.exe -window -opengl "${EDITION_ARGS[@]}" "$@" >"$WORK/$who/wine.log" 2>&1) &
     GAME_PIDS+=($!)
@@ -240,40 +264,79 @@ launch host "wait:Screen ready: main menu;click:LocalAreaNetworkButton;wait:Scre
 click:CreateButton;wait:Screen ready: create LAN game;click:PlayButton;wait:Screen ready: lobby;\
 wait:My mods 1/1: sync-test 1.0.1;click:StartGameButton;wait:not starting, the players' required mods differ;\
 wait:My mods 1/1: sync-test 1.0.0;click:StartGameButton;wait:Game started: ;\
-wait:Handshake: every player;wait:turns off when it ends;settle;\
+wait:Handshake: every player;wait:message from player 1 (1000 bytes;type:/synctest from host;\
+wait:message from player 0 (9 bytes;wait:Desync check: told the player;wait:turns off when it ends;settle;\
 key:F10;settle;click:EndGameButton;settle;click:QuitButton;wait:Screen: score screen;settle;click:ScoreScreenOkButton"
 check "$HOST_LOG" "Handshake: lobby opened" "host: the lobby is open" || exit 1
 check "$HOST_LOG" "Screen ready: lobby" "host: the lobby takes input" || exit 1
 # Client, once the host's game is there to see: Local Area Network, the
 # name Guest, the first game in the list (it has no name to click by; it
 # shows up within a few frames of the screen), Join Game. In the game it
-# waits for the report and stays until the end.
+# waits for the report and stays until the end. It waits for the first
+# desync check to match and nothing else before skewing: waits only look at
+# lines after the previous wait's, and that line can come before or after the
+# host's message (the round is at 3 s of game time).
+# The game's row is at a position as measured in the default window (the
+# client area 788 x 564 there: the test size minus 12 x 36 pixels); the list
+# hangs from the left edge, so in a wider window the row's fraction shrinks
+# with the UI's width (0.6 x the client area's aspect, at least 0.8).
+GAME_X="$(awk -v w="${TEST_WIDTH:-800}" -v h="${TEST_HEIGHT:-600}" 'BEGIN {
+    ui = 0.6 * (w - 12) / (h - 36); if (ui < 0.8) ui = 0.8
+    base = 0.6 * 788 / 564
+    printf "%.4f", 0.26 * base / ui }')"
 launch client "wait:Screen ready: main menu;click:LocalAreaNetworkButton;wait:Screen ready: LAN;\
-focus:PlayerNameEditBox;text:Guest;frames:120;0.26,0.335;settle;click:JoinButton;wait:Screen ready: lobby"
+focus:PlayerNameEditBox;text:Guest;frames:120;$GAME_X,0.335;settle;click:JoinButton;wait:Screen ready: lobby;\
+wait:Game started: ;wait:Handshake: every player;type:/synctest hello;wait:message from player 1 (5 bytes;\
+type:/synctest big;\
+wait:Desync check: sync-test's state matches;type:/synctest skew"
 
 # Every check below needs the client in the lobby: without it they would
 # each wait out the watchdog.
-check "$CLIENT_LOG" "Handshake: lobby: .*, joined, players: 128 Tome" "client: joined the host's lobby" || exit 1
-check "$HOST_LOG" "Handshake: lobby: .*, hosting, players: 129 Guest" "host: sees the client"
+check "$CLIENT_LOG" "Handshake: lobby: .*, joined, host 128, players: 128 Tome" \
+    "client: joined the host's lobby and knows who hosts" || exit 1
+check "$HOST_LOG" "Handshake: lobby: .*local id 128, hosting, players: 129 Guest" "host: sees the client (and hosts as 128)"
+check_absent "$HOST_LOG" "Handshake: hosting, but player number 1 is net id" "host: has the host's net id"
 check "$HOST_LOG" "Handshake: to lobby player 129: \[Tome\] Required mods 1/1: sync-test 1\.0\.0 #" \
     "host: sends the client its required mods"
 check "$CLIENT_LOG" "Handshake: from lobby player 128: \[Tome\] Required mods 1/1: sync-test 1\.0\.0" \
     "client: gets the host's"
 check "$CLIENT_LOG" "Handshake: Your required mods differ from the host's: .*sync-test" \
     "client: says its version differs"
-check "$HOST_LOG" "Handshake: from lobby player 129: \[Tome\] My mods 1/1: sync-test 1\.0\.1" "host: gets the client's"
+# TOME_DEBUG_LOBBY_AS: the client's first reply claims the host's net id, as
+# a modified client could; the host's router puts the real sender on it.
+check "$CLIENT_LOG" "Handshake: debug: sent a reply as net id 128 \(really 129\)" "client: one reply claims to be the host's"
+check "$HOST_LOG" "Handshake: from lobby player 129: \[Tome\] My mods 1/1: sync-test 1\.0\.1" \
+    "host: gets the client's, under its real id"
+check_absent "$HOST_LOG" "Handshake: from lobby player 128" "host: no line passes for its own"
 check "$HOST_LOG" "Handshake: Guest: .*sync-test.*The game can't start until they match" "host: says the client's differ"
 check "$HOST_LOG" "Handshake: not starting, the players' required mods differ" "host: Start is refused"
 check "$HOST_LOG" "Handshake:   Guest: " "host: the refusal names the player"
 check_absent "$HOST_LOG" "Game started: " "host: no game started"
-# The client's sync-test made right: the same file as the host's, so the
-# same hash; a live reload sends the host the new set. Through a rename, so
-# the watcher never reads half a file.
+# The client's sync-test made right, as an update would: a new copy of its
+# DLL (a new file, so Tome loads it again and runs the new version) and the
+# same tome.mod.json as the host's, so the same hash; a live reload sends
+# the host the new set. Through renames, so the watcher never reads half a
+# file. (A version changed in tome.mod.json alone doesn't reload a loaded
+# DLL: the game lock would then go on with the version that's running.)
+cp "$BUILD/mods/sync-test/sync-test.dll" "$WORK/sync-test.dll.new" && touch "$WORK/sync-test.dll.new" &&
+    mv -f "$WORK/sync-test.dll.new" "$WORK/client/home/tome/mods/sync-test/sync-test.dll"
 cp "$WORK/host/home/tome/mods/sync-test/tome.mod.json" "$WORK/tome.mod.json.new" && mv "$WORK/tome.mod.json.new" "$CLIENT_META"
 check "$HOST_LOG" "Handshake: from lobby player 129: \[Tome\] My mods 1/1: sync-test 1\.0\.0" \
     "host: gets the client's new set (a live reload in the lobby)"
 check "$HOST_LOG" "Handshake: Guest has the same required mods" "host: says they match now"
 check "$CLIENT_LOG" "Handshake: Your required mods match the host's \(sync-test 1\.0\.0" "client: says so too"
+# Mods' lobby messages (API version 21): sync-test's client says hello to
+# the host once the host's Tome answered, the host says welcome back.
+check "$CLIENT_LOG" "lobby: sent hello to the host \(player 128, Tome\): 0" "client: a lobby message to the host"
+check "$HOST_LOG" "lobby message from player 129 \(from host 0, 5 bytes\): hello" "host: gets it from the client"
+check "$HOST_LOG" "lobby: sent welcome to player 129: 0" "host: answers"
+check "$CLIENT_LOG" "lobby message from player 128 \(from host 1, 7 bytes\): welcome" "client: gets it, from the host"
+check_absent "$CLIENT_LOG" "\[Tome\] Msg " "client: no lobby message line shown or logged as chat"
+# sync-test holds the first allowed Start once, then presses it itself.
+check "$HOST_LOG" "lobby: holding the start once \(note shown: 0\)" "host: a mod holds the start, with a note"
+check "$HOST_LOG" "Handshake: not starting, a mod refused" "host: the start waits for the mod"
+check "$HOST_LOG" "lobby_start: pressing Start" "host: the mod presses Start"
+check "$HOST_LOG" "lobby: letting the start through" "host: the mod lets it through"
 check "$HOST_LOG" "Handshake: starting; every player's required mods match" "host: Start goes through"
 for who in host client; do
     log="$HOST_LOG"; [[ "$who" == client ]] && log="$CLIENT_LOG"
@@ -282,7 +345,25 @@ for who in host client; do
     check "$log" "Handshake: sent this game 1 required mod\(s\): sync-test 1\.0\.0" "$who: sent its set as game actions"
     check_players "$log" "$who: got the other player's too"
     check "$log" "Handshake: every player has the same required mods \(sync-test 1\.0\.0" "$who: every player matches"
+    check "$log" "Handshake: the host is player 0 \(Tome;" "$who: the host is player 0 in the game"
+    # Messages between players (sync-test's /synctest): the client's two and
+    # the host's one reach both, from the right player, whole.
+    check "$log" "\[sync-test\] message from player 1 \(5 bytes, fnv [0-9a-f]+, replay 0\): hello" \
+        "$who: gets the client's message"
+    check "$log" "\[sync-test\] message from player 1 \(1000 bytes, fnv 180bf895, replay 0\)" \
+        "$who: gets the client's 1000 bytes whole (6 actions)"
+    check "$log" "\[sync-test\] message from player 0 \(9 bytes, fnv [0-9a-f]+, replay 0\): from host" \
+        "$who: gets the host's message"
+    # Desync checks (sync-test's on_checksum): the same state on both
+    # computers until the client's /synctest skew, then both see it differ.
+    other=1; [[ "$who" == client ]] && other=0
+    check "$log" "Desync check: sync-test's state matches player $other " "$who: the desync check matches at first"
+    check "$log" "Desync check: sync-test's state differs between this computer \([0-9a-f]{16}\) and player $other " \
+        "$who: and catches the client's skewed state"
+    check "$log" "Desync check: told the player" "$who: tells the player"
 done
+check_order "$CLIENT_LOG" "skewed this computer's state" "Desync check: sync-test's state differs" \
+    "client: the difference comes after the skew"
 # The host is in the game: what it logs from here on is about leaving it
 # (its "Screen: LAN" from before the game mustn't count).
 IN_GAME=$(mark "$HOST_LOG")
@@ -304,6 +385,7 @@ launch host "wait:Game started: " -loadfile 'replay\LastReplay.w3g'
 check "$HOST_LOG" "Game started: " "the replay plays"
 check "$HOST_LOG" "Multiplayer game: required mods are locked until it ends \(none running\)" "a replay locks required mods too"
 check_players "$HOST_LOG" "both recorded players' sets are read back"
+check "$HOST_LOG" "Handshake: the host is player 0 \(Tome;" "the replay's host is the recorded game's"
 check "$HOST_LOG" "Handshake: This replay was recorded with other required mods than yours" \
     "Tome says the replay had other required mods"
 stop_games

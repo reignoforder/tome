@@ -16,8 +16,9 @@ make test 1.26a / make e2e 1.26a         # the same on another game version: the
 make e2e roc / make e2e 1.26a roc        # as Reign of Chaos (EDITION=roc: war3.exe -classic; default tft); also tools/game.sh
 make e2e                                 # real game, 6 launches (~2.5 min), off screen in Xvfb, then:
 make e2e-multiplayer                     # two instances in a LAN game (tools/e2e-multiplayer.sh, network namespaces)
-make coverage                            # line coverage of make test + make e2e by section (tools/coverage.sh, build-cov/; fails below 90%)
+make coverage                            # line coverage of make test + make e2e by section (tools/coverage.sh, build-cov/; fails below 80%)
 tools/game.sh start [VAR=val] / wait <regex> / shot <png> / stop / log / dir
+tools/ui-shots.sh map|seq|timed|sheet  # scripted screenshots of the UI at any window shape (TEST_WIDTH/TEST_HEIGHT); the showcase map puts every in-game UI on screen by chat command (tools/showcase-map.py)
 tools/fuzz.sh [seconds] [target...]      # libFuzzer + ASan/UBSan on the core parsers (host clang, build-fuzz/)
 make container-fuzz FUZZ_SECONDS=30       # the same in the container (build-container-fuzz/; CI runs it)
 tools/gen-rust-bindings.sh               # after changing tome.h: regenerate sdk/rust/tome-sys (bindgen)
@@ -126,7 +127,9 @@ default) puts it in its own Xvfb; `tools/game.sh` shows it on screen unless
 - **Screenshots:** `tools/game.sh shot file.png` (ImageMagick `import` of the
   game's display). Simulate input with `TOME_DEBUG_CLICKS="x,y;..."`
   (fractions of the window; `move:x,y` moves the cursor without a click, 1
-  being the last pixel, for edge scrolling; `core/debug_script.h`). Prefer
+  being the last pixel, for edge scrolling; `dump:<FrameName>` logs a frame's
+  rectangle in UI units, to check a layout without reading pixels;
+  `core/debug_script.h`). Prefer
   `click:<FrameName>[,<context>]` (the game's own click on a named control:
   FDF names, e.g. `SinglePlayerButton`, `TomeModsRow0Button`). **Never
   pace it with times** (`@ms` still parses): a game screen or panel drops

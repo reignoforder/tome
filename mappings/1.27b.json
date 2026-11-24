@@ -29,19 +29,28 @@
     "CreateJassString": {
       "kind": "function", "rva": "0x001f7f60", "conv": "fastcall",
       "sig": "uint32_t(const char* text)",
-      "bytes": "85 c9 75 03 33 c0 c3 51 8b 0d ?? ?? ?? ?? e8 3d",
+      "bytes": "85 c9 75 03 33 c0 c3 51 8b 0d ?? ?? ?? ?? e8 ??",
       "doc": "What natives returning a string return (I2S, SubString, GetPlayerName): adds the text to the map script's string table and returns its id, 0 for NULL. Reads CGameWar3.instance without checking it."
     },
+    "CGameWar3::CreateString": {
+      "kind": "function", "rva": "0x001dd4b0", "conv": "thiscall",
+      "sig": "uint32_t(CGameWar3* this, const char* text)",
+      "bytes": "55 8b ec 8b 55 08 8b 49 08 e8 ?? ?? ?? ?? 5d c2",
+      "doc": "Adds text to the map script's string table and returns its id: passes [this+8] (CGameWar3.vm_index) to the VM's own string function, which fetches the VM with JassVM::Get and doesn't check it for NULL (docs/reverse-engineering.md, \"A string result is a string-table id\"). ret 4."
+    },
+    "CreateJassString.call.create_string": { "kind": "call", "rva": "0x001f7f6e", "target": "CGameWar3::CreateString", "doc": "CreateJassString's call to CGameWar3::CreateString, made with the game instance (CGameWar3.instance) in ecx; global-string-guard points it at its check." },
     "JassScanner::nextToken": {
       "kind": "function", "rva": "0x009249d0", "conv": "thiscall",
       "sig": "int(void* this)",
       "bytes": "55 8b ec 83 ec 0c 53 56 57 8b f9 c7 45 fc 00 00",
-      "doc": "Memhack fix: reads the next token; returns its type code in eax (endfunction is 0x115; keywords get codes ~0x120-0x12d; identifiers tail-call the scanner's intern+classify, 0x9253E0). The token text is left in [this+0x98] (len [this+0xC4]). The memhack-guard patch hooks this (AFTER) to restore shadowed globals at the endfunction token. See docs/reverse-engineering.md, JASS compiler. Stores each character of a token at [[this+8]+n] with no bound: a ~4000-character string literal in war3map.j writes past that heap buffer while the map loads (access violation at 0x924AE4, seen in game; docs/known-bugs.md, Long string literal)."
+      "size": "0x5c8",
+      "doc": "Memhack fix: reads the next token; returns its type code in eax (endfunction is 0x115; keywords get codes ~0x120-0x12d; identifiers tail-call the scanner's intern+classify, 0x9253E0). The token text is left in [this+0x98] (len [this+0xC4]). The memhack-guard patch hooks this (AFTER) to restore shadowed globals at the endfunction token. See docs/reverse-engineering.md, JASS compiler. Stores each character of a token at [[this+8]+n] and [[this+0x98]+n] with a length check that never fires (JassScanner::nextToken.overflow_check): a string literal over 2100 characters in war3map.j writes past those heap buffers while the map loads (access violation at 0x924AE4 with ~4000, seen in game; docs/known-bugs.md, Long string literal). jass-token-guard makes the check fire."
     },
     "Jass::compile": {
       "kind": "function", "rva": "0x009146f0", "conv": "fastcall",
       "sig": "void*(void* context, void* callback, void* a0, int a1)",
       "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 81 ec e4 00 00 00 53",
+      "size": "0x102",
       "doc": "Memhack fix: the JASS compile driver. Builds the parser (0x9122E0) and the scanner (0x9246A0) on its own stack, runs the parse (0x913C30), then destroys the scanner (0x9245F0); both live in its stack frame. The only live caller of the scanner ctor (the other site, 0x9120E0, has no references), so every JassScanner::nextToken and JassLocalVarDesc::ctor runs inside one of these calls. ret 8. The memhack-guard patch hooks it (BEFORE and AFTER) to drop saved descriptors when a compile starts or ends, including one that stops inside a function. See docs/reverse-engineering.md, JASS compiler."
     },
     "JassLocalVarDesc::ctor": {
@@ -49,6 +58,30 @@
       "sig": "void(void* this, void* a0, void* typeNode, void* sym, void* a3)",
       "bytes": "55 8b ec 8b 45 08 8b 55 10 56 8b f1 8b 4d 0c c7 06 ?? ?? ?? ?? c7 46 14 00 00 00 00 89 46 0c c7 46 04 29",
       "doc": "Memhack fix: builds a local variable's type descriptor (desc+0x4=kind 0x29 local-var, desc+0x10=type-id from typeNode+0x10) and at 0x91DD5E writes sym+0x18=this descriptor, overwriting the symbol's current (possibly global) descriptor with no save and no endfunction restore. sym=3rd stack arg, typeNode=2nd. The memhack gateway. See docs/reverse-engineering.md, JASS compiler."
+    },
+    "JassScanner::nextToken.overflow_check": {
+      "kind": "data", "rva": "0x00924a6d",
+      "doc": "In JassScanner::nextToken's character loop, the token length check: cmp dword [edi+0x1C], 0 / jne 0x924BF1 (83 7f 1c 00 0f 85 7a 01 00 00), reached once the token's length (esi) is JassScanner.capacity. 0x924BF1 returns -2, which the parser (0x922B96, 0x922C17) takes as a fatal error: the compile stops. [edi+0x1C] is cleared when nextToken starts, so the check never takes the exit and a longer token runs past the scanner's two buffers (a heap overrun from war3map.j; docs/known-bugs.md, Long string literal). jass-token-guard makes the jne a jmp."
+    },
+    "JassScanner.capacity": {
+      "kind": "offset", "value": "0xc",
+      "doc": "int: the longest token the scanner's buffers hold (+0x98, the input and token text, and +0x8, the state of each character, each capacity + 1 bytes, from the constructor 0x9246A0, last argument). Jass::compile makes the scanner with 0x834 (2100)."
+    },
+    "JassScanner::ctor": {
+      "kind": "function", "rva": "0x009246a0", "conv": "thiscall",
+      "sig": "void*(void* this, void* files, void* a1, void* a2, void* a3, int capacity)",
+      "bytes": "55 8b ec 8b 45 14 56 57 8b f9 6a 00 68 94 01 00 00 68 ?? ?? ?? ??",
+      "doc": "The JASS scanner's constructor (the base: the vtable, +0 = read a character or -1, +4 = wrap at the end, is set by the caller's derived class). Allocates the two token buffers of capacity + 1 bytes (+0x98 the text, +0x8 the states) and stores capacity at JassScanner.capacity; files (the compile's (name, text) list) at +0xA0/+0x9C/+0xA4. Jass::compile's one call (0x914745) passes 0x834. ret 0x14. tests/game builds one on a test buffer."
+    },
+    "JassParser::parse": {
+      "kind": "function", "rva": "0x00922a50", "conv": "thiscall",
+      "sig": "int(void* this, void* context)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 08 53 56 57 a1",
+      "doc": "The JASS parser (yacc-style tables; the scanner at [this+0x44], the look-ahead token at +0x28): 0 when the script parsed, else nonzero. JassParser::parse's caller 0x913C30 builds the parser on its stack (constructor 0x91E9A0, which leaves JassParser.root unset), and after a failed parse destroys whatever JassParser.root holds (0x913D44: if nonzero, its vtable +0 with 0). The scanner's -2 makes it return 1 (0x922B99 -> 0x924250). ret 4. jass-token-guard zeroes JassParser.root before it runs."
+    },
+    "JassParser.root": {
+      "kind": "offset", "value": "0x34",
+      "doc": "The parsed script's root node, set only once the whole script is parsed (0x923F3B). The parser's constructor doesn't clear it, so after a parse stopped early (the scanner's -2) it holds stack garbage, and 0x913D44 calls a destructor through it: a crash (seen in game with a 3000-character string literal and jass-token-guard's length check)."
     },
     "Native.CreateTrigger": {
       "kind": "function", "rva": "0x001fc7e0", "conv": "cdecl", "sig": "uint32_t(void)",
@@ -120,11 +153,39 @@
       "kind": "offset", "value": "0xd0",
       "doc": "void __thiscall Hide(void). Sets bit 0 of the flags at +0xB0 and marks children hidden by parent."
     },
+    "CFrame.vtable.Destroy": {
+      "kind": "offset", "value": "0xd8",
+      "doc": "void __thiscall Destroy(int unlink) (ret 4; CFrame's is 0xF55D0): the teardown the game uses for screens and for frames that fail to initialize. With unlink 1 it removes the frame from its parent's child list (0xF05A0, through 0xF1010), then destroys the children, clears the focus and hover globals that point at it (0xD47820..0xD4782C, the focused frame 0xD47830), removes it from the name table (0xF1B70) and frees its listeners. Children go the same way, so their names are free again."
+    },
     "CFrame.vtable.Show": {
       "kind": "offset", "value": "0xd4",
       "doc": "void __thiscall Show(void). Also shows every child."
     },
     "CLayoutFrame.points": { "kind": "offset", "value": "0x8", "doc": "The frame's anchor points, one pointer per point (TOPLEFT 0 ... BOTTOMRIGHT 8), NULL where unset. A point (made by 0x11E3C0) holds the relative CLayoutFrame* at +4, the relative point at +8 and the offsets x, y at +0xC, +0x10, multiplied by the frame's own scale. SetAllPoints (0x1114B0) clears the points (0x110A00) and sets TOPLEFT and BOTTOMRIGHT." },
+    "CSpriteFrame::Render": {
+      "kind": "function", "rva": "0x000f72f0", "conv": "thiscall", "sig": "void(CSpriteFrame* this)",
+      "bytes": "56 8d b1 80 01 00 00 8b ce e8",
+      "doc": "vtable slot +0x30: renders what the frame's draw (slot +0x2C, 0xF73E0: SetupCamera, then each model instance into the scene at +0x180) queued, with the projection SetupCamera set. Plain ret."
+    },
+    "CModelFrame::Render": {
+      "kind": "function", "rva": "0x000f81b0", "conv": "thiscall", "sig": "void(CModelFrame* this)",
+      "bytes": "56 8b b1 6c 01 00 00 57 8b b9 70 01 00 00",
+      "doc": "vtable slot +0x30 of a MODEL frame (CModelFrame, vtable 0xA8B454): renders each of its models (+0x16C count, +0x170 array; 0x18CCA0) with the projection its draw (slot +0x2C, 0xF8200) set up through CSpriteFrame::SetupCamera. Plain ret."
+    },
+    "CSpriteFrame.vtable.Render": { "kind": "offset", "value": "0x30", "doc": "vtable slot: void(CSpriteFrame* this), thiscall: renders what the draw (slot +0x2C) queued (CSpriteFrame::Render, CModelFrame::Render)." },
+    "CFrame.alpha": { "kind": "offset", "value": "0xac", "doc": "uint8: the frame's alpha, 255 opaque (set with its children by 0x0F07B0, which then calls CFrame.vtable.ApplyAlpha)." },
+    "CFrame.vtable.ApplyAlpha": { "kind": "offset", "value": "0xa4", "doc": "vtable slot: void(CFrame* this), thiscall: passes CFrame.alpha on to what the frame draws (a sprite frame to its model instances, 0xF7260, through 0x1ACAB0 with property 6; a MODEL frame to its models, 0xF8150, through 0x187E30)." },
+    "CLayoutFrame.vtable.GetRect": { "kind": "offset", "value": "0x10", "doc": "vtable slot of the CLayoutFrame: int(CLayoutFrame* this, float* out), thiscall, ret 4: its rect in UI units, {bottom, left, top, right}." },
+    "GxXformSetViewport": {
+      "kind": "function", "rva": "0x001371f0", "conv": "stdcall", "sig": "void(float x0, float x1, float y0, float y1, float z0, float z1)",
+      "bytes": "55 8b ec f3 0f 10 45 1c 83 ec 18",
+      "doc": "Sets the viewport, fractions of the window (0..1), through the device's vtable +0x4C (GxDevice.instance), which keeps it at CGxDevice.viewport. The UI's clips set it (CFrame render, 0xECF70). ret 0x18."
+    },
+    "GxDevice.instance": { "kind": "data", "rva": "0x00d52eb8", "doc": "CGxDevice*: the graphics device (CGxDeviceD3d or CGxDeviceOpenGl)." },
+    "CGxDevice.viewport": { "kind": "offset", "value": "0xe4", "doc": "float[6]: the viewport as GxXformSetViewport last set it, {x0, x1, y0, y1, z0, z1} (the base setter 0x13A7E0, which both devices' call)." },
+    "CHighlightFrame.vtable": { "kind": "data", "rva": "0x00a8b744", "doc": "CHighlightFrame's vtable (RTTI; a CSpriteFrame, through CSpriteFrame::SetupCamera): button highlights, and the full-screen layer that dims a glue screen behind a dialog (\"Please enter your account name.\"), a model made for 0.8 x 0.6." },
+    "CCursorFrame.vtable": { "kind": "data", "rva": "0x00a8da14", "doc": "CCursorFrame's vtable (RTTI): the mouse cursor, a sprite frame that fills the screen with its model drawn at the pointer (the layout's vtable at +0xB4 is 0xA8DB04)." },
+    "CLayoutFrame.relative_point_vtable": { "kind": "data", "rva": "0x00a8ddd0", "doc": "The vtable of a point relative to a frame (made by 0x11E3C0): only such a point holds a CLayoutFrame* at +4. A point relative to the screen (0x11E380, vtable 0xA8DDBC) holds x, y at +4, +8 instead." },
     "CLayoutFrame.dependents": { "kind": "offset", "value": "0x40", "doc": "The frames anchored to this one (0x111280 adds them): a list whose first node is here and ends at a value <= 0; a node's next is at +8, the dependent CLayoutFrame* at +0xC, flags at +0x10." },
     "CLayoutFrame.scale": { "kind": "offset", "value": "0x60", "doc": "float, 1 by default: multiplies the frame's width (+0x58) and height (+0x5C) (0x110BA0, 0x110B50) and its anchor offsets. A top-level frame without anchors keeps its rectangle at +0x44 (left, bottom, top, right; CGameUI's is 0, 0, 0.6, 0.8)." },
     "CLayoutFrame.vtable.SetScale": { "kind": "offset", "value": "0x14", "doc": "vtable slot of the CLayoutFrame: void(CLayoutFrame* this, float scale), thiscall, ret 4. The base (0x111540) stores CLayoutFrame.scale and updates the layout; CSimpleFrame's (0x10DD00, the frame itself) passes it to its child frames (+0xD8) and regions (+0x120), CFrame's (0x0F6410, on frame + CFrame.layout) to its child frames, and CSpriteFrame's (0x0F7700) also scales its model. Children get the same value, not a product." },
@@ -898,6 +959,7 @@
       "doc": "Frees the minimap's textures and clears +0x1CC. The minimap's per-frame update (vtable +0x2C, 0x3C1CB0) sets it up again while +0x1CC is 0 (vtable +0xE4, 0x3B7E30), from its frame's rectangle: the only time its picture and its map-to-screen transform (+0x750) follow the frame's size. The setup calls it first, as does the destructor and 0x211DEA (on CGameUI.minimap). ret."
     },
     "CLayoutFrame.width": { "kind": "offset", "value": "0x58", "doc": "float: the frame's width as set (SetWidth), before CLayoutFrame.scale; the height follows at +0x5C." },
+    "CLayoutFrame.height": { "kind": "offset", "value": "0x5c", "doc": "float: the frame's height as set (SetHeight), before CLayoutFrame.scale." },
     "CLayoutFrame::SetWidth": {
       "kind": "function", "rva": "0x001116c0", "conv": "thiscall", "sig": "void(CLayoutFrame* this, float width)",
       "bytes": "55 8b ec f3 0f 10 45 08 f3 0f 11 41 58 c7 45 08",
@@ -946,6 +1008,8 @@
     },
     "CameraField.target_distance": { "kind": "constant", "value": "0x0", "doc": "CAMERA_FIELD_TARGET_DISTANCE: the camera's distance from its target, 1650 by default." },
     "CameraField.farz": { "kind": "constant", "value": "0x1", "doc": "CAMERA_FIELD_FARZ: the far clipping distance, 5000 by default; farther terrain isn't drawn." },
+    "CameraField.angle_of_attack": { "kind": "constant", "value": "0x2", "doc": "CAMERA_FIELD_ANGLE_OF_ATTACK: degrees for GameCamera::SetField (304 by default: 56 below the horizon); GameCamera::GetField gives radians, as GetCameraField does." },
+    "CameraField.field_of_view": { "kind": "constant", "value": "0x3", "doc": "CAMERA_FIELD_FIELD_OF_VIEW: degrees for GameCamera::SetField (70 by default); GameCamera::GetField gives radians." },
     "CameraPresets": { "kind": "data", "rva": "0x00a9f4e0", "doc": "float[4][4]: the classic zoom levels the mouse wheel steps through in a game (the camera code loads them with movaps, 0x35EAA2, 0x360122): heights 160, angles of attack 304/311/318/325, distances 1650/1600/1500/1400. The wheel only zooms in from the default." },
     "CGameUI.world_frame": { "kind": "offset", "value": "0x3bc", "doc": "The CWorldFrameWar3 (a CFrame) the world is drawn in: anchored to the game UI with BOTTOMLEFT (0, 0.13) and TOPRIGHT (0, -0.02) (0x367EA7), between the console and the top bar. Moving its anchors moves the 3D view's edges. Also a CSpriteFrame (camera +0x140, rectangle +0x12C, the WorldView at +0x19C): unit picking sets up its projection with CSpriteFrame::SetupCamera (0x3911A5, 0x3C09CE)." },
     "CGameUI.console": { "kind": "offset", "value": "0x428", "doc": "The console, a CSimpleConsole (simple frame) made from the FDF frame the skin key \"SimpleConsole\" names (\"ConsoleUI\", UI\\FrameDef\\UI\\ConsoleUI.fdf: the top bar's and the bottom console's textures), anchored to all of the game UI. The command card, info panel, resource bar and top-left menu buttons are its children: its scale reaches them." },
@@ -961,11 +1025,32 @@
     "CGameUI.command_card": { "kind": "offset", "value": "0x3c8", "doc": "The command card (made by 0x39D410 in 0x368340): a CFrameGrid of 3 rows by 4 columns of CCommandButton (vtable 0xABCFF4), made once per game." },
     "CGameUI.info_panel": { "kind": "offset", "value": "0x3c4", "doc": "The info panel (0x39E6D0), which holds the inventory." },
     "CInfoPanel.inventory": { "kind": "offset", "value": "0x148", "doc": "The inventory bar (0x39F380)." },
+    "CInfoPanel.inventory_cover": { "kind": "offset", "value": "0x14c", "doc": "The simple frame (0.128 x 0.175) that covers the inventory when the unit has none, its texture the skin's ConsoleInventoryCoverTexture. Made by the info panel's constructor (0x39E9A4) with its BOTTOMRIGHT at x 0.6, y 0 of the screen (no relative frame, 0x111590), so it doesn't move with the info panel the inventory's buttons hang from." },
     "CInventoryBar.slots": { "kind": "offset", "value": "0x130", "doc": "Pointer to 6 entries of 8 bytes, one per slot (top left first, by rows): the slot's CCommandButton at +4." },
     "CFrameGrid.rows": { "kind": "offset", "value": "0x154", "doc": "Pointer to the grid's rows, 16 bytes each: the row's cells (CFrame*, one per column) through the pointer at +8. Rows at +0x124, columns at +0x128 (0x10EE50 sets them); 0x10E490 puts a frame in a cell (column, row, frame, flag)." },
     "CCommandButton.data": { "kind": "offset", "value": "0x190", "doc": "The button's CCommandButtonData (what it does), NULL on an empty button. The cooldown sweep sprite is at +0x19C (made on first use, 0x3AD950)." },
     "CCommandButtonData.ability": { "kind": "offset", "value": "0x6d4", "doc": "CAbility*: the ability behind the button (an item's for an inventory slot), or NULL. Raw: check it through its reference (+0xC/+0x10, ObjectLookup, ObjectRecord.dead) as 0x3B62D0 does." },
     "CCommandButtonData.command": { "kind": "offset", "value": "0x8", "doc": "uint32_t: what the button tells its ability, passed to CAbility.vtable.GetCooldownRemaining." },
+    "CCommandButtonData.x": { "kind": "offset", "value": "0x59c", "doc": "uint32_t: the button's column on the command card, 0-3 (Buttonpos, Researchpos, ...). The setters on 1.27b (0x3CA29B, 0x36B490, 0x36B4D4, 0x373A96, 0x373AB6) store it only if it's at most 3 (unsigned); CCommandCard::PlaceButton indexes the grid with it unchecked." },
+    "CCommandButtonData.y": { "kind": "offset", "value": "0x5a0", "doc": "uint32_t: the button's row, 0-2; stored only if it's at most 2 (unsigned) on 1.27b (0x3CA2A9, 0x36B4A4, 0x36B4E2, 0x373AD6, 0x373AF6)." },
+    "CCommandCard::PlaceButton": {
+      "kind": "function", "rva": "0x003aa430", "conv": "thiscall",
+      "sig": "void(void* this, void* data)",
+      "bytes": "55 8b ec 83 ec 08 8b c1 8b 4d 08 53 56 57 8b 91 9c 05 00 00",
+      "doc": "Puts a button's data on the card (CGameUI.command_card): reads CCommandButtonData.x and .y, indexes the grid with them unchecked (rows at +0x154, 16 bytes each, the cells through +8), moves to the next free cell if that one is taken (+0x94 of the cell's button), and fills it (0x3AA2F0). Its one caller (0x3AAED6) skips it for buttons it doesn't show. ret 4. command-card-guard skips it for a position outside the grid (docs/known-bugs.md, Command card button positions)."
+    },
+    "CCommandCard::AddButton.pos_check": {
+      "kind": "data", "rva": "0x003ca298",
+      "doc": "In 0x3CA1A0 (thiscall on the card, ret 0x24: adds or updates the CCommandButtonData of a command in the card's table at +0x160; data in ecx here, x and y its stack arguments 6 and 7 at [ebp+0x1C] and [ebp+0x20]), the 28 bytes that store them: mov eax,[ebp+1C] / cmp eax,3 / ja / mov [ecx+59C],eax / mov eax,[ebp+20] / cmp eax,2 / ja / mov [ecx+5A0],eax. Abilities' buttons and CommandFunc.txt's Buttonpos come here (0x377260 -> 0x372A40; 0x36B6D0). command-card-guard replaces it with a call that also keeps (0,-11) and (INT_MIN,INT_MIN)."
+    },
+    "CGameUI::SetCommandButtonPos.pos_check_button": {
+      "kind": "data", "rva": "0x0036b48b",
+      "doc": "In 0x36B470 (thiscall on CGameUI, ret 0xC; the third argument points to {x, y}; called from 0x375F20), the path for a button on the card (0x3B5F20; eax the CCommandButton, its data at +0x190): the 43 bytes from mov edx,[ebp+10] to the final pop ebp (8b 55 10 8b 32 83 fe 03 77 0c ...), which store x and y with the same checks as 0x3CA1A0. command-card-guard replaces them like CCommandCard::AddButton.pos_check, keeping the pop esi."
+    },
+    "CGameUI::SetCommandButtonPos.pos_check_data": {
+      "kind": "data", "rva": "0x0036b4cf",
+      "doc": "In 0x36B470, the path for a command's data not on the card (0x3B60F0 returns it in eax): the 30 bytes from mov edx,[ebp+10] up to 0x36B4ED (8b 55 10 8b 0a 83 f9 03 77 06 ...). Patched by command-card-guard."
+    },
     "CGameUI.esc_menu": { "kind": "offset", "value": "0x228", "doc": "The CEscMenu (vtable 0xABDF34), made once per game." },
     "CEscMenu::Reset": {
       "kind": "function", "rva": "0x003cdd10", "conv": "thiscall", "sig": "void(CEscMenu* this)",
@@ -973,6 +1058,24 @@
       "doc": "What F10 and the Menu button do before opening the menu: the options panel to its first state (0x3CF230(0)) and the main panel to EscMenuPanel.main."
     },
     "CEscMenu.main_panel": { "kind": "offset", "value": "0x18", "doc": "Its CEscMenuMainPanel." },
+    "CEscMenu.options_panel": { "kind": "offset", "value": "0x1c", "doc": "Its CEscMenuOptionsPanel (EscMenuOptionsPanel.fdf), shown by the menu's mode 3 (Options on the main panel, 0x3CF230)." },
+    "CEscMenuOptionsPanel::SetPanel": {
+      "kind": "function", "rva": "0x003cf8a0", "conv": "thiscall", "sig": "void(CEscMenuOptionsPanel* this, int panel)",
+      "bytes": "55 8b ec 56 8b f1 57 8b 7d 08 39 be 68 01 00 00",
+      "doc": "Switches the in-game Options' panel (EscOptionsPanel.*): 1 the list (OptionsPanel, +0x174), 2 Gameplay (+0x18C), 3 Video (+0x1C0), 4 Sound (+0x1F4), 5 Network (+0x21C); the sub-panels show the OK/Cancel bar (+0x22C) too. Hides the others with vtable +0xD0 and shows its own with +0xD4; returns at once if it's already that one. Any other number is only stored (+0x168), with nothing shown or hidden, and OK, Cancel and Esc then do nothing (OnOK). ret 4."
+    },
+    "CEscMenuOptionsPanel.panel": { "kind": "offset", "value": "0x168", "doc": "int: the shown panel (EscOptionsPanel.*), as CEscMenuOptionsPanel::SetPanel stored it." },
+    "EscOptionsPanel.list": { "kind": "constant", "value": 1, "doc": "CEscMenuOptionsPanel::SetPanel: the list of Gameplay, Video, Sound and Network, where Previous Menu and the sub-panels' OK and Cancel go back to (0x3C2D40)." },
+    "CEscMenuOptionsPanel::OnOK": {
+      "kind": "function", "rva": "0x003c2810", "conv": "thiscall", "sig": "int(CEscMenuOptionsPanel* this)",
+      "bytes": "56 8b f1 8b 86 68 01 00 00 83 c0 fe 83 f8 03 77 33",
+      "doc": "OK in a sub-panel (OnEvent command 9): stores the shown panel's controls (Gameplay 0x3CB890, Video 0x3CBB60, Sound 0x3CBA60, Network 0x3CBA00), then goes back (0x3C2D40): from a sub-panel (2-5) to the list with SetPanel(EscOptionsPanel.list), from the list to the Esc menu's main panel. For any other panel number it does nothing. Plain ret."
+    },
+    "CEscMenuOptionsPanel::OnCancel": {
+      "kind": "function", "rva": "0x003bc9d0", "conv": "thiscall", "sig": "int(CEscMenuOptionsPanel* this)",
+      "bytes": "56 8b f1 8b 86 68 01 00 00 83 c0 fe 83 f8 03 77 26",
+      "doc": "Cancel in a sub-panel (OnEvent command 10, and Esc through the key handler 0x3BF4A0): puts the shown panel's controls back (Gameplay 0x3ABDD0, Video 0x3AC4C0, Sound 0x3AC0C0), then goes back as OnOK does; nothing for another panel number. Plain ret."
+    },
     "EscMenuPanel.help": { "kind": "constant", "value": 4, "doc": "CEscMenuMainPanel::SetPanel: the Help panel (HelpPanel, 0.432 x 0.384). Tome's in-game mod menu takes its place." },
     "GlueScreen.game_chatroom": { "kind": "constant", "value": 11, "doc": "The game lobby (CGameChatroom): LAN and Battle.net games before they start." },
     "CGameChatroom::OnChatReceived": {
@@ -1021,6 +1124,21 @@
       "bytes": "56 57 8b f9 b9 0d 00 00 00 e8 72 01 d4 ff 8b 40",
       "doc": "Whether this client hosts the game: 1 for game type 'NONE', 0 once the client's state (+0x278 of its block) is 3 or more (the game started), otherwise the flag at +0x28C of its block. The Start button checks it. Plain ret."
     },
+    "NetGetPlayerNumber": {
+      "kind": "function", "rva": "0x0032b5f0", "conv": "fastcall",
+      "sig": "int(int player, int net_index)",
+      "bytes": "53 56 8b d9 b9 0d 00 00 00 57 8b fa e8 7f 0b d4",
+      "doc": "The player number of a net id (the game's router numbers players from 1, and a game's creator is 1), 0 without such a player: [list +0x18] through 0x329CD0. The host is the id whose number is 1, in the lobby (128: lobby ids are 0x80 | (number - 1), 0x3245C0) and in a game (ids are renumbered to game slots, 0x32FF80). Its inverse is 0x32B790. Plain ret; the number in al. docs/reverse-engineering.md, The network client."
+    },
+    "NetClient::Registry": {
+      "kind": "function", "rva": "0x0032aee0", "conv": "cdecl", "sig": "void*(void)",
+      "bytes": "b9 0d 00 00 00 e9 96 12 d4 ff cc cc cc cc cc cc",
+      "doc": "The registry entry the net client hangs off (0x06C180 with 0xD): the client is [[entry + NetClientRegistry.holder] + NetClientHolder.client], null without one. Only the TOME_DEBUG_LOBBY_AS check uses it (developer builds)."
+    },
+    "NetClientRegistry.holder": { "kind": "offset", "value": "0x10" },
+    "NetClientHolder.client": { "kind": "offset", "value": "0x8" },
+    "NetClient.block_size": { "kind": "constant", "value": "0x304", "doc": "Each local client's block: net client + index * this." },
+    "NetClient.local_id": { "kind": "offset", "value": "0x2dc", "doc": "uint8 in a block: the local player's net id (NetGetLocalPlayer). The send path (0x32CA60) reads the sender from here." },
     "NetIsReplay": {
       "kind": "function", "rva": "0x0032c110", "conv": "cdecl", "sig": "int(void)",
       "bytes": "b9 0d 00 00 00 e8 66 00 d4 ff 8b 40 10 8b 48 08",
@@ -1195,6 +1313,23 @@
     "Option.allyFilter": { "kind": "constant", "value": "0x38", "doc": "Gameplay\\allyFilter (default 1): the ally color mode Alt+A cycles and the minimap button shows, as Get/SetAllyColorFilterState (0x1FF0C0, 0x211B10) read and set it (SetInt, then ApplyValue: it applies at once). The game keeps the last one." },
     "Option.customkeys": { "kind": "constant", "value": "0x3d", "doc": "Gameplay\\customkeys (default 0): the Gameplay panel's Custom Keyboard Shortcuts. When the game builds its unit and ability data (0x350DA0, after start-up's sound and so after the first mod load), 1 makes it lay CustomKeys.txt over the data files (GameData::LoadOverrides). Read once: a change applies from the next start." },
     "Option.herobar": { "kind": "constant", "value": "0x2e", "doc": "Gameplay\\herobar (default 1): 0 hides the hero icons at the left of the in-game UI. Read when the hero bar is built (0x39E265), so it applies from the next game. Not on the Options screen." },
+    "Option.healthbars": { "kind": "constant", "value": "0x2b", "doc": "Gameplay\\healthbars (the Gameplay panel's Always Show Health Bars): applying it, and the game UI as it's built, store it at CGameUI.healthbars." },
+    "CGameUI.healthbars": { "kind": "offset", "value": "0x1d8", "doc": "int: Option.healthbars. HealthBars::Update inverts the health bar keys with it: on, bars show unless a key is held." },
+    "HealthBars::Update": {
+      "kind": "function", "rva": "0x00386620", "conv": "thiscall", "sig": "void(void* this)",
+      "bytes": "55 8b ec 83 ec 70 a1 ?? ?? ?? ?? 33 c5 89 45 fc 56 8b",
+      "doc": "A per-frame update of an in-game UI object (not the CGameUI: called from 0x385FDC on its own `this`; class not known). Reads the health bar keys into its own flags: friendly bars (+0x180) while key 2 (Alt) or 0x112 is down, enemy bars (+0x17C) while 2 or 0x113 is; both inverted when CGameUI::Get(1, 0)'s CGameUI.healthbars is on. With neither, hides every shown bar but the hovered unit's (0x390320); else 0x38E4E0 runs HealthBars::Consider on an eighth of the units each frame. Plain ret."
+    },
+    "HealthBars::Consider": {
+      "kind": "function", "rva": "0x00397b90", "conv": "fastcall", "sig": "void(CUnit* unit, int friendly, int enemy)",
+      "bytes": "55 8b ec 6a ff 68 ?? ?? ?? ?? 64 a1 00 00 00 00 50 83 ec 0c 53 56 57 a1 ?? ?? ?? ?? 33 c5 50 8d 45 f4 64 a3 00 00 00 00 89 55 e8",
+      "doc": "Shows a unit's health bar if it should: a living, visible unit not shown yet (+0x280 bit 0x100) whose owner is allied to the local player (or +0x60 bit 1) when friendly, or not when enemy. Shows it with CUnit::SetHealthBarShown(1, hovered) and lists it among the shown bars. Name guessed. ret 4."
+    },
+    "CUnit::SetHealthBarShown": {
+      "kind": "function", "rva": "0x00654e20", "conv": "thiscall", "sig": "void(CUnit* this, int shown, int hovered)",
+      "bytes": "55 8b ec 83 7d 08 00 56 8b f1 74 23 83 7e 50 00",
+      "doc": "Shows or hides the unit's health bar (made on first use at +0x50). Every path ends here: HealthBars::Consider, hiding all, and the hovered unit's. Name guessed. ret 8."
+    },
     "Option.multiboardon": { "kind": "constant", "value": "0x3c", "doc": "Gameplay\\multiboardon (default 1): 0 shows a map's multiboards minimized. Read when a multiboard is created (0x37447F). Not on the Options screen." },
     "Scheduler::SetPeriod": {
       "kind": "function", "rva": "0x00073630", "conv": "fastcall", "sig": "void(int period_ms, void* context)",
@@ -1250,6 +1385,54 @@
       "kind": "function", "rva": "0x0013fdc0", "conv": "thiscall", "sig": "void(CGxDeviceD3d* this, int release_textures)",
       "bytes": "55 8b ec 81 ec 84 00 00 00 8b 55 fc 53 8b d9 b9",
       "doc": "Clears the device's state caches (render states +0x748, 256 x 12 bytes; texture stages +0x1348/+0x1358; lights +0x1B58, 8 x 0x74) and releases the 7 surfaces at +0x6C0..+0x6D8; with release_textures != 0 also the textures (0x143B00). Called with 0 before IDirect3DDevice9::Reset (0x1404D2) and with 1 by the teardown (0x13FD2B). The d3d-reset-lights patch hooks it (BEFORE). ret 4."
+    },
+    "CScreenFrame::GetCurrent": {
+      "kind": "function", "rva": "0x0011dd60", "conv": "cdecl", "sig": "void*(void)",
+      "bytes": "a1 ?? ?? ?? ?? c3",
+      "doc": "The current screen frame (.data 0xD47BB4, set by 0x11E060: the game UI sets itself at 0x36FFA9), the root frames are laid out on. Plain ret."
+    },
+    "CScreenFrame::UpdateScreenRect": {
+      "kind": "function", "rva": "0x0011dff0", "conv": "thiscall", "sig": "void(void* this)",
+      "bytes": "55 8b ec 83 ec 34 a1 ?? ?? ?? ?? 33 c5 89 45 fc",
+      "doc": "CLayoutFrame.vtable.UpdateScreenRect of a screen frame's layout (this = frame + CFrame.layout): CScreenFrame, CGlueMgr (the menus' root) and CGameUI. Sets the layout's rect (vtable +0xC) to the whole screen, the NDC rect {0, 0, 1, 1} (.rdata 0xA8DD90) through NDCToDDCRect: 0..0.8 x 0..0.6. Plain ret."
+    },
+    "CLayoutFrame.vtable.UpdateScreenRect": { "kind": "offset", "value": "0x4", "doc": "vtable slot of a screen frame's layout (CScreenFrame's at frame + CFrame.layout, vtable 0xA8DD24; CGlueMgr's and CGameUI's the same): CScreenFrame::UpdateScreenRect, void(CLayoutFrame* this), thiscall." },
+    "CSpriteFrame.view": { "kind": "offset", "value": "0x12c", "doc": "float[4]: the rect CSpriteFrame::SetupCamera sets the model's camera up for, {x0, y0, height, width} in UI units (a full-screen sprite: 0, 0, 0.6, the screen's width). Its camera is at +0x140." },
+    "DDCWidth": { "kind": "data", "rva": "0x00aa9328", "doc": "float 0.8: the UI's width in its own units (1.26a: 0.8f widened to a double, read by fmul/fdiv QWORD), which DDCToNDCRect, NDCToDDCRect, DDCToNDC, NDCToDDC, DDCToNDCWidth and NDCToDDCWidth divide or multiply x by (one [disp32] operand each, two in the Rect forms). Other code reads it too: patches point those operands elsewhere rather than write here." },
+    "DDCToNDCRect": {
+      "kind": "function", "rva": "0x008b37a0", "conv": "fastcall", "sig": "void(const float* ddc, float* ndc)",
+      "bytes": "f3 0f 10 01 f3 0f 5e 05 ?? ?? ?? ?? f3 0f 11 02",
+      "doc": "Converts a rect {left, bottom, right, top} from the UI's 0.8 x 0.6 units (DDC) to the screen's 0..1 (NDC): x / 0.8, y / 0.6 (the constants at .rdata 0xAA9328 and 0xAA9324). Plain ret."
+    },
+    "DDCToNDC": {
+      "kind": "function", "rva": "0x008b37f0", "conv": "fastcall", "sig": "void(float* x_out, float* y_out, float x, float y)",
+      "bytes": "55 8b ec 85 c9 74 11 f3 0f 10 45 08 f3 0f 5e 05",
+      "doc": "A point from UI units to 0..1: *x_out = x / 0.8, *y_out = y / 0.6, either out pointer may be null. ret 8."
+    },
+    "DDCToNDCWidth": {
+      "kind": "function", "rva": "0x008b3840", "conv": "stdcall", "sig": "float(float width)",
+      "bytes": "55 8b ec d9 45 08 d8 35 ?? ?? ?? ?? 5d c2 04 00",
+      "doc": "A width from UI units to 0..1 of the screen: width / 0.8 (st0). The height's twin (/ 0.6) is 0x8B3830. ret 4."
+    },
+    "NDCToDDCRect": {
+      "kind": "function", "rva": "0x008b3850", "conv": "fastcall", "sig": "void(const float* ndc, float* ddc)",
+      "bytes": "f3 0f 10 01 f3 0f 59 05 ?? ?? ?? ?? f3 0f 11 02",
+      "doc": "DDCToNDCRect's inverse: x * 0.8, y * 0.6. Plain ret."
+    },
+    "NDCToDDC": {
+      "kind": "function", "rva": "0x008b38a0", "conv": "fastcall", "sig": "void(float* x_out, float* y_out, float x, float y)",
+      "bytes": "55 8b ec 85 c9 74 11 f3 0f 10 45 08 f3 0f 59 05",
+      "doc": "DDCToNDC's inverse: *x_out = x * 0.8, *y_out = y * 0.6, either out pointer may be null. ret 8."
+    },
+    "NDCToDDCWidth": {
+      "kind": "function", "rva": "0x008b38f0", "conv": "stdcall", "sig": "float(float width)",
+      "bytes": "55 8b ec d9 45 08 d8 0d ?? ?? ?? ?? 5d c2 04 00",
+      "doc": "DDCToNDCWidth's inverse: width * 0.8 (st0). The height's twin (* 0.6) is 0x8B38E0. ret 4."
+    },
+    "C44Matrix::Ortho": {
+      "kind": "function", "rva": "0x00126d50", "conv": "thiscall", "sig": "void(float* this, float left, float right, float bottom, float top, float near, float far)",
+      "bytes": "55 8b ec f3 0f 10 5d 08 f3 0f 10 55 0c f3 0f 10",
+      "doc": "Fills the 4x4 matrix at this with an orthographic projection of the box left..right, bottom..top, near..far: m[0] = 2/(right-left), m[5] = 2/(top-bottom), m[10] = 2/(far-near), m[12..14] = -(right+left)/(right-left) and the like, m[15] = 1. The 2D UI's projection is one: 0x193532 passes (0, 0.8, 0, 0.6, 0, 500), the UI's 0.8 x 0.6 space over the whole window. ret 0x18."
     },
     "C44Matrix::Perspective": {
       "kind": "function", "rva": "0x00126e30", "conv": "thiscall", "sig": "void(float* this, float fov, float aspect, float near, float far)",
@@ -1307,6 +1490,7 @@
       "kind": "function", "rva": "0x008e9790", "conv": "thiscall",
       "sig": "int(void* this, const char* name, void* context)",
       "bytes": "55 8b ec 53 56 57 8b d9 e8 a3 f3 ff ff 8b 7d 08",
+      "size": "0x9f",
       "doc": "Loads a whole BLP1 file into the object (+0x4A4 buffer, +0x4A8 size), copies a fixed 0x127-dword header to +8, checks the magic. Returns 1, or 0 for a failed load or a wrong magic. ret 8. The blp-guard patch hooks it (AFTER). See docs/reverse-engineering.md, BLP textures."
     },
     "CBLPFile.buffer": {
@@ -1320,6 +1504,13 @@
     "CBLPFile.header_copy": {
       "kind": "data", "rva": "0x008e97e6",
       "doc": "The fixed-size header copy in CBLPFile::Open (mov ecx,0x127; rep movsd): blp-guard patches it to clamp the copy to the file's length. Bytes b9 27 01 00 00 f3 a5."
+    },
+    "MapTransfer::IsValidName": {
+      "kind": "function", "rva": "0x00979000", "conv": "thiscall",
+      "sig": "int(void* this, const char* name)",
+      "bytes": "55 8b ec 81 ec 08 01 00 00 a1 ?? ?? ?? ?? 33 c5 89 45 fc 56 8b 75 08 57 8b f9 8b",
+      "size": "0x8b",
+      "doc": "The map transfer's check of a file name a host sends (the client's start-download handler 0x989260 calls it on the host's map path before making a transfer, and the host's sender 0x985280 on its own): 0 for an absolute path (0x91F00), any of */:><|&+^?\" (0x91EC0), a base name that is a DOS device (0x91B60: nul, con, prn, aux, com1-9, lpt1-9, compared up to the last dot) or an extension other than the transfer's list (0x9788F0: .w3m;.w3x, at +0x2DA). Backslashes and '..' components pass: the client then looks the path up under the game folder as sent (0x9789E0) before searching Maps\\ by base name. The download itself is written to Maps\\Download\\<base name> (0x979090). ret 4. The lan-map-guard patch hooks it (AFTER). See docs/reverse-engineering.md, Map downloads."
     },
     "CSound::InitMIDI": {
       "kind": "function", "rva": "0x002385b0", "conv": "thiscall",

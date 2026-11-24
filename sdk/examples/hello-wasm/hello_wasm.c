@@ -6,6 +6,7 @@
  * is tagged [hello-wasm] in tome/tome.log.
  */
 #include <tome/tome_wasm.h>
+#include <tome/tome_wasm_game.h>  /* typed hooks: TOME_FN_*, tome_wasm_hook_* */
 
 static uint32_t g_ticks = 0;
 
@@ -157,6 +158,19 @@ static uint32_t native_same(const uint32_t* args, void* user) {
     return args[0];
 }
 
+/* A typed hook (tome_wasm_game.h lists the game functions a module can hook):
+ * CGlueMgr::SetScreen(int screen, int force), after the game's own. The block
+ * holds its arguments by name; a BEFORE handler could change them. */
+static void on_set_screen(void* block, void* user) {
+    static int logged = 0;
+    const tome_wasm_hook_CGlueMgr_SetScreen* call = (const tome_wasm_hook_CGlueMgr_SetScreen*)block;
+    (void)user;
+    if (logged++) return;
+    char line[96] = "first CGlueMgr::SetScreen after enable: screen ";
+    tome_append_int(line, sizeof(line), call->screen);
+    tome_log(TOME_LOG_INFO, line);
+}
+
 int tome_mod_load(void) {
     const tome_wasm_game_info* game = tome_game_info();
     log_line("loaded, Warcraft III ", game->build_name);
@@ -172,6 +186,7 @@ void tome_mod_enable(void) {
     tome_on_event(TOME_EVENT_GAME_END, on_event, 0);
     tome_on_event(TOME_EVENT_TICK, on_event, 0);
     tome_on_ui(TOME_UI_MAIN_MENU, on_main_menu, 0);
+    tome_hook(TOME_FN_CGlueMgr_SetScreen, TOME_HOOK_AFTER, 0, on_set_screen, 0);
     tome_register_native("HelloWasmAdd", native_add, 0);
     tome_register_native("HelloWasmHalf", native_half, 0);
     tome_register_native("HelloWasmGreet", native_greet, 0);

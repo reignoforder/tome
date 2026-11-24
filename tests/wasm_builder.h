@@ -92,6 +92,19 @@ inline Bytes if_() { return {0x04, 0x40}; }  // no result; close with end()
 inline Bytes end() { return {0x0b}; }
 inline Bytes unreachable() { return {0x00}; }
 inline Bytes loop_forever() { return {0x03, 0x40, 0x0c, 0x00, 0x0b}; }  // loop br 0 end
+inline Bytes i32_add() { return {0x6a}; }
+inline Bytes i32_sub() { return {0x6b}; }
+// Stores the i32 (or its low byte) on top of the stack at the address below it.
+inline Bytes i32_store(uint32_t offset = 0) {
+    Bytes b = opcode({0x36, 0x02});
+    uleb(b, offset);
+    return b;
+}
+inline Bytes i32_store8(uint32_t offset = 0) {
+    Bytes b = opcode({0x3a, 0x00});
+    uleb(b, offset);
+    return b;
+}
 inline Bytes i32_load(uint32_t offset = 0) {
     Bytes b = opcode({0x28, 0x02});
     uleb(b, offset);

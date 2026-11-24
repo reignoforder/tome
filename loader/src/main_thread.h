@@ -44,6 +44,11 @@ void set_activate_hook(ActivateHook hook);
 using DestroyHook = void (*)();
 void set_destroy_hook(DestroyHook hook);
 
+// Called for every WM_SIZE of the game window, once client_size has the
+// new size and before the game sees it. One hook (patches/widescreen.cpp).
+using SizeHook = void (*)();
+void set_size_hook(SizeHook hook);
+
 // Like post(), after at least `delay_ms` milliseconds.
 void post_delayed(unsigned delay_ms, std::function<void()> fn);
 

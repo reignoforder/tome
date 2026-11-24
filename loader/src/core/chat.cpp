@@ -90,6 +90,8 @@ TomeCommand parse_tome(std::string_view args) {
         out.action = TomeAction::Help;
     } else if (action == "list") {
         out.action = TomeAction::List;
+    } else if (action == "perf") {
+        out.action = TomeAction::Perf;
     } else if (action == "enable" || action == "disable") {
         if (id.empty()) {
             out.error = "usage: /tome " + action + " <mod id>";
@@ -121,7 +123,7 @@ TomeCommand parse_tome(std::string_view args) {
         out.error = "unknown command \"" + action + "\"; try /tome help";
         return out;
     }
-    if (extra || (!id.empty() && (out.action == TomeAction::Help || out.action == TomeAction::List))) {
+    if (extra || (!id.empty() && (out.action == TomeAction::Help || out.action == TomeAction::List || out.action == TomeAction::Perf))) {
         out = TomeCommand{};
         out.error = "too many arguments; try /tome help";
     }

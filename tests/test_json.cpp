@@ -21,6 +21,12 @@ TEST(json_parses_nested_document) {
     CHECK(v.find("missing") == nullptr);
 }
 
+TEST(json_rejects_escaped_nul) {
+    Value v;
+    CHECK(!parse(R"("a\u0000b")", v).ok);
+    CHECK(parse(R"("a\u0001b")", v).ok);
+}
+
 TEST(json_decodes_surrogate_pairs) {
     Value v;
     CHECK(parse(R"("😀")", v).ok);

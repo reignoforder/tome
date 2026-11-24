@@ -53,6 +53,31 @@ TEST(x86_decodes_common_prologue_instructions) {
     CHECK_EQ(length_of({0xff, 0x15, 1, 2, 3, 4}), size_t(6));                 // call [imm32]
 }
 
+// Where an absolute 32-bit address sits (widescreen's constant_operands relies
+// on it): ModRM mod 0 rm 5 and a SIB with no base, wherever the opcode's
+// bytes put them; no other form has one.
+TEST(x86_reports_absolute_displacements) {
+    auto decode = [](std::initializer_list<uint8_t> bytes) {
+        std::vector<uint8_t> code(bytes);
+        x86::Insn insn;
+        std::string error;
+        CHECK(x86::decode(code.data(), code.size(), insn, error));
+        return insn;
+    };
+    x86::Insn mov = decode({0x8b, 0x05, 1, 2, 3, 4});                    // mov eax, [disp32]
+    CHECK(mov.has_abs_disp32 && mov.abs_disp32_at == 2);
+    x86::Insn sse = decode({0xf3, 0x0f, 0x5e, 0x05, 1, 2, 3, 4});        // divss xmm0, [disp32]
+    CHECK(sse.has_abs_disp32 && sse.abs_disp32_at == 4);
+    x86::Insn sib = decode({0x8b, 0x04, 0x8d, 1, 2, 3, 4});              // mov eax, [ecx*4 + disp32]
+    CHECK(sib.has_abs_disp32 && sib.abs_disp32_at == 3);
+    x86::Insn imm = decode({0x05, 1, 2, 3, 4});                          // add eax, imm32: no memory operand
+    CHECK(!imm.has_abs_disp32);
+    x86::Insn reg_disp = decode({0x8b, 0x81, 1, 2, 3, 4});               // mov eax, [ecx+disp32]: not absolute
+    CHECK(!reg_disp.has_abs_disp32);
+    x86::Insn cmp_imm = decode({0x81, 0x7d, 0x08, 1, 2, 3, 4});          // cmp [ebp+8], imm32
+    CHECK(!cmp_imm.has_abs_disp32);
+}
+
 TEST(x86_refuses_unknown_and_truncated) {
     x86::Insn insn;
     std::string error;

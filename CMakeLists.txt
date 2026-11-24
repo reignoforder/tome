@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 cmake_minimum_required(VERSION 3.20)
 
-project(tome VERSION 0.1.0 LANGUAGES C CXX)
+project(tome VERSION 0.2.0 LANGUAGES C CXX)
 
 if(NOT CMAKE_SIZEOF_VOID_P EQUAL 4)
     message(FATAL_ERROR "Tome must be built as 32-bit. Configure with "

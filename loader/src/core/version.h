@@ -71,4 +71,11 @@ using GameVersionRange = Range<GameVersion>;
 bool parse_semver_range(std::string_view text, SemVerRange& out, std::string& error);
 bool parse_game_range(std::string_view text, GameVersionRange& out, std::string& error);
 
+// The mod API's version_compare and version_match (tome.h, API version 20):
+// `game` picks game versions, else semver. compare_versions sets `order` to
+// -1, 0 or 1; false if either isn't a version. match_version: 1, 0, or -1 if
+// either can't be parsed.
+bool compare_versions(bool game, std::string_view a, std::string_view b, int& order);
+int match_version(bool game, std::string_view range, std::string_view version);
+
 } // namespace tome

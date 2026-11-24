@@ -24,8 +24,13 @@ struct Target;
 // Remembers the running build's mapping database. Call before any hook.
 void init(uintptr_t game_base, const mappings::Build* build);
 
-// The target for a mapped function or import, patching it on first use.
-// Null (with `error`) if the name isn't one or can't be hooked.
+// The target for a mapped function or import, patching it on first use:
+// Tome's names, and mods' own ("<mod id>/<name>", mod_mappings.h). Null
+// (with `error`) if the name isn't one or can't be hooked. A name for a
+// function that's hooked already under another one shares that patch if
+// it passes its arguments the same way (and its bytes match); a patch that
+// would overlap another one's moved bytes is refused. A mod's name whose
+// file now maps another address hooks that one.
 Target* find_or_install(const std::string& name, std::string& error);
 
 // The target if `name` is already hooked, otherwise null.
@@ -39,7 +44,21 @@ Target* find(const std::string& name);
 // API-level boundary only: a mod is native code and can still write process
 // memory directly, which Tome can't prevent for in-process plugins.
 void reserve(const std::string& name);
+// Also true for another name of a reserved function (a mod's mapping of it,
+// or of a place inside it: its mapping's "size").
 bool is_reserved(const std::string& name);
+// Tests only: forgets a reservation (and where its function is).
+void unreserve(const std::string& name);
+
+// Every target `name` hooks or hooked: the current one first, then those
+// it hooked before a mod's file moved it (find_or_install), whose handlers
+// stay. unhook by name looks in all of them.
+std::vector<Target*> targets_of(const std::string& name);
+
+// What tome_hook_call.name should say to a handler hooked by `name` (kept
+// for the session): `target`'s own name, or another name of it. Null if
+// `name` doesn't hook `target`, and never did.
+const char* handler_name(const Target* target, const std::string& name);
 
 // Patches the function at `address`, whose first bytes must match `bytes`
 // (-1 matches anything). find_or_install uses it; tests call it directly.
@@ -56,9 +75,11 @@ Target* install_import(const std::string& name, uintptr_t slot, mappings::Conven
 // remove revokes the handlers' gates first, so calls that already hold the
 // old chain don't start them either.
 // `removed_gates`, if given, receives the removed handlers' gates.
+// `by_name`, if given, removes only what was hooked by that name (a target
+// may have several, hooks::find_or_install).
 void add(Target* target, Handler handler);
 size_t remove(Target* target, tome_mod* mod, int32_t phase, tome_hook_fn fn, void* user,
-              std::vector<const void*>* removed_gates = nullptr);
+              std::vector<const void*>* removed_gates = nullptr, const std::string* by_name = nullptr);
 // Removes the one handler registered with `gate`.
 bool remove_gate(Target* target, const Gate* gate);
 

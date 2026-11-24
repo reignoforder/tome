@@ -7,9 +7,11 @@
 #include "log.h"
 #include "mappings.h"
 #include "mod_manager.h"
+#include "mod_mappings.h"
 #include "mods_ready.h"
 #include "natives.h"
 #include "overlay.h"
+#include "patch.h"
 #include "paths.h"
 #include "storm.h"
 
@@ -18,6 +20,8 @@
 #include <cstring>
 #include <deque>
 #include <map>
+#include <memory>
+#include <set>
 
 namespace tome::testing {
 namespace {
@@ -183,6 +187,49 @@ bool FakeGame::create() {
     for (const mappings::Symbol& sym : mappings_->data->symbols) {
         if (sym.kind == mappings::Kind::Function) put_bytes(sym.name.c_str());
     }
+    // Mods' own mapping files too, as each is read (mod_mappings::verify),
+    // so a mod's hooks on its own functions install in its tests and
+    // tome-check: each function's bytes and each call's E8 rel32. Only into
+    // bytes nothing put there yet, or that a mod's file put there before (a
+    // changed file's new bytes replace them, but not under a patch): a mod's
+    // name for one of the functions above keeps what those have. Imports
+    // aren't checked: this image has no import table.
+    const uintptr_t base = base_;
+    const uint32_t size = mappings_->data->size_of_image;
+    auto from_mods = std::make_shared<std::set<uint32_t>>();  // offsets a mod's file wrote
+    mod_mappings::set_verifier([base, size, from_mods](const mappings::Build& build) {
+        // Never under one of Tome's patches (a hook's jmp): the game's code
+        // doesn't change, and the check reads what was there before it.
+        const std::map<uintptr_t, uint8_t> patched = original_bytes();
+        auto put = [&](uint32_t rva, const std::vector<uint8_t>& bytes) {
+            if (rva >= size || bytes.size() > size - rva) return;
+            auto at = reinterpret_cast<uint8_t*>(base + rva);
+            for (size_t i = 0; i < bytes.size(); ++i) {
+                if (at[i] != 0 && !from_mods->count(rva + static_cast<uint32_t>(i)) && !patched.count(base + rva + i)) {
+                    return;
+                }
+            }
+            for (size_t i = 0; i < bytes.size(); ++i) {
+                if (patched.count(base + rva + i)) continue;
+                at[i] = bytes[i];
+                from_mods->insert(rva + static_cast<uint32_t>(i));
+            }
+            FlushInstructionCache(GetCurrentProcess(), at, bytes.size());
+        };
+        mappings::Build checked = build;
+        std::erase_if(checked.symbols, [](const mappings::Symbol& sym) { return sym.kind == mappings::Kind::Import; });
+        for (const mappings::Symbol& sym : checked.symbols) {
+            if (sym.kind == mappings::Kind::Function) {
+                std::vector<uint8_t> bytes;
+                for (int16_t b : sym.bytes) bytes.push_back(b < 0 ? 0 : static_cast<uint8_t>(b));
+                put(sym.value, bytes);
+            } else if (const mappings::Symbol* target = sym.kind == mappings::Kind::Call ? build.find(sym.target) : nullptr) {
+                const uint32_t rel = target->value - (sym.value + 5);
+                put(sym.value, {0xE8, uint8_t(rel), uint8_t(rel >> 8), uint8_t(rel >> 16), uint8_t(rel >> 24)});
+            }
+        }
+        return mod_mappings::check_code(checked);
+    });
     if (!put_slash_command()) return false;
     if (!put_bytes("RCString::GetText")) return false;
     if (!put_jump("InitNatives", reinterpret_cast<const void*>(&fake_init_natives))) return false;

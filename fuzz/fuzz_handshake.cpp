@@ -14,9 +14,11 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 
     ModSet local = {{"hello", "1.0.0", "1a2b3c4d"}, {"other", "2.0.0", "00ff00ff"}};
     std::vector<LobbyPlayer> others = {{1, "a"}, {2, "b"}};
-    Lobby host, client;
+    Lobby host, client, known;  // known: a client that knows the host (player 1)
+    known.set_host(1);
     host.update(true, local, others, 0);
     client.update(false, local, others, 0);
+    known.update(false, local, others, 0);
 
     // Each line of the input is one chat line; the first byte of a line picks the sender.
     Assembler assembler;
@@ -38,6 +40,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
             }
             host.receive(from, line);
             client.receive(from, line);
+            known.receive(from, line);
         }
         SyncMod mod;
         if (decode_key(line, mod)) {
@@ -46,6 +49,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         }
         host.update(true, local, others, now);
         client.update(false, local, others, now += 0.5);
+        known.update(false, local, others, now);
     }
     std::vector<std::string> problems;
     host.can_start(problems);
@@ -53,6 +57,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     client.take_outgoing();
     host.take_notes();
     client.take_notes();
+    known.take_outgoing();
+    known.take_notes();
     for (const auto& [slot, set] : record.sets()) explain(compare(local, set), "you");
     return 0;
 }

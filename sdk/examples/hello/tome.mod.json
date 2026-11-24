@@ -9,7 +9,7 @@
   "license": "MIT",
   "icon": "icon.blp",
   "game": "1.27b",
-  "tome": ">=0.1.0 <0.2.0",
+  "tome": ">=0.2.0 <0.3.0",
   "entry": "hello.dll",
   "sync": "client",
   "reload": "live",

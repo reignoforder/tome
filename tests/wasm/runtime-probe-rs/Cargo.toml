@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# A WebAssembly mod for tests/host/test_wasm.cpp: the Rust runtime's lobby and
+# hook callbacks (see tests/wasm/runtime-probe for the C one). A workspace of
+# its own, built for wasm32-unknown-unknown by tests/CMakeLists.txt.
+[workspace]
+
+[package]
+name = "runtime-probe-rs"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]   # runtime_probe_rs.wasm: tome.mod.json "wasm"
+
+[dependencies]
+tome-wasm = { path = "../../../sdk/rust/wasm/tome-wasm" }
+
+[profile.release]
+strip = true
+opt-level = "s"

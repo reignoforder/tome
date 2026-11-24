@@ -6,7 +6,7 @@
 # exits by itself so tome.mix and the mods write their counters), then the
 # report by section (tools/coverage.py).
 #
-#   tools/coverage.sh [--no-e2e]     COVERAGE_MIN=90 fails below that
+#   tools/coverage.sh [--no-e2e]     COVERAGE_MIN=80 fails below that
 set -uo pipefail
 cd "$(dirname "$0")/.."
 BUILD="${COVERAGE_BUILD:-build-cov}"

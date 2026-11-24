@@ -53,8 +53,14 @@ helpers check for you.
   players, resources, day and night, saved games.
 - **UI** [3, 5]: frames from the mod's own FDF files on every menu screen and
   in games, button clicks, popups [10].
+- **Typed hooks and calls** (no API change): `#include <tome/tome_game.h>`
+  (generated from the mapping files, `tools/gen-game-header.py`) for
+  `TOME_FN_<name>` (the name for `hook` and `resolve`), `tome_fn_<name>` (the
+  function's pointer type, calling convention included) and `TOME_ARGS(<name>,
+  call)->text`, a hook's arguments by name instead of `call->args[1]`.
 - **Hooks** [4, 9]: run code before, after or instead of a mapped game
-  function or an import of game.dll.
+  function or an import of game.dll, Tome's or one the mod maps itself
+  (`mappings/<build>.json`, `docs/tome-mod-json.md`).
 - **Settings and keybinds** [7]: pages in the Mods menu, generated from the
   mod's files.
 - **Chat commands** [5]: `/name ...` in games.
@@ -74,6 +80,45 @@ helpers check for you.
   each object is still there before it touches it. In a multiplayer game
   or a replay, only `"sync": "required"` mods may change properties or run
   natives.
+- **The game's host** [17]: which player created the current game
+  (`host_player`), the same on every player's computer, also in replays.
+- **Messages between players** [18]: send up to 1 KiB to your mod on every
+  player's computer (`net_send`, `on_net_message`), all at the same point
+  of the game, the replay included.
+- **Timers** [19]: run a callback after a delay, once or again and again,
+  on real time (for UI, on every screen) or game time (`TOME_CLOCK_GAME`:
+  follows the game speed and pauses, and fires in the same game step on
+  every player's computer, so gameplay can use it). `timer_start`,
+  `timer_stop`.
+- **Desync checks** [19]: give Tome a hash of your mod's game state
+  (`on_checksum`, `tome_hash_*`); in a multiplayer game it compares it
+  between the players every few seconds and tells them which mod differs
+  from whose computer, instead of the game dropping players without saying
+  why.
+- **Versions and the installed mods** [20]: compare versions and check
+  ranges by Tome's own rules, the ones `tome.mod.json` is checked with
+  (`version_compare`, `version_match`; mods' semver and game versions),
+  list every installed mod with its version, state and why it isn't running
+  (`list_mods`), hear when that list changes (`TOME_EVENT_MODS_CHANGED`),
+  find the folder mods are installed in (`mods_dir`), and check a release's
+  `tome.mod.json` before installing it, as Tome will check it
+  (`check_metadata`): what an updater or a mod browser needs.
+- **The lobby** [21]: before a LAN or Battle.net game starts, send up to
+  1 KiB to your mod on other players' computers (`lobby_send`,
+  `on_lobby_message`: the host to any player who runs Tome, a player to the
+  host; hidden lobby chat lines), see who's in the lobby (`lobby_players`), write in its chat
+  (`lobby_show`),
+  and keep the game from starting until your mod is ready
+  (`on_lobby_start`; `lobby_start` presses Start once it is). Required mods
+  only; WebAssembly mods have all of it (`tome_lobby_send`, `tome_on_lobby_message`,
+  `tome_lobby_players`, `tome_on_lobby_start`; `lobby_send` and friends in Rust).
+- **Destroying frames** [21]: `frame_destroy` (`BlzDestroyFrame` in JASS)
+  destroys a frame your mod made and the frames below it, so a list, a tooltip
+  or a panel can come and go and its name can be created again. Only frames
+  made through Tome (not the game's own, not Tome's menus); on 1.27b.
+- **Your mod's time**: Tome times every call into your mod. The Mods menu's
+  Details page shows its time a frame and its slowest call, `/tome perf`
+  the busiest mods.
 
 A mod built against an older `tome.h` keeps working with a newer Tome: the
 API only ever grows.
@@ -219,8 +264,9 @@ It can use almost all of the API: settings, chat commands, game events,
 screens, frames and clicks, keybinds, popups, the selection, messages
 between mods, JASS natives and code values, the game's files, and files of
 its own (`tome_config_read`/`tome_config_write` instead of a folder path).
-It can't hook game functions, resolve addresses or reach memory: if a mod
-needs those, it's a DLL mod.
+It can't resolve addresses or reach memory, and its hooks are limited to the
+game functions that take numbers and units, items and players
+(`tome_wasm_game.h`): if a mod needs more than that, it's a DLL mod.
 
 ```sh
 cp -r templates/wasm my-mod && cd my-mod

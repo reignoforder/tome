@@ -30,7 +30,7 @@
  * one instead, for locals only, with the symbol one argument further
  * (kVariants).
  *
- * Built in as a patch, not a mod, so it's always in force (patches.h). The
+ * Built in as a patch, not a mod, so mods can't turn it off (patches.h). The
  * downloaded-map scanner that *reports* the same pattern in the log lives
  * separately, at map load (events.cpp, core/jass.cpp).
  */
@@ -189,6 +189,7 @@ extern const Patch kMemhackGuard = {
     kReserve,   // and reserves: mods can't hook the compiler functions
     nullptr,    // needed everywhere
     install_memhack_guard,
+    true,  // sync: changes what map scripts do
 };
 
 } // namespace tome::patches

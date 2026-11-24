@@ -54,6 +54,7 @@ imports! {
     fn frame_set_point(frame: u32, point: i32, relative: u32, relative_point: i32, x: f32, y: f32) -> i32;
     fn frame_set_text(frame: u32, text: *const u8, len: u32) -> i32;
     fn frame_set_visible(frame: u32, visible: i32) -> i32;
+    fn frame_destroy(frame: u32) -> i32;
     fn frame_set_animation(sprite: u32, tags: *const i32, count: i32) -> i32;
     fn frame_on_click(button: u32, callback: u32) -> i32;
     fn load_fdf(path: *const u8, len: u32) -> i32;
@@ -83,5 +84,21 @@ imports! {
     fn get_keyed_property(object: u32, property: i32, key: u32, value: *mut f64) -> i32;
     fn set_keyed_property(object: u32, property: i32, key: u32, value: f64) -> i32;
     fn list_objects(kind: i32, out: *mut u32, max: i32) -> i32;
+    fn host_player() -> i32;
+    fn net_send(data: *const u8, size: u32) -> i32;
+    fn on_net_message(callback: u32) -> i32;
+    fn timer_start(clock: i32, delay: f64, interval: f64, callback: u32, timer: *mut u32) -> i32;
+    fn timer_stop(timer: u32) -> i32;
+    fn on_checksum(callback: u32) -> i32;
+    fn version_compare(kind: i32, a: *const u8, a_len: u32, b: *const u8, b_len: u32, order: *mut i32) -> i32;
+    fn version_match(kind: i32, range: *const u8, range_len: u32, version: *const u8, version_len: u32) -> i32;
+    fn check_metadata(text: *const u8, size: u32, reason: *mut u8, reason_size: u32) -> i32;
+    fn hook(name: *const u8, len: u32, phase: i32, priority: i32, callback: u32) -> i32;
+    fn lobby_show(text: *const u8, len: u32) -> i32;
+    fn lobby_start() -> i32;
+    fn lobby_send(to: i32, data: *const u8, size: u32) -> i32;
+    fn on_lobby_message(callback: u32) -> i32;
+    fn lobby_players(out: *mut u8, max: i32) -> i32;
+    fn on_lobby_start(callback: u32) -> i32;
     fn jass_call(name: *const u8, len: u32, args: *const u32, count: i32, result: *mut u32, text: *mut u8, capacity: u32) -> i32;
 }

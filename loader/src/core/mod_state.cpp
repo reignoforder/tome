@@ -143,6 +143,10 @@ std::string manifest(std::vector<CodeFile> files) {
     return text;
 }
 
+std::string built_code_manifest(const std::string& code_hash, const std::string& built) {
+    return code_hash + "  files\n" + built + "  shade\n";
+}
+
 bool debug_approves(std::string_view list, std::string_view id) {
     while (!list.empty()) {
         size_t comma = list.find(',');

@@ -51,11 +51,15 @@ bool parse_step(std::string_view item, Step& step) {
             return true;
         }
     }
-    std::string_view click = "click:", focus = "focus:";
-    const bool is_click = head.substr(0, click.size()) == click;
-    if (is_click || head.substr(0, focus.size()) == focus) {
-        step.kind = is_click ? Kind::ClickFrame : Kind::Focus;
-        std::string_view rest = head.substr(is_click ? click.size() : focus.size());
+    struct FrameStep {
+        std::string_view prefix;
+        Kind kind;
+    };
+    for (const FrameStep& fs : {FrameStep{"click:", Kind::ClickFrame}, FrameStep{"focus:", Kind::Focus},
+                                FrameStep{"dump:", Kind::Dump}}) {
+        if (head.substr(0, fs.prefix.size()) != fs.prefix) continue;
+        step.kind = fs.kind;
+        std::string_view rest = head.substr(fs.prefix.size());
         size_t comma = rest.find(',');
         std::string_view name = rest.substr(0, comma);
         if (name.empty()) return false;
@@ -69,6 +73,14 @@ bool parse_step(std::string_view item, Step& step) {
             step.context = static_cast<int>(context);
         }
         return true;
+    }
+    std::string_view resize = "resize:";
+    if (head.substr(0, resize.size()) == resize) {
+        step.kind = Kind::Resize;
+        std::string_view size = head.substr(resize.size());
+        size_t x = size.find('x');
+        return x != std::string_view::npos && parse_number(size.substr(0, x), 5, step.width) &&
+               parse_number(size.substr(x + 1), 5, step.height) && step.width > 0 && step.height > 0;
     }
     std::string_view frames = "frames:";
     if (head.substr(0, frames.size()) == frames) {

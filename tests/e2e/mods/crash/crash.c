@@ -28,8 +28,12 @@ static get_text_fn get_text;
 static probe_rep probe_rep_ = {{0}, "TomeCrashProbe"};
 static probe_string probe = {{0}, &probe_rep_};
 
+/* A null pointer read at run time: a write through a constant null is
+   undefined, and GCC drops it below -O2 (above, it puts a trap there). */
+static volatile int* volatile null_pointer;
+
 static void crash(void) {
-    *(volatile int*)0 = 1;
+    *null_pointer = 1;
 }
 
 static DWORD WINAPI crash_thread(LPVOID unused) {

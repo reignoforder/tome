@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "game_build.h"
 
+#include "pe.h"
 #include "sha256.h"
 
 #include <cstdio>
@@ -10,16 +11,8 @@ namespace tome {
 namespace {
 
 uint32_t pe_timestamp_of(HMODULE module) {
-    auto base = reinterpret_cast<const uint8_t*>(module);
-    auto dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
-    if (dos->e_magic != IMAGE_DOS_SIGNATURE) {
-        return 0;
-    }
-    auto nt = reinterpret_cast<const IMAGE_NT_HEADERS32*>(base + dos->e_lfanew);
-    if (nt->Signature != IMAGE_NT_SIGNATURE) {
-        return 0;
-    }
-    return nt->FileHeader.TimeDateStamp;
+    const IMAGE_NT_HEADERS32* nt = pe::nt_headers(module);
+    return nt ? nt->FileHeader.TimeDateStamp : 0;
 }
 
 std::string file_version_of(const std::wstring& path) {

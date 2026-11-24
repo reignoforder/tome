@@ -8,7 +8,7 @@
   "authors": ["Tome contributors"],
   "license": "MIT",
   "game": "1.27b",
-  "tome": ">=0.1.0 <0.2.0",
+  "tome": ">=0.2.0 <0.3.0",
   "entry": "hello-cpp.dll",
   "sync": "client",
   "reload": "live",

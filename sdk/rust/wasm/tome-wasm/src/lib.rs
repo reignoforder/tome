@@ -221,6 +221,194 @@ pub fn display_text(text: &str, seconds: f32) -> Result<()> {
     check(unsafe { raw::display_text(ptr, len, seconds) })
 }
 
+/// Shows `text` in this computer's lobby chat (API version 21).
+pub fn lobby_show(text: &str) -> Result<()> {
+    let (ptr, len) = str_arg(text);
+    check(unsafe { raw::lobby_show(ptr, len) })
+}
+
+/// Presses the host's Start for this mod (API version 21): the same
+/// checks run. Only for a "sync": "required" mod, in the host's lobby.
+pub fn lobby_start() -> Result<()> {
+    check(unsafe { raw::lobby_start() })
+}
+
+// --- hooks --------------------------------------------------------------------
+
+/// When a hook's handler runs around the game's function.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HookPhase {
+    /// Before it: the handler may change float arguments and the plain int ones
+    /// (other ints are read-only), or `skip` the
+    /// game's function and give the result itself.
+    Before,
+    /// After it: the handler may read and change the result.
+    After,
+}
+
+/// One call of a hooked game function, as `hook` hands it to a handler: the
+/// arguments in the order of the function's signature (`tome_wasm_game.h`
+/// shows them for each function that can be hooked). Numbers (`int`,
+/// `uint32_t`, `float`) can be changed in a BEFORE handler; units, items and
+/// players are handles, read with `handle` and never changed.
+pub struct HookCall<'a> {
+    pub(crate) words: &'a mut [u32],
+}
+
+impl HookCall<'_> {
+    fn arg_word(&self, index: usize) -> u32 {
+        self.words.get(2 + index).copied().unwrap_or(0)
+    }
+    fn set_arg_word(&mut self, index: usize, value: u32) {
+        if let Some(word) = self.words.get_mut(2 + index) {
+            *word = value;
+        }
+    }
+    /// How many arguments there are (`this` counts).
+    pub fn arg_count(&self) -> usize {
+        self.words.len().saturating_sub(2)
+    }
+    /// Argument `index` as an integer (0 if there's no such argument).
+    pub fn int(&self, index: usize) -> i32 {
+        self.arg_word(index) as i32
+    }
+    /// Argument `index` as an unsigned integer.
+    pub fn uint(&self, index: usize) -> u32 {
+        self.arg_word(index)
+    }
+    /// Argument `index` as a float.
+    pub fn float(&self, index: usize) -> f32 {
+        f32::from_bits(self.arg_word(index))
+    }
+    /// Argument `index` as a unit, item or player handle (0: none).
+    pub fn handle(&self, index: usize) -> u32 {
+        self.arg_word(index)
+    }
+    /// Changes number argument `index` (a BEFORE handler: the game's function gets it).
+    pub fn set_int(&mut self, index: usize, value: i32) {
+        self.set_arg_word(index, value as u32);
+    }
+    /// Changes number argument `index`.
+    pub fn set_float(&mut self, index: usize, value: f32) {
+        self.set_arg_word(index, value.to_bits());
+    }
+    /// The result (what the game's function returned: AFTER handlers only; 0 before).
+    pub fn result_int(&self) -> i32 {
+        self.words[1] as i32
+    }
+    /// The result as a float.
+    pub fn result_float(&self) -> f32 {
+        f32::from_bits(self.words[1])
+    }
+    /// Changes the result (AFTER handlers, or after `skip`).
+    pub fn set_result_int(&mut self, value: i32) {
+        self.words[1] = value as u32;
+    }
+    /// Changes the result.
+    pub fn set_result_float(&mut self, value: f32) {
+        self.words[1] = value.to_bits();
+    }
+    /// BEFORE handlers: the game's function doesn't run; the result set here is returned.
+    pub fn skip(&mut self) {
+        self.words[0] |= 1; // TOME_WASM_HOOK_SKIP
+    }
+}
+
+/// Runs `f` around the mapped game function `name` (`tome_wasm_game.h` lists
+/// the ones a module can hook: numbers, units, items and players as arguments,
+/// a number or nothing as the result), on the game's main thread only. Higher
+/// priorities run first. Kept until the mod is disabled.
+pub fn hook(name: &str, phase: HookPhase, priority: i32, f: impl Fn(&mut HookCall) + 'static) -> Result<()> {
+    let phase = match phase {
+        HookPhase::Before => consts::TOME_HOOK_BEFORE,
+        HookPhase::After => consts::TOME_HOOK_AFTER,
+    };
+    let (ptr, len) = str_arg(name);
+    rt::register(Callback::Hook(Rc::new(f)), |id| unsafe { raw::hook(ptr, len, phase, priority, id) }).map(drop)
+}
+
+/// Sends `data` (up to `consts::TOME_LOBBY_MAX_MESSAGE` bytes) to this mod on
+/// the computer of lobby player `to` (`LobbyPlayer::id`, or
+/// `consts::TOME_LOBBY_EVERYONE` from the host). Only in a lobby, for a
+/// "sync": "required" mod.
+pub fn lobby_send(to: i32, data: &[u8]) -> Result<()> {
+    let size = u32::try_from(data.len()).unwrap_or(u32::MAX);
+    check(unsafe { raw::lobby_send(to, data.as_ptr(), size) })
+}
+
+/// A message `on_lobby_message` hands over: untrusted input from another
+/// player, so check what it says and who sent it.
+pub struct LobbyMessage<'a> {
+    /// The sender's lobby id (`LobbyPlayer::id`).
+    pub player: i32,
+    /// The sender is the game's host.
+    pub from_host: bool,
+    pub data: &'a [u8],
+}
+
+/// `f` gets every message this mod's copies send it in the lobby.
+pub fn on_lobby_message(f: impl Fn(&LobbyMessage) + 'static) -> Result<()> {
+    rt::register(Callback::Lobby(Rc::new(f)), |id| unsafe { raw::on_lobby_message(id) }).map(drop)
+}
+
+/// A person in the lobby (computers aren't listed).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LobbyPlayer {
+    /// The lobby's net id: `lobby_send`'s `to`.
+    pub id: i32,
+    pub is_host: bool,
+    /// This computer.
+    pub is_local: bool,
+    /// The handshake heard from its Tome.
+    pub runs_tome: bool,
+    pub name: String,
+}
+
+/// The people in the lobby, this computer included; `None` outside a game's lobby.
+pub fn lobby_players() -> Option<Vec<LobbyPlayer>> {
+    const SIZE: usize = 48;
+    let mut max = 16usize;
+    loop {
+        let mut buf = vec![0u8; max * SIZE];
+        let total = unsafe { raw::lobby_players(buf.as_mut_ptr(), max as i32) };
+        let total = usize::try_from(total).ok()?;
+        if total > max {
+            max = total;
+            continue;
+        }
+        return Some(buf.chunks_exact(SIZE).take(total).map(parse_lobby_player).collect());
+    }
+}
+
+fn parse_lobby_player(raw: &[u8]) -> LobbyPlayer {
+    let int = |at: usize| i32::from_le_bytes([raw[at], raw[at + 1], raw[at + 2], raw[at + 3]]);
+    let name = &raw[16..48];
+    let len = name.iter().position(|&b| b == 0).unwrap_or(name.len());
+    LobbyPlayer {
+        id: int(0),
+        is_host: int(4) != 0,
+        is_local: int(8) != 0,
+        runs_tome: int(12) != 0,
+        name: String::from_utf8_lossy(&name[..len]).into_owned(),
+    }
+}
+
+/// What `on_lobby_start` says about the host's Start.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LobbyStart {
+    Allow,
+    /// Keeps the game from starting; the reason (up to 251 bytes, may be
+    /// empty) goes to the lobby's chat.
+    Refuse(String),
+}
+
+/// `f` runs when the host presses Start, once Tome's own checks pass: only on
+/// the host, only for a "sync": "required" mod. Any mod's refusal keeps the
+/// game from starting.
+pub fn on_lobby_start(f: impl Fn() -> LobbyStart + 'static) -> Result<()> {
+    rt::register(Callback::LobbyStart(Rc::new(f)), |id| unsafe { raw::on_lobby_start(id) }).map(drop)
+}
+
 /// Asks the player to restart the game (a dialog; nothing happens unless
 /// they agree).
 pub fn restart_game() -> Result<()> {
@@ -353,6 +541,83 @@ pub fn handle_of(object: u32) -> u32 {
 pub fn player_object(slot: i32) -> Option<u32> {
     let object = unsafe { raw::player_object(slot) };
     (object != 0).then_some(object)
+}
+
+/// The current game's host: its player slot (0 = Player 1), the same on
+/// every player's computer; `None` outside a game.
+pub fn host_player() -> Option<i32> {
+    let slot = unsafe { raw::host_player() };
+    (slot >= 0).then_some(slot)
+}
+
+/// Which kind of version [`version_compare`] and [`version_match`] read
+/// (`tome_version_kind`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VersionKind {
+    /// Semantic versions: mods' `"version"` and `"depends"`, and Tome's own.
+    Mod,
+    /// Game versions: `"game"` in `tome.mod.json` (`"1.27.1.7085"`, `"1.27b"`).
+    Game,
+}
+
+fn version_kind(kind: VersionKind) -> i32 {
+    match kind {
+        VersionKind::Mod => consts::TOME_VERSION_MOD,
+        VersionKind::Game => consts::TOME_VERSION_GAME,
+    }
+}
+
+/// Compares two versions by Tome's own rules; an error if either isn't one.
+pub fn version_compare(kind: VersionKind, a: &str, b: &str) -> Result<core::cmp::Ordering> {
+    let (a_ptr, a_len) = str_arg(a);
+    let (b_ptr, b_len) = str_arg(b);
+    let mut order = 0i32;
+    check(unsafe { raw::version_compare(version_kind(kind), a_ptr, a_len, b_ptr, b_len, &mut order) })?;
+    Ok(order.cmp(&0))
+}
+
+/// What [`check_metadata`] says of a `tome.mod.json`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MetadataCheck {
+    /// It would run here (if what it `"depends"` on is installed).
+    Runs,
+    /// Valid, but not for this game, edition, Tome or build: why.
+    NotHere(String),
+    /// Not a valid `tome.mod.json`: why.
+    Invalid(String),
+}
+
+/// Checks a `tome.mod.json` (a release's, before installing it) as Tome
+/// checks an installed one. Up to 64 KiB.
+pub fn check_metadata(text: &str) -> MetadataCheck {
+    let mut reason = vec![0u8; 1024];
+    let r = unsafe {
+        raw::check_metadata(
+            text.as_ptr(),
+            text.len() as u32,
+            reason.as_mut_ptr(),
+            reason.len() as u32,
+        )
+    };
+    let end = reason.iter().position(|&b| b == 0).unwrap_or(reason.len());
+    let why = String::from_utf8_lossy(&reason[..end]).into_owned();
+    match r {
+        1 => MetadataCheck::Runs,
+        0 => MetadataCheck::NotHere(why),
+        _ => MetadataCheck::Invalid(why),
+    }
+}
+
+/// Whether `version` is in `range`, as Tome checks `"depends"`, `"tome"` and
+/// `"game"`; `None` if either can't be parsed.
+pub fn version_match(kind: VersionKind, range: &str, version: &str) -> Option<bool> {
+    let (r_ptr, r_len) = str_arg(range);
+    let (v_ptr, v_len) = str_arg(version);
+    match unsafe { raw::version_match(version_kind(kind), r_ptr, r_len, v_ptr, v_len) } {
+        1 => Some(true),
+        0 => Some(false),
+        _ => None,
+    }
 }
 
 /// A unit as the selection describes it, if it's a live unit.
@@ -574,6 +839,13 @@ impl Frame {
         check(unsafe { raw::frame_set_visible(self.0, visible as i32) })
     }
 
+    /// Destroys a frame made with [`Frame::create`], and the frames below it;
+    /// their handles stop working and their names can be created again. From
+    /// a click callback it happens right after the click.
+    pub fn destroy(self) -> Result<()> {
+        check(unsafe { raw::frame_destroy(self.0) })
+    }
+
     /// A sprite's animation, by tags.
     pub fn set_animation(self, tags: &[i32]) -> Result<()> {
         let count = i32::try_from(tags.len()).map_err(|_| Error::INVALID_ARGUMENT)?;
@@ -694,6 +966,122 @@ pub fn publish(topic: &str, data: &[u8]) -> usize {
     usize::try_from(unsafe { raw::publish(ptr, len, data.as_ptr(), size) }).unwrap_or(0)
 }
 
+// --- messages between players ----------------------------------------------
+
+/// Sends `data` (up to `consts::TOME_NET_MAX_MESSAGE` bytes) to this mod on
+/// every player's computer, this one included, at the same point of the
+/// game. Only in a game from its first step (the first game tick, not yet at
+/// game start); in multiplayer only for a "sync": "required" mod.
+pub fn net_send(data: &[u8]) -> Result<()> {
+    let size = u32::try_from(data.len()).unwrap_or(u32::MAX);
+    check(unsafe { raw::net_send(data.as_ptr(), size) })
+}
+
+/// `f` gets every message this mod's copies send (the sender's player slot,
+/// the data, whether a replay plays it back). Untrusted input from other
+/// players: check what it says.
+pub fn on_net_message(f: impl Fn(i32, &[u8], bool) + 'static) -> Result<()> {
+    rt::register(Callback::Net(Rc::new(f)), |id| unsafe { raw::on_net_message(id) }).map(drop)
+}
+
+// --- timers and desync checks ------------------------------------------------
+
+/// Which clock a timer runs on (`tome_clock`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Clock {
+    /// Real time, checked once per frame drawn, in menus and games: for UI.
+    Real,
+    /// Game time: only in a game, follows the game speed, stops while it's
+    /// paused, ends with the game; fires in the same game step on every
+    /// player's computer if each started it in the same one.
+    Game,
+}
+
+/// Calls `f` (with the timer's id) `delay` seconds from now, then every
+/// `interval` seconds until `timer_stop` (0: only once). Returns its id.
+pub fn timer_start(clock: Clock, delay: f64, interval: f64, f: impl Fn(u32) + 'static) -> Result<u32> {
+    let clock = match clock {
+        Clock::Real => consts::TOME_CLOCK_REAL,
+        Clock::Game => consts::TOME_CLOCK_GAME,
+    };
+    let mut timer = 0u32;
+    let id = rt::register(Callback::Timer(Rc::new(f)), |cb| unsafe {
+        raw::timer_start(clock, delay, interval, cb, &mut timer)
+    })?;
+    rt::note_timer(timer, id);
+    Ok(timer)
+}
+
+/// Stops one of the mod's timers.
+pub fn timer_stop(timer: u32) -> Result<()> {
+    check(unsafe { raw::timer_stop(timer) })?;
+    rt::forget_timer(timer);
+    Ok(())
+}
+
+/// Gives Tome the mod's checksum for desync checks (tome.h, `on_checksum`):
+/// `f` returns a hash of the mod's game state ([`Hash`] makes one), which
+/// must be the same on every player's computer. For a "sync": "required"
+/// mod, called every few seconds of a multiplayer game.
+pub fn on_checksum(f: impl Fn() -> u64 + 'static) -> Result<()> {
+    let id = rt::register(Callback::Checksum(Rc::new(f)), |id| unsafe { raw::on_checksum(id) })?;
+    rt::replace_checksum(Some(id));
+    Ok(())
+}
+
+/// Removes the mod's checksum.
+pub fn clear_checksum() -> Result<()> {
+    check(unsafe { raw::on_checksum(0) })?;
+    rt::replace_checksum(None);
+    Ok(())
+}
+
+/// A hash for desync checks, as tome.h's `tome_hash_*` (FNV-1a, 64 bits):
+/// `Hash::new().u32(wave).f64(boss_life).value()`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Hash(pub u64);
+
+impl Default for Hash {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Hash {
+    /// The starting value (`TOME_HASH_INIT`).
+    pub const fn new() -> Self {
+        Hash(0xcbf2_9ce4_8422_2325)
+    }
+    /// Adds bytes.
+    pub fn bytes(mut self, data: &[u8]) -> Self {
+        for &b in data {
+            self.0 ^= u64::from(b);
+            self.0 = self.0.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        self
+    }
+    /// Adds a number, little-endian (as `tome_hash_u32`).
+    pub fn u32(self, value: u32) -> Self {
+        self.bytes(&value.to_le_bytes())
+    }
+    /// Adds a number, little-endian.
+    pub fn i32(self, value: i32) -> Self {
+        self.bytes(&value.to_le_bytes())
+    }
+    /// Adds a number, little-endian (as `tome_hash_u64`).
+    pub fn u64(self, value: u64) -> Self {
+        self.bytes(&value.to_le_bytes())
+    }
+    /// A number's bits (0.0 and -0.0 differ).
+    pub fn f64(self, value: f64) -> Self {
+        self.u64(value.to_bits())
+    }
+    /// The hash.
+    pub fn value(self) -> u64 {
+        self.0
+    }
+}
+
 // --- files --------------------------------------------------------------------
 
 /// A game file (through the archives and Tome's overlay), if there is one.
@@ -768,6 +1156,14 @@ macro_rules! export_mod {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn hash_matches_fnv1a() {
+        // FNV-1a 64 of "a" is af63dc4c8601ec8c; of nothing, the start value.
+        assert_eq!(super::Hash::new().value(), 0xcbf2_9ce4_8422_2325);
+        assert_eq!(super::Hash::new().bytes(b"a").value(), 0xaf63_dc4c_8601_ec8c);
+        assert_eq!(super::Hash::new().u32(1).value(), super::Hash::new().bytes(&[1, 0, 0, 0]).value());
+    }
+
     use super::*;
 
     #[test]

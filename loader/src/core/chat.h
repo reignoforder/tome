@@ -30,7 +30,7 @@ std::string lowercase(std::string_view text);
 bool reserved(std::string_view name);
 
 // The /tome command's subcommands.
-enum class TomeAction { Help, List, Enable, Disable, Reload, Logs, Invalid };
+enum class TomeAction { Help, List, Enable, Disable, Reload, Logs, Perf, Invalid };
 
 // Logs: which lines of tome.log to show.
 enum class LogFilter { All, Warn /* warnings and errors */, Error };
@@ -47,7 +47,7 @@ struct TomeCommand {
 };
 
 // Parses the arguments of "/tome": "", "help", "list", "enable <id>",
-// "disable <id>", "reload [id]", "logs [warn|error] [count]" (in either order).
+// "disable <id>", "reload [id]", "logs [warn|error] [count]" (in either order), "perf".
 TomeCommand parse_tome(std::string_view args);
 
 } // namespace tome::chat

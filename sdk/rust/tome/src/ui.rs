@@ -148,6 +148,16 @@ impl Tome {
         Frame::from_raw(unsafe { create(self.ptr(), name.as_ptr(), parent.as_raw(), priority, context) })
     }
 
+    /// Destroys a frame made with [`Tome::create_frame`] and the frames below
+    /// it: their names can be created again, and the pointers stop being
+    /// frames (do not use `frame` after this). Not for the game's frames.
+    /// From a click callback it happens right after the click.
+    pub fn destroy_frame(self, frame: Frame) -> Result<()> {
+        self.require(21)?;
+        let f = self.raw().0.frame_destroy.ok_or(Error::UNAVAILABLE)?;
+        check(unsafe { f(self.ptr(), frame.as_raw()) })
+    }
+
     /// The root frame of a screen while it shows.
     pub fn ui_root(self, screen: UiEvent) -> Option<Frame> {
         self.require(5).ok()?;

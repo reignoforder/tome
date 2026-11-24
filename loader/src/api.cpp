@@ -1,24 +1,35 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "api.h"
 
+#include "core/metadata_check.h"
+#include "core/version.h"
+#include "desync.h"
 #include "events.h"
 #include "frames.h"
+#include "guard.h"
+#include "handshake.h"
 #include "hooks.h"
 #include "intermod.h"
 #include "keybinds.h"
 #include "log.h"
 #include "mod_manager.h"
+#include "mod_mappings.h"
 #include "natives.h"
+#include "lobby_messages.h"
+#include "net_messages.h"
 #include "objects.h"
 #include "popups.h"
 #include "settings_api.h"
+#include "shade.h"
 #include "storm.h"
+#include "timers.h"
 #include "units.h"
 #include "unwind.h"
 
 #include <windows.h>
 
 #include <cstring>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -28,6 +39,7 @@ namespace {
 std::string g_build_name;
 std::string g_file_version;
 tome_game_info g_game_info;
+const mappings::Build* g_mappings = nullptr;  // the running build's, or null (check_metadata)
 std::vector<tome_symbol> g_symbols;  // the running build's mapping database
 tome_api g_api;
 
@@ -86,7 +98,54 @@ const tome_symbol* TOME_CALL api_resolve(const char* name) {
     for (const tome_symbol& sym : g_symbols) {
         if (std::strcmp(sym.name, name) == 0) return &sym;
     }
-    return nullptr;
+    return mod_mappings::resolve(name);  // "<mod id>/<name>": a mod's own mapping file
+}
+
+int32_t TOME_CALL api_host_player() {
+    if (!frames::on_main_thread()) return -1;
+    return handshake::host_slot();
+}
+
+tome_result TOME_CALL api_version_compare(int32_t kind, const char* a, const char* b, int32_t* order) {
+    if (order) *order = 0;
+    if (!a || !b || !order || (kind != TOME_VERSION_MOD && kind != TOME_VERSION_GAME)) return TOME_ERR_INVALID_ARGUMENT;
+    int result = 0;
+    if (!compare_versions(kind == TOME_VERSION_GAME, a, b, result)) return TOME_ERR_INVALID_ARGUMENT;
+    *order = result;
+    return TOME_OK;
+}
+
+int32_t TOME_CALL api_version_match(int32_t kind, const char* range, const char* version) {
+    if (!range || !version || (kind != TOME_VERSION_MOD && kind != TOME_VERSION_GAME)) return -1;
+    return match_version(kind == TOME_VERSION_GAME, range, version);
+}
+
+int32_t TOME_CALL api_list_mods(tome_mod* mod, tome_mod_info* out, uint32_t info_size, int32_t max) {
+    if (!mod || max < 0 || (max > 0 && (!out || info_size < sizeof(uint32_t)))) return -1;
+    std::shared_ptr<const mod_list::Snapshot> list = mod_manager().mod_list();
+    if (!list) return 0;
+    if (max > 0) {
+        // Keeps the strings alive; the snapshot it held before goes now.
+        ExclusiveLock hold(mod->lock);
+        mod->listed_mods = list;
+    }
+    return list->fill(out, info_size, max);
+}
+
+int32_t TOME_CALL api_check_metadata(const char* text, size_t size, char* reason, size_t reason_size) {
+    MetadataCheck check;
+    if (!text && size > 0) {
+        check.reason = "no text";
+    } else {
+        check = check_metadata_text(std::string_view(text ? text : "", size), mod_manager().environment(), g_mappings,
+                                    !shade::active() || shade::can_load_dlls());
+    }
+    copy_text(check.reason, reason, reason_size);
+    return check.result;
+}
+
+const char* TOME_CALL api_mods_dir() {
+    return mod_manager().mods_dir_utf8().c_str();
 }
 
 size_t TOME_CALL api_read_game_file(const char* name, void* buffer, size_t size) {
@@ -119,6 +178,7 @@ tome_result TOME_CALL api_hook(tome_mod* mod, const char* name, int32_t phase, i
     handler.priority = priority;
     handler.fn = fn;
     handler.user = user;
+    handler.name = hooks::handler_name(target, name);
     handler.gate = std::make_shared<hooks::Gate>();
     // The mod's DLL is freed only once no handler of it runs (ModManager::unload).
     // Under the mod's lock: hook() may run on any thread, alongside disable.
@@ -135,27 +195,20 @@ tome_result TOME_CALL api_hook(tome_mod* mod, const char* name, int32_t phase, i
 tome_result TOME_CALL api_unhook(tome_mod* mod, const char* name, int32_t phase, tome_hook_fn fn, void* user) {
     if (!mod || !name || !fn || !valid_phase(phase)) return TOME_ERR_INVALID_ARGUMENT;
     if (hooks::is_reserved(name)) return TOME_ERR_NOT_OWNER;  // a built-in patch owns it; nothing of the mod's to remove
-    hooks::Target* target = hooks::find(name);
+    // Where the name hooks now, and where it did before a mod's file moved it.
     std::vector<const void*> removed;
-    if (!target || hooks::remove(target, mod, phase, fn, user, &removed) == 0) return TOME_ERR_INVALID_ARGUMENT;
+    const std::string by_name = name;
+    size_t count = 0;
+    for (hooks::Target* target : hooks::targets_of(by_name)) {
+        count += hooks::remove(target, mod, phase, fn, user, &removed, &by_name);
+    }
+    if (count == 0) return TOME_ERR_INVALID_ARGUMENT;
     mod->drop_revokers(removed);
     return TOME_OK;
 }
 
 void TOME_CALL api_hook_call_next(tome_hook_call* call) {
     hooks::call_next(call);
-}
-
-tome_symbol_kind to_api_kind(mappings::Kind kind) {
-    switch (kind) {
-    case mappings::Kind::Function: return TOME_SYMBOL_FUNCTION;
-    case mappings::Kind::Data:     return TOME_SYMBOL_DATA;
-    case mappings::Kind::Call:     return TOME_SYMBOL_CALL;
-    case mappings::Kind::Offset:   return TOME_SYMBOL_OFFSET;
-    case mappings::Kind::Constant: return TOME_SYMBOL_CONSTANT;
-    case mappings::Kind::Import:   return TOME_SYMBOL_IMPORT;
-    }
-    return TOME_SYMBOL_CONSTANT;
 }
 
 } // namespace
@@ -174,21 +227,17 @@ void init_api(const GameBuild& build) {
                   static_cast<int32_t>(Edition::FrozenThrone) == TOME_EDITION_FROZEN_THRONE);
     g_game_info.edition = static_cast<int32_t>(build.edition);
 
+    g_mappings = build.known ? build.known->data : nullptr;
+
     // The strings point into the database, which lives as long as the process.
     g_symbols.clear();
     if (build.known) {
         for (const mappings::Symbol& sym : build.known->data->symbols) {
-            tome_symbol out = {};
-            out.size = sizeof(out);
-            out.name = sym.name.c_str();
-            out.kind = to_api_kind(sym.kind);
-            out.rva = mappings::has_rva(sym.kind) ? sym.value : 0;
-            out.value = mappings::has_rva(sym.kind) ? build.base + sym.value : sym.value;
-            out.convention = mappings::to_string(sym.convention);
-            out.signature = sym.signature.c_str();
-            g_symbols.push_back(out);
+            g_symbols.push_back(mod_mappings::to_api_symbol(sym, sym.name.c_str(), build.base));
         }
     }
+
+    guard::set_frame_counter(events::frames);
 
     g_api = {};
     g_api.size = sizeof(g_api);
@@ -203,8 +252,17 @@ void init_api(const GameBuild& build) {
     g_api.register_native = api_register_native;
     g_api.resolve = api_resolve;
     g_api.read_game_file = api_read_game_file;
+    g_api.host_player = api_host_player;
+    g_api.version_compare = api_version_compare;
+    g_api.version_match = api_version_match;
+    g_api.list_mods = api_list_mods;
+    g_api.mods_dir = api_mods_dir;
+    g_api.check_metadata = api_check_metadata;
+    net_messages::fill_api(g_api);
+    lobby_messages::fill_api(g_api);
     frames::fill_api(g_api);
     hooks::init(build.base, build.known ? build.known->data : nullptr);
+    mod_mappings::init(build.base);
     g_api.hook = api_hook;
     g_api.unhook = api_unhook;
     g_api.hook_call_next = api_hook_call_next;
@@ -216,6 +274,8 @@ void init_api(const GameBuild& build) {
     popups::fill_api(g_api);
     intermod_api::fill_api(g_api);
     objects::fill_api(g_api);
+    timers_api::fill_api(g_api);
+    desync_api::fill_api(g_api);
 }
 
 const tome_api* api_table() {

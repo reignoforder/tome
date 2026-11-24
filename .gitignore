@@ -5,6 +5,8 @@ sdk/rust/target/
 sdk/templates/rust/target/
 sdk/rust/wasm/target/
 sdk/templates/rust-wasm/target/
+tests/wasm/runtime-probe-rs/target/
+tests/wasm/runtime-probe-rs/Cargo.lock
 sdk/templates/rust-wasm/Cargo.lock
 sdk/templates/rust/Cargo.lock
 # Downloaded at configure time (FetchContent: WAMR, StormLib) into
@@ -51,3 +53,6 @@ war3map.j
 # Tome's runtime folders, if the repo root is ever used as a game folder
 /mods/
 /tome/
+# Core dumps (Wine in the container leaves them in the working folder)
+/core
+core.[0-9]*

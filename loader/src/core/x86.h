@@ -28,6 +28,10 @@ struct Insn {
     bool falls_through = true;  // control can reach the next instruction
     Branch branch = Branch::None;
     int32_t displacement = 0;   // relative branches: target = end of the instruction + displacement
+    // A memory operand with an absolute 32-bit address (ModRM mod 00 rm 101,
+    // or a SIB with no base): where its 4 bytes sit in the instruction.
+    bool has_abs_disp32 = false;
+    size_t abs_disp32_at = 0;
 };
 
 // Decodes the instruction at `code` (at most `available` bytes readable).

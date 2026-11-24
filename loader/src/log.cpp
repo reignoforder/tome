@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "log.h"
+#include "core/log_guard.h"
 #include "unwind.h"
 
 #include <windows.h>
@@ -17,6 +18,7 @@ std::wstring g_path;  // of g_file
 SRWLOCK g_lock = SRWLOCK_INIT;
 bool g_keep = false;
 std::string g_kept;  // every line since keep_lines()
+SizeCap g_cap;       // of g_file, which open() truncates
 
 } // namespace
 
@@ -30,6 +32,7 @@ bool open(const std::wstring& path) {
     ExclusiveLock hold(g_lock);
     g_file = file;
     g_path = path;
+    g_cap = SizeCap();
     return true;
 }
 
@@ -101,15 +104,24 @@ int stamped_line(char (&line)[2200], Level level, const char* message) {
                             now.wMilliseconds, GetCurrentThreadId(), level, message);
 }
 
-// With g_lock held.
-void emit(const char* message, const char* line, int len) {
+// With g_lock held. Whether the line went into the file (not if none is
+// open or g_cap dropped it).
+bool emit(Level level, const char* message, const char* line, int len) {
     if (g_keep && std::strncmp(message, "Debug ", 6) != 0) g_kept.append(line, static_cast<size_t>(len));
-    if (g_file != INVALID_HANDLE_VALUE) {
-        // Unbuffered on our side: if the game crashes, everything up to the
-        // crash is already in the OS file cache.
-        DWORD written;
-        WriteFile(g_file, line, static_cast<DWORD>(len), &written, nullptr);
+    if (g_file == INVALID_HANDLE_VALUE) return false;
+    // Unbuffered on our side: if the game crashes, everything up to the
+    // crash is already in the OS file cache.
+    DWORD written;
+    const SizeCap::Verdict verdict = g_cap.take(level, static_cast<size_t>(len));
+    if (verdict.notice) {
+        char notice[2200];
+        int n = stamped_line(notice, Level::Warn, SizeCap::notice_text);
+        if (n > 0) {
+            g_cap.count(static_cast<size_t>(n));
+            WriteFile(g_file, notice, static_cast<DWORD>(n), &written, nullptr);
+        }
     }
+    return verdict.write && WriteFile(g_file, line, static_cast<DWORD>(len), &written, nullptr);
 }
 
 } // namespace
@@ -127,7 +139,7 @@ void write(Level level, const char* fmt, ...) {
     OutputDebugStringA(line);
 
     ExclusiveLock hold(g_lock);
-    emit(message, line, len);
+    emit(level, message, line, len);
 }
 
 bool try_write(Level level, const char* message) {
@@ -142,9 +154,9 @@ bool try_write(Level level, const char* message) {
         if (GetTickCount() - start >= 100) return false;
         Sleep(1);
     }
-    emit(message, line, len);
+    const bool written = emit(level, message, line, len);
     ReleaseSRWLockExclusive(&g_lock);
-    return true;
+    return written;
 }
 
 } // namespace tome::log

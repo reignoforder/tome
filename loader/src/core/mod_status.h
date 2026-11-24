@@ -6,6 +6,7 @@
 
 #include "json.h"
 #include "keys.h"
+#include "profile.h"
 #include "settings.h"
 
 #include <string>
@@ -34,6 +35,7 @@ struct ModStatus {
     std::string description;
     std::string icon;  // tome.mod.json "icon", relative to the mod folder; "" if none or its files aren't allowed yet
     std::vector<std::string> authors;
+    std::vector<std::string> provides;  // tome.mod.json "provides"
     std::string sync;    // "client" / "required"; "" if the metadata is invalid
     std::string sync_hash;  // a running "required" mod: its identity in the multiplayer handshake (8 hex digits)
     std::string code_hash;  // a mod with code: SHA-256 of its files (core/mod_state.h); "" otherwise
@@ -42,6 +44,7 @@ struct ModStatus {
     std::string reload;  // "live" / "map" / "restart"
     std::vector<std::string> errors;  // every problem with tome.mod.json, in full
     std::string crash_calls;  // after a crash: where it was called from (likely), as logged
+    profile::Stats profile;   // the time its code took (core/profile.h); calls 0 if none ran
 
     // Settings (core/settings.h): the schema and the current values. A
     // schema that failed to parse leaves `settings` empty and says why in

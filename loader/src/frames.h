@@ -39,6 +39,9 @@ void fill_api(tome_api& api);
 // --- for Tome's own UI (main thread) -----------------------------------------
 
 void* get(const char* name, int context = 0);
+// A frame's rectangle in UI units, {bottom, left, top, right} (the layout's
+// GetRect); false where the build doesn't map it. For the debug script's dump.
+bool rect(void* frame, float out[4]);
 void* create(const char* definition, void* parent, int priority, int context);
 bool set_point(void* frame, int point, void* relative, int relative_point, float x, float y);
 bool set_text(void* frame, const char* text);  // false unless it's a text frame

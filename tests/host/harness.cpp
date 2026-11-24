@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "harness.h"
 
+#include "core/mod_state.h"
 #include "log.h"
+#include "sha256.h"
 #include "test.h"
 
 #include <windows.h>
+
 
 #ifndef TOME_TEST_BUILD_DIR
 #error "TOME_TEST_BUILD_DIR must be set (tests/CMakeLists.txt)"
@@ -36,6 +39,16 @@ bool Home::install_mod(const char* folder) {
     std::wstring fixture = win_path(TOME_TEST_SOURCE_DIR "/tests/e2e/mods/") + name;
     std::wstring from = tome::testing::path_exists(built) ? built : fixture;
     return tome::testing::copy_tree(from, paths().mods_dir + L"\\" + name);
+}
+
+std::string crash_hash(const Home& home) {
+    std::wstring dll = home.paths().mods_dir + L"\\crash\\crash.dll";
+    return tome::sha256_bytes(tome::mod_state::manifest({{"crash.dll", tome::sha256_file(dll)}}));
+}
+
+std::string allowed_with_key(const std::string& key, const std::string& hash) {
+    return R"({"schema":3,"mods":{"crash":{"enabled":true,"approved":")" + hash +
+           R"(","approved_from":"elsewhere")" + (key.empty() ? "" : R"(,"approved_key":")" + key + "\"") + "}}}";
 }
 
 bool Home::write(const std::wstring& relative, const std::string& text) {

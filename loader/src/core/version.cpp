@@ -450,4 +450,34 @@ bool parse_game_range(std::string_view text, GameVersionRange& out, std::string&
     return true;
 }
 
+bool compare_versions(bool game, std::string_view a, std::string_view b, int& order) {
+    order = 0;
+    int cmp;
+    if (game) {
+        GameVersion x, y;
+        if (!parse_game_version(a, x) || !parse_game_version(b, y)) return false;
+        cmp = compare(x, y);
+    } else {
+        SemVer x, y;
+        if (!parse_semver(a, x) || !parse_semver(b, y)) return false;
+        cmp = compare(x, y);
+    }
+    order = cmp < 0 ? -1 : cmp > 0 ? 1 : 0;
+    return true;
+}
+
+int match_version(bool game, std::string_view range, std::string_view version) {
+    std::string error;
+    if (game) {
+        GameVersionRange r;
+        GameVersion v;
+        if (!parse_game_range(range, r, error) || !parse_game_version(version, v)) return -1;
+        return r.matches(v) ? 1 : 0;
+    }
+    SemVerRange r;
+    SemVer v;
+    if (!parse_semver_range(range, r, error) || !parse_semver(version, v)) return -1;
+    return r.matches(v) ? 1 : 0;
+}
+
 } // namespace tome

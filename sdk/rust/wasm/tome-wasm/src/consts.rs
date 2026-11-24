@@ -5,8 +5,13 @@
 
 #![allow(missing_docs)]
 
-pub const TOME_API_VERSION: u32 = 16;
+pub const TOME_API_VERSION: u32 = 21;
 pub const TOME_POPUP_CLOSED: i32 = -1;
+pub const TOME_NET_MAX_MESSAGE: u32 = 1024;
+pub const TOME_LOBBY_MAX_MESSAGE: u32 = 1024;
+pub const TOME_LOBBY_EVERYONE: i32 = -1;
+pub const TOME_START_ALLOW: i32 = 1;
+pub const TOME_START_REFUSE: i32 = 0;
 
 // tome_result
 pub const TOME_OK: i32 = 0;
@@ -124,6 +129,7 @@ pub const TOME_EVENT_HERO_XP: i32 = 66;
 pub const TOME_EVENT_PLAYER_RESOURCE: i32 = 67;
 pub const TOME_EVENT_DAY: i32 = 68;
 pub const TOME_EVENT_NIGHT: i32 = 69;
+pub const TOME_EVENT_MODS_CHANGED: i32 = 70;
 
 // tome_resource
 pub const TOME_RESOURCE_GOLD: i32 = 1;
@@ -152,6 +158,14 @@ pub const TOME_CHAT_ALL: i32 = 0;
 pub const TOME_CHAT_ALLIES: i32 = 1;
 pub const TOME_CHAT_OBSERVERS: i32 = 2;
 pub const TOME_CHAT_PRIVATE: i32 = 3;
+
+// tome_hook_phase
+pub const TOME_HOOK_BEFORE: i32 = 1;
+pub const TOME_HOOK_AFTER: i32 = 3;
+
+// tome_clock
+pub const TOME_CLOCK_REAL: i32 = 0;
+pub const TOME_CLOCK_GAME: i32 = 1;
 
 // tome_object_type
 pub const TOME_OBJECT_NONE: i32 = 0;
@@ -193,6 +207,17 @@ pub const TOME_PROPERTY_DAMAGE_DICE: i32 = 28;
 pub const TOME_PROPERTY_DAMAGE_SIDES: i32 = 29;
 pub const TOME_PROPERTY_ATTACK_COOLDOWN: i32 = 30;
 pub const TOME_PROPERTY_ATTACK_RANGE: i32 = 31;
+
+// tome_version_kind
+pub const TOME_VERSION_MOD: i32 = 0;
+pub const TOME_VERSION_GAME: i32 = 1;
+
+// tome_mod_state
+pub const TOME_MOD_ACTIVE: i32 = 0;
+pub const TOME_MOD_DISABLED: i32 = 1;
+pub const TOME_MOD_APPROVAL: i32 = 2;
+pub const TOME_MOD_WAITING: i32 = 3;
+pub const TOME_MOD_ERROR: i32 = 4;
 
 impl crate::FramePoint {
     pub const TOPLEFT: Self = Self(TOME_FRAMEPOINT_TOPLEFT);
@@ -292,4 +317,5 @@ impl crate::Event {
     pub const PLAYER_RESOURCE: Self = Self(TOME_EVENT_PLAYER_RESOURCE);
     pub const DAY: Self = Self(TOME_EVENT_DAY);
     pub const NIGHT: Self = Self(TOME_EVENT_NIGHT);
+    pub const MODS_CHANGED: Self = Self(TOME_EVENT_MODS_CHANGED);
 }

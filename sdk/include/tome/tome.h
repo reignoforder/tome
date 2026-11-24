@@ -36,8 +36,14 @@ extern "C" {
  * 13: the map script's memhack pattern (script_shadows, map_script_shadows).
  * 14: the game's files (read_game_file). 15: the game's edition (tome_game_info.edition).
  * 16: game objects (object_type, object_of, handle_of, player_object, unit_info, get_property,
- * set_property, jass_call, get_keyed_property, set_keyed_property, list_objects). */
-#define TOME_API_VERSION 16
+ * set_property, jass_call, get_keyed_property, set_keyed_property, list_objects).
+ * 17: the game's host (host_player). 18: messages between players (net_send, on_net_message).
+ * 19: timers (timer_start, timer_stop) and desync checks (on_checksum).
+ * 20: versions and the installed mods (version_compare, version_match, list_mods, mods_dir,
+ * check_metadata, TOME_EVENT_MODS_CHANGED).
+ * 21: messages in a game's lobby (lobby_send, on_lobby_message, lobby_players, lobby_show) and
+ * a say in when it starts (on_lobby_start, lobby_start). */
+#define TOME_API_VERSION 21
 
 #define TOME_CALL __cdecl
 /* C linkage in C++ too: Tome looks the lifecycle functions up by their plain names. */
@@ -390,7 +396,14 @@ typedef enum tome_event {
      * it across one: amount = the time of day in hours. Checked every game
      * tick. */
     TOME_EVENT_DAY = 68,
-    TOME_EVENT_NIGHT = 69
+    TOME_EVENT_NIGHT = 69,
+    /* API version 20: what list_mods returns changed: a mod was installed,
+     * removed, updated, turned on or off, allowed, or stopped by an error.
+     * On any screen, once Tome has applied the change; also right after
+     * the change that enabled the listening mod itself, Tome's first look
+     * at startup included (once the game's window is up: list_mods has
+     * nothing in tome_mod_enable then). No fields. */
+    TOME_EVENT_MODS_CHANGED = 70
 } tome_event;
 
 /* tome_event_info.resource for TOME_EVENT_PLAYER_RESOURCE (the JASS
@@ -463,7 +476,8 @@ typedef struct tome_event_info {
     /* TICK: the number of frames so far, counting from 1. */
     uint32_t frame;
     /* GAME_TICK, GAME_END: seconds of game time since the game started (or
-     * a saved game was loaded), including this step. */
+     * a saved game was loaded), including this step. Tome counts it in
+     * whole microseconds, the same on every player's computer. */
     double game_time;
     /* API version 8: check `size` before reading these. */
     /* MAP_LOAD, GAME_START, GAME_END: the map's description, "" if none. */
@@ -584,7 +598,7 @@ typedef enum tome_hook_phase {
 
 typedef struct tome_hook_call {
     uint32_t size;               /* sizeof(tome_hook_call) as known to Tome */
-    const char* name;            /* the hooked function, e.g. "CTextFrame::SetText" */
+    const char* name;            /* the hooked function as this handler named it, e.g. "CTextFrame::SetText" */
     /*
      * The arguments in the order of the mapping's signature, as 32-bit
      * words: `this` first for thiscall, floats as their bits
@@ -677,6 +691,111 @@ typedef void (TOME_CALL *tome_service_fn)(tome_mod* mod, const char* name, int32
 /* A message published on a topic; `data` is valid only during the call. */
 typedef void (TOME_CALL *tome_message_fn)(tome_mod* mod, const char* topic, const void* data, size_t size,
                                           void* user);
+
+/*
+ * Messages between players (API version 18): a mod's message reaches the
+ * same mod on every player's computer, the sender's own included, at the
+ * same point of the game (the game's synced actions carry it), so the
+ * players can act on it alike. A replay plays them back. Only in a game.
+ */
+#define TOME_NET_MAX_MESSAGE 1024
+
+typedef struct tome_net_message {
+    uint32_t size;       /* sizeof(tome_net_message) as Tome built it */
+    int32_t player;      /* the sender's player slot (0 = Player 1), as the host's game saw it */
+    const void* data;    /* valid only during the call */
+    uint32_t data_size;  /* 0 .. TOME_NET_MAX_MESSAGE */
+    int32_t replay;      /* 1 while a replay plays it back */
+} tome_net_message;
+
+typedef void (TOME_CALL *tome_net_message_fn)(tome_mod* mod, const tome_net_message* message, void* user);
+
+/*
+ * Messages in a game's lobby (API version 21), before the game starts:
+ * from a "sync": "required" mod to the same mod on another player's
+ * computer, as hidden lobby chat lines (the multiplayer handshake's way;
+ * docs/architecture.md, "Lobby messages"). The host reaches each player
+ * who runs Tome (the handshake found out); a joined player reaches the
+ * host. Unlike net_send's, they aren't in the replay, and each goes to one
+ * computer at a time, in the order sent. The sender is stamped by the
+ * host's game, so a player can't pass for another.
+ */
+#define TOME_LOBBY_MAX_MESSAGE 1024
+/* lobby_send's `to`: every player who runs Tome (from the host only). */
+#define TOME_LOBBY_EVERYONE (-1)
+
+typedef struct tome_lobby_message {
+    uint32_t size;        /* sizeof(tome_lobby_message) as Tome built it */
+    int32_t player;       /* the sender's lobby id (tome_lobby_player.id) */
+    int32_t from_host;    /* 1 if the sender is the game's host */
+    const void* data;     /* valid only during the call */
+    uint32_t data_size;   /* 0 .. TOME_LOBBY_MAX_MESSAGE */
+} tome_lobby_message;
+
+typedef void (TOME_CALL *tome_lobby_message_fn)(tome_mod* mod, const tome_lobby_message* message, void* user);
+
+/* One person in the lobby (computers aren't listed), from lobby_players. */
+typedef struct tome_lobby_player {
+    int32_t id;         /* the lobby's net id: lobby_send's `to` */
+    int32_t is_host;    /* the game's host (player number 1) */
+    int32_t is_local;   /* this computer */
+    int32_t runs_tome;  /* the handshake heard from its Tome (always 1 for is_local) */
+    char name[32];      /* UTF-8, NUL-terminated (cut short to fit) */
+} tome_lobby_player;
+
+/* on_lobby_start's verdicts. */
+#define TOME_START_ALLOW 1
+#define TOME_START_REFUSE 0
+
+/* The host pressed Start (or lobby_start ran): return TOME_START_ALLOW, or
+ * TOME_START_REFUSE with up to `reason_size` bytes of a reason (UTF-8,
+ * NUL-terminated) for the lobby's chat; an empty reason refuses quietly. */
+typedef int32_t (TOME_CALL *tome_lobby_start_fn)(tome_mod* mod, char* reason, uint32_t reason_size, void* user);
+
+/*
+ * Timers (API version 19). A timer runs `fn` on the main thread after a
+ * delay, once or again and again, on one of two clocks:
+ *   TOME_CLOCK_REAL  real time, checked once per frame drawn (in menus,
+ *                    loading screens and games). For UI.
+ *   TOME_CLOCK_GAME  game time, as GAME_TICK counts it: only in a game,
+ *                    follows the game speed, stops while the game is paused,
+ *                    and the timer ends with the game. It fires in a game
+ *                    step, after that step's GAME_TICK handlers: in the same
+ *                    step on every player's computer, if every computer
+ *                    started it in the same step (from GAME_START, a
+ *                    GAME_TICK, a game event, another game timer or a
+ *                    net_send message; not from a TICK, a click or a key).
+ * A timer fires at most once per frame or step: one that falls behind (an
+ * interval shorter than a frame) fires once and goes on from then, never
+ * in a burst.
+ */
+typedef enum tome_clock {
+    TOME_CLOCK_REAL = 0,
+    TOME_CLOCK_GAME = 1
+} tome_clock;
+
+/* `timer` is the id timer_start gave. */
+typedef void (TOME_CALL *tome_timer_fn)(tome_mod* mod, uint32_t timer, void* user);
+
+/*
+ * Desync checks (API version 19). A multiplayer game stays in sync only if
+ * every player's computer computes the same game, mods' own state included
+ * (a mod changing the game from a value only one computer has, or keeping
+ * its own counters differently, sends the game out of sync, and the game
+ * then drops players without saying why). A "sync": "required" mod can
+ * give Tome a hash of its game state: every few seconds of game time, Tome
+ * calls the callback in the same game step on every player's computer,
+ * sends the result to the others and compares. The first difference
+ * between this computer and a player, per mod and game, is shown to the
+ * player ("<mod id> differs between you and player 2"); every one is in
+ * tome.log with both hashes and the time. In a replay of a multiplayer
+ * game, the recorded hashes are compared with the replay's.
+ *
+ * The callback returns a hash of what must be equal on every computer
+ * (the units it made, its counters and decisions), not of UI, settings or
+ * anything per player. tome_hash_* below make one. Keep it cheap.
+ */
+typedef uint64_t (TOME_CALL *tome_checksum_fn)(tome_mod* mod, void* user);
 
 /* `popup` is the id popup() gave; `choice` an index into options, or TOME_POPUP_CLOSED. */
 typedef void (TOME_CALL *tome_popup_fn)(tome_mod* mod, uint32_t popup, int32_t choice, void* user);
@@ -792,6 +911,58 @@ typedef union tome_jass_value {
     const char* string;
 } tome_jass_value;
 
+/* API version 20: which kind of version version_compare and version_match read. */
+typedef enum tome_version_kind {
+    /* Semantic versions: mods' "version", "depends" and the like, and
+     * Tome's own (tome_api.tome_version). "1.2.3", "1.0.0-beta.1"; ranges
+     * "*", "1.2.3", ">=1.2 <2", "^1.2", "~1.2", "1.2" (1.2.x), "a || b". */
+    TOME_VERSION_MOD = 0,
+    /* Game versions: tome.mod.json "game". The game binary's four-part
+     * version ("1.27.1.7085", tome_game_info.file_version) or a known name
+     * ("1.27b"); ranges "*", ">=1.26a <1.28", "1.27" (1.27.x.x), "a || b". */
+    TOME_VERSION_GAME = 1
+} tome_version_kind;
+
+/* API version 20: tome_mod_info.state. */
+typedef enum tome_mod_state {
+    TOME_MOD_ACTIVE = 0,    /* running */
+    TOME_MOD_DISABLED = 1,  /* turned off by the player, or safe mode (reason "safe mode") */
+    TOME_MOD_APPROVAL = 2,  /* its code waits for the player to allow it (the mod menu) */
+    TOME_MOD_WAITING = 3,   /* held off by a multiplayer game until it ends */
+    /* Can't run: tome.mod.json can't be read, a dependency is missing, it's
+     * for another game or Tome, its DLL failed or crashed... (reason) */
+    TOME_MOD_ERROR = 4
+} tome_mod_state;
+
+/* API version 20: one installed mod, as list_mods reports it. */
+typedef struct tome_mod_info {
+    uint32_t size;            /* sizeof(tome_mod_info) as known to Tome */
+    const char* id;           /* "" if its tome.mod.json couldn't be read */
+    const char* name;         /* its folder's name if its tome.mod.json couldn't be read */
+    /* What runs: a mod a multiplayer game keeps running has the version it
+     * started with until the game ends. "" if tome.mod.json couldn't be read. */
+    const char* version;
+    /* Its entry in mods_dir(): a folder's name, or a package's file name
+     * ("hello.tome"). Two entries may have the same id (then one is an error). */
+    const char* folder;
+    const char* dir;          /* where its files are; a package's is where Tome unpacked it */
+    int32_t state;            /* tome_mod_state */
+    const char* reason;       /* why it isn't running, for people; "" if it is or was turned off */
+    /* 1: the player wants it on and its code is allowed (for a mod a
+     * multiplayer game keeps running: the code that runs, allowed when it
+     * started, whatever its folder holds now) */
+    int32_t enabled;
+    int32_t package;          /* 1: a .tome package file */
+    int32_t sync_required;    /* 1: "sync": "required" */
+    /* 1: changes to its assets wait for the game to restart (a mod updated
+     * while the game ran, "reload": "restart"). */
+    int32_t restart_pending;
+    /* Its tome.mod.json "provides": the ids it stands in for in other mods'
+     * "depends" (only those without a version range). */
+    const char* const* provides;
+    int32_t provides_count;
+} tome_mod_info;
+
 typedef struct tome_api {
     uint32_t size;               /* sizeof(tome_api) as known to Tome */
     uint32_t api_version;        /* TOME_API_VERSION of the running Tome */
@@ -823,7 +994,11 @@ typedef struct tome_api {
      * Looks a name up in the mapping database, e.g. "CTextFrame::SetText" or
      * "CFrame.layout". Returns NULL if the name isn't mapped on this build.
      * List the names a mod can't work without in tome.mod.json "requires":
-     * Tome then refuses to load the mod on builds that lack them.
+     * Tome then refuses to load the mod on builds that lack them. A mod's own
+     * mapping file (tome.mod.json "mappings": mappings/<build>.json in the
+     * mod's folder, in the format of Tome's) adds names "<mod id>/<name>",
+     * e.g. "mymod/CUnit::Foo", which any mod can resolve, hook and require.
+     * The pointer stays valid for the session.
      */
     const tome_symbol* (TOME_CALL *resolve)(const char* name);
 
@@ -899,8 +1074,13 @@ typedef struct tome_api {
     /*
      * Adds `fn` to the chain of the mapped function `name` (a FUNCTION in the
      * mapping database, e.g. "CTextFrame::SetText", or since API version 9 an
-     * IMPORT) in `phase` (a
-     * tome_hook_phase). Any thread; takes effect for calls that start
+     * IMPORT; or one from a mod's own mapping file, "<mod id>/<name>", see
+     * resolve) in `phase` (a
+     * tome_hook_phase). A function mapped under two names (Tome's and a
+     * mod's) has one chain for both if they pass its arguments the same way;
+     * each handler's tome_hook_call.name is the name it hooked by. A mod's
+     * mapping that passes them another way, or whose patch would overlap
+     * another hook's, fails with TOME_ERR_UNAVAILABLE. Any thread; takes effect for calls that start
      * afterwards. Revoked on disable; the mod's DLL is only freed once none
      * of its handlers is running. Fails with TOME_ERR_UNAVAILABLE if the
      * name isn't mapped, or if Tome can't hook that function (see tome.log:
@@ -1254,6 +1434,186 @@ typedef struct tome_api {
      * or game tick). Main thread.
      */
     int32_t (TOME_CALL *list_objects)(int32_t type, void** out, int32_t max);
+
+    /* --- API version 17: the game's host --- */
+
+    /* The player slot (0 = Player 1) of the current game's host: the player
+     * who created the game, whose computer the others' traffic goes through.
+     * In a replay, the recorded game's host; in single player, the local
+     * player. -1 outside a game, or where Tome can't tell (a build it
+     * doesn't map this for). The same on every player's computer. Main
+     * thread. */
+    int32_t (TOME_CALL *host_player)(void);
+
+    /* --- API version 18: messages between players (see tome_net_message) --- */
+
+    /* Sends `size` bytes (up to TOME_NET_MAX_MESSAGE) to this mod on every
+     * player's computer, this one included: each gets it through
+     * on_net_message, in the same order, a moment later (a game turn).
+     * Only in a game from its first step on (the first GAME_TICK; not yet
+     * at GAME_START, when the players may not all be in place), not while
+     * watching a replay, and in a multiplayer
+     * game only for a "sync": "required" mod (every player has it):
+     * TOME_ERR_UNAVAILABLE otherwise, or when the mod sends more than 16
+     * messages a second. TOME_ERR_INVALID_ARGUMENT for too many bytes or
+     * NULL data with a size. Main thread. */
+    tome_result (TOME_CALL *net_send)(tome_mod* mod, const void* data, uint32_t size);
+
+    /* Calls `fn` on the main thread for each message this mod's copies
+     * send (net_send), from any player, until the mod is disabled. Any
+     * thread (tome_mod_enable). A message from another player is untrusted
+     * input: check what it says. */
+    tome_result (TOME_CALL *on_net_message)(tome_mod* mod, tome_net_message_fn fn, void* user);
+
+    /* --- API version 19: timers and desync checks --- */
+
+    /* Starts a timer on `clock` (tome_clock): `fn` runs `delay` seconds from
+     * now (0: the next frame or game step), then every `interval` seconds
+     * until timer_stop (0: only once). Times are rounded to whole
+     * microseconds of the clock, so game timers fire in the same step on
+     * every player's computer. Puts its id (never 0) in *timer, if
+     * `timer` isn't NULL. Revoked on disable. TOME_ERR_INVALID_ARGUMENT for
+     * another clock or a delay or interval that's negative or not a finite
+     * number. TOME_CLOCK_REAL: any thread. TOME_CLOCK_GAME: main thread, and
+     * TOME_ERR_UNAVAILABLE outside a game. */
+    tome_result (TOME_CALL *timer_start)(tome_mod* mod, int32_t clock, double delay, double interval,
+                                         tome_timer_fn fn, void* user, uint32_t* timer);
+
+    /* Stops one of the mod's timers; it doesn't fire again (also from its own
+     * callback). TOME_ERR_INVALID_ARGUMENT if it isn't running: it was
+     * stopped, fired for the last time, or its game ended. Any thread; from
+     * another one, a callback the main thread was just starting may still
+     * run once after this returns (keep `user` alive until it can't). */
+    tome_result (TOME_CALL *timer_stop)(tome_mod* mod, uint32_t timer);
+
+    /* Gives Tome the mod's checksum callback for desync checks (see
+     * tome_checksum_fn): one per mod, registering again replaces it, NULL
+     * removes it. Called only for a "sync": "required" mod, in a
+     * multiplayer game or its replay, on the main thread. Any thread.
+     * Revoked on disable. */
+    tome_result (TOME_CALL *on_checksum)(tome_mod* mod, tome_checksum_fn fn, void* user);
+
+    /* --- API version 20: versions and the installed mods --- */
+
+    /* Compares two versions of a tome_version_kind by Tome's own rules (the
+     * ones tome.mod.json is checked with): *order (not NULL) becomes -1 if
+     * a comes first, 0 if they're equal, 1 if b does. Pre-releases come
+     * before their release ("1.0.0-beta" < "1.0.0"); build metadata
+     * ("+build.5") doesn't count; game versions compare by number, so
+     * "1.27b" equals "1.27.1.7085". TOME_ERR_INVALID_ARGUMENT (*order 0)
+     * if either isn't a version of that kind: a mod version needs all
+     * three numbers. Any thread. */
+    tome_result (TOME_CALL *version_compare)(int32_t kind, const char* a, const char* b, int32_t* order);
+
+    /* Whether `version` is in `range` (both of a tome_version_kind), as
+     * Tome checks "depends", "tome" and "game": 1 if it is, 0 if it isn't,
+     * -1 if either can't be parsed. Ranges compare in version order, so
+     * pre-releases inside one count ("^1.2.0" takes "1.3.0-beta"), but not
+     * those of the version a range ends before ("^1.2.0" doesn't take
+     * "2.0.0-beta", nor "1.2" "1.3.0-beta"). Any thread. */
+    int32_t (TOME_CALL *version_match)(int32_t kind, const char* range, const char* version);
+
+    /*
+     * Every mod in mods_dir() as of Tome's last look (the mod menu's list,
+     * this mod too), in the order Tome found them: fills up to `max` (use
+     * tome_list_mods; `out` may be NULL with max 0, to count them) and
+     * returns how many there are, possibly more than `max` (0 until Tome's
+     * first look ends: in tome_mod_enable at startup, wait for
+     * TOME_EVENT_MODS_CHANGED); -1 for bad
+     * arguments. Tome looks again when files there change (a moment
+     * later; TOME_EVENT_MODS_CHANGED says when what this returns changed).
+     * The strings stay valid until this mod calls list_mods again with
+     * max > 0. Any thread.
+     */
+    int32_t (TOME_CALL *list_mods)(tome_mod* mod, tome_mod_info* out, uint32_t info_size, int32_t max);
+
+    /*
+     * The folder mods are installed in (tome/mods; UTF-8, no trailing
+     * backslash): a folder with a tome.mod.json, or a .tome package file,
+     * per mod. Tome notices what's added, changed or removed there and
+     * applies it. Put a new mod together elsewhere (config_dir) and move it
+     * in whole (MoveFileExW), so Tome never reads half of it. A mod with
+     * code waits for the player to allow it (TOME_MOD_APPROVAL), and so
+     * does an update with new code, unless it's signed by the key the
+     * player allowed before. Any thread.
+     */
+    const char* (TOME_CALL *mods_dir)(void);
+
+    /*
+     * Checks a tome.mod.json (`size` bytes of `text`: a release's, before
+     * installing it) as Tome checks an installed one: 1 if it would run
+     * here, 0 if it's valid but not for this game, edition or Tome, or
+     * "requires" names this build doesn't map, or its DLL can't run here
+     * (a Shade that loads no mods' DLLs), -1 if it isn't a valid
+     * tome.mod.json. What else it needs ("depends") isn't checked: compare
+     * list_mods with version_match. `reason` (may be NULL) gets why not,
+     * every problem "; "-separated ("" for 1), NUL-terminated and cut short
+     * to fit `reason_size`. Any thread.
+     */
+    int32_t (TOME_CALL *check_metadata)(const char* text, size_t size, char* reason, size_t reason_size);
+
+    /* --- API version 21: the lobby (see tome_lobby_message) --- */
+
+    /* Sends `size` bytes (up to TOME_LOBBY_MAX_MESSAGE) to this mod on the
+     * computer of lobby player `to`, who gets them through on_lobby_message
+     * a moment later. The host sends to any player who runs Tome
+     * (tome_lobby_player.runs_tome) or to all of them (TOME_LOBBY_EVERYONE);
+     * a joined player only to the host. Only in a LAN or Battle.net game's
+     * lobby, for a "sync": "required" mod, at most 16 messages a second:
+     * TOME_ERR_UNAVAILABLE otherwise (or when `to` doesn't run Tome as far
+     * as this computer knows). TOME_ERR_INVALID_ARGUMENT for too many bytes
+     * or NULL data with a size. Main thread. */
+    tome_result (TOME_CALL *lobby_send)(tome_mod* mod, int32_t to, const void* data, uint32_t size);
+
+    /* Calls `fn` on the main thread for each lobby message this mod's
+     * copies send it (lobby_send), until the mod is disabled. Any thread.
+     * A message from another player is untrusted input: check what it says,
+     * and who sent it (from_host). */
+    tome_result (TOME_CALL *on_lobby_message)(tome_mod* mod, tome_lobby_message_fn fn, void* user);
+
+    /* The people in the lobby, this computer included, up to `max` into
+     * `out` (out may be NULL with max 0). Returns how many there are (more
+     * than `max` if they don't fit), or -1 outside a game's lobby. Poll it
+     * (TOME_EVENT_TICK) to see players come and go. Main thread. */
+    int32_t (TOME_CALL *lobby_players)(tome_lobby_player* out, int32_t max);
+
+    /* Calls `fn` when the host presses Start, once Tome's own checks pass
+     * (every player has the same required mods), only on the host and only
+     * for a "sync": "required" mod: any mod's TOME_START_REFUSE keeps the
+     * game from starting. Pressing Start again doesn't get past a mod's
+     * refusal (it does past the handshake's: StartOverride), and a callback
+     * that fails (crashes) refuses too. Any thread; `fn` runs on the main
+     * thread. */
+    tome_result (TOME_CALL *on_lobby_start)(tome_mod* mod, tome_lobby_start_fn fn, void* user);
+
+    /* The host's Start, pressed by a mod: the same checks run (the
+     * handshake's, then every mod's on_lobby_start callback, this one's
+     * too, which should now allow), then the game starts as if the host
+     * had pressed it. A mod's press never overrides the handshake's
+     * refusal the way the host's second press does. TOME_ERR_UNAVAILABLE off the host's lobby, for a mod
+     * that isn't "sync": "required", or from inside an on_lobby_start
+     * callback; TOME_OK if the checks ran (whether or not they let the
+     * game start). Main thread. */
+    tome_result (TOME_CALL *lobby_start)(tome_mod* mod);
+
+    /* Shows a line (UTF-8, the game's |c color codes allowed) in this
+     * computer's lobby chat, for this player only. TOME_ERR_UNAVAILABLE
+     * outside a game's lobby. Main thread. */
+    tome_result (TOME_CALL *lobby_show)(tome_mod* mod, const char* text);
+
+    /* Destroys a frame made with frame_create (or the game's BlzCreateFrame
+     * through a map's script) and the frames below it: they leave their
+     * parent and the game's name table, so their names and contexts can be
+     * created again, and the pointers to them (and the JASS ids and Wasm
+     * handles) stop being frames: frame_get finds nothing, the other frame_*
+     * calls refuse them. Tome's own frames and the game's can't be destroyed
+     * (TOME_ERR_INVALID_ARGUMENT), nor can one that's gone already, e.g. with
+     * its screen. TOME_ERR_UNAVAILABLE on a build that doesn't map the
+     * destructor. Called from the frame's own click callback (or any
+     * button's), the destroy happens right after that click is over; the
+     * pointer is not to be used after this call returns either way. Main
+     * thread. */
+    tome_result (TOME_CALL *frame_destroy)(tome_mod* mod, tome_frame* frame);
 } tome_api;
 
 /*
@@ -1420,6 +1780,88 @@ static inline int32_t tome_get_selection(const tome_api* api, tome_unit* units, 
 static inline int tome_has_objects(const tome_api* api) {
     return api->api_version >= 16 &&
            api->size >= offsetof(tome_api, list_objects) + sizeof(api->list_objects);
+}
+
+/* True if the running Tome has messages between players (version 18). */
+static inline int tome_has_net_messages(const tome_api* api) {
+    return api->api_version >= 18 &&
+           api->size >= offsetof(tome_api, on_net_message) + sizeof(api->on_net_message);
+}
+
+/* True if the running Tome can tell the game's host (version 17). */
+static inline int tome_has_host_player(const tome_api* api) {
+    return api->api_version >= 17 &&
+           api->size >= offsetof(tome_api, host_player) + sizeof(api->host_player);
+}
+
+/* True if the running Tome has timers and desync checks (version 19). */
+static inline int tome_has_timers(const tome_api* api) {
+    return api->api_version >= 19 && api->size >= offsetof(tome_api, on_checksum) + sizeof(api->on_checksum);
+}
+
+/* True if the running Tome has version_compare, version_match, list_mods, mods_dir and
+ * check_metadata (version 20). */
+static inline int tome_has_mod_list(const tome_api* api) {
+    return api->api_version >= 20 && api->size >= offsetof(tome_api, check_metadata) + sizeof(api->check_metadata);
+}
+
+/* True if the running Tome has the lobby functions (version 21). */
+static inline int tome_has_lobby(const tome_api* api) {
+    return api->api_version >= 21 && api->size >= offsetof(tome_api, lobby_show) + sizeof(api->lobby_show);
+}
+
+/* True if the running Tome has frame_destroy (version 21; on a build that doesn't map the
+ * game's destructor it still fails with TOME_ERR_UNAVAILABLE). */
+static inline int tome_has_frame_destroy(const tome_api* api) {
+    return api->api_version >= 21 && api->size >= offsetof(tome_api, frame_destroy) + sizeof(api->frame_destroy);
+}
+
+static inline int32_t tome_list_mods(const tome_api* api, tome_mod* mod, tome_mod_info* out, int32_t max) {
+    return api->list_mods(mod, out, (uint32_t)sizeof(tome_mod_info), max);
+}
+
+/*
+ * A hash for desync checks (FNV-1a, 64 bits): start from TOME_HASH_INIT and
+ * add values in an order every computer shares. The same bytes give the
+ * same hash on every computer.
+ *   uint64_t h = TOME_HASH_INIT;
+ *   h = tome_hash_u32(h, wave);
+ *   h = tome_hash_double(h, boss_life);
+ */
+#define TOME_HASH_INIT 0xcbf29ce484222325ull
+
+static inline uint64_t tome_hash_bytes(uint64_t hash, const void* data, size_t size) {
+    const unsigned char* p = (const unsigned char*)data;
+    size_t i;
+    for (i = 0; i < size; ++i) {
+        hash ^= p[i];
+        hash *= 0x100000001b3ull;
+    }
+    return hash;
+}
+
+static inline uint64_t tome_hash_u32(uint64_t hash, uint32_t value) {
+    unsigned char b[4];
+    b[0] = (unsigned char)value;
+    b[1] = (unsigned char)(value >> 8);
+    b[2] = (unsigned char)(value >> 16);
+    b[3] = (unsigned char)(value >> 24);
+    return tome_hash_bytes(hash, b, 4);
+}
+
+static inline uint64_t tome_hash_u64(uint64_t hash, uint64_t value) {
+    return tome_hash_u32(tome_hash_u32(hash, (uint32_t)value), (uint32_t)(value >> 32));
+}
+
+/* A number's bits: 0.0 and -0.0 differ, which they also do to the game. */
+static inline uint64_t tome_hash_double(uint64_t hash, double value) {
+    uint64_t bits;
+    memcpy(&bits, &value, sizeof(bits));
+    return tome_hash_u64(hash, bits);
+}
+
+static inline uint64_t tome_hash_string(uint64_t hash, const char* text) {
+    return text ? tome_hash_bytes(hash, text, strlen(text) + 1) : tome_hash_u32(hash, 0);
 }
 
 static inline tome_result tome_get_unit_info(const tome_api* api, const void* unit, tome_unit* out) {

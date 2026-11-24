@@ -3,23 +3,30 @@
 
 #include "api.h"
 #include "core/intermod.h"
+#include "core/metadata_check.h"
 #include "core/path_guard.h"
 #include "core/text.h"
 #include "core/wasm_abi.h"
 #include "core/wasm_alloc.h"
+#include "core/wasm_hooks.h"
 #include "core/wasm_imports.h"
 #include "core/wasm_layout.h"
+#include "frames.h"
 #include "log.h"
+#include "main_thread.h"
 #include "natives.h"
 #include "objects.h"
 #include "paths.h"
 #include "storm.h"
+#include "guard.h"
+#include "timers.h"
 
 #include "wasm_export.h"
 
 #include <windows.h>
 
 #include <algorithm>
+#include <bit>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
@@ -27,6 +34,7 @@
 #include <functional>
 #include <iterator>
 #include <map>
+#include <memory>
 #include <unordered_map>
 #include <vector>
 
@@ -91,13 +99,22 @@ struct Instance::Impl {
     bool revoked = false;
 
     struct Callback {
+        Callback(Impl* owner, uint32_t callback_id) : impl(owner), id(callback_id) {}
         Impl* impl;
         uint32_t id;
         uint32_t frame = 0;  // frame_on_click: the button's handle
+        // hook: the function's arguments and what the module may do with them.
+        std::shared_ptr<const wasm::HookPoint> point;
+        int32_t phase = 0;
     };
     // The `user` of each callback the module registered; they live as long
     // as the instance (revoked on disable, before it's destroyed).
     std::deque<Callback> callbacks;
+    // Timers share one `user` (a module may start a timer every frame):
+    // each running one's callback id is kept by timer id, until it fires
+    // for the last time, is stopped or its game ends.
+    Callback timer_cb{this, 0};
+    std::map<uint32_t, uint32_t> timer_slots;
 
     // What a frame handle stands for: looked up again on every use, so a
     // frame that's gone is never touched (frames::frame_alive's rule).
@@ -117,7 +134,7 @@ struct Instance::Impl {
     ~Impl();
 
     Callback* callback(uint32_t id) {
-        callbacks.push_back({this, id});
+        callbacks.emplace_back(this, id);
         return &callbacks.back();
     }
     // A registration's result: the callback of one Tome refused is dropped
@@ -296,6 +313,7 @@ struct Instance::Impl {
         if (!revoked || depth > 0) return true;
         revoked = false;
         callbacks.clear();
+        timer_slots.clear();
         natives.clear();
         uint32_t argv[1] = {0};
         return !fn_revoked || invoke("tome_callbacks_revoked", fn_revoked, 0, argv);
@@ -307,6 +325,34 @@ struct Instance::Impl {
         if (!to_buffer(make, ptr, len)) return false;
         uint32_t argv[3] = {id, ptr, len};
         return invoke("tome_callback", fn_callback, 3, argv);
+    }
+    // A callback that answers in its block: `size` zero bytes go in, and
+    // what the module left there comes back in `out` (support/tome_wasm.c
+    // writes a checksum's 8 bytes there).
+    bool send_for_result(uint32_t id, uint32_t size, std::vector<uint8_t>& out) {
+        uint32_t ptr = 0, len = 0;
+        if (!to_buffer([&](uint32_t) { return std::string(size, '\0'); }, ptr, len)) return false;
+        uint32_t argv[3] = {id, ptr, len};
+        if (!invoke("tome_callback", fn_callback, 3, argv)) return false;
+        if (!wasm::read_bytes(memory(), ptr, size, size, out) || out.size() != size) {
+            TOME_ERROR("[%s] the module's answer to a callback is outside its memory", mod->id.c_str());
+            return false;
+        }
+        return true;
+    }
+    // A callback that gets `block` and answers by changing it (a typed
+    // hook): what the module left there comes back in `out`.
+    bool exchange(uint32_t id, const std::string& block, std::vector<uint8_t>& out) {
+        uint32_t ptr = 0, len = 0;
+        if (!to_buffer([&](uint32_t) { return block; }, ptr, len)) return false;
+        uint32_t argv[3] = {id, ptr, len};
+        if (!invoke("tome_callback", fn_callback, 3, argv)) return false;
+        if (!wasm::read_bytes(memory(), ptr, static_cast<uint32_t>(block.size()), block.size(), out) ||
+            out.size() != block.size()) {
+            TOME_ERROR("[%s] the module's answer to a callback is outside its memory", mod->id.c_str());
+            return false;
+        }
+        return true;
     }
     bool send_text(uint32_t id, std::string_view text) {
         return send(id, [&](uint32_t) { return std::string(text); });
@@ -491,6 +537,176 @@ void TOME_CALL on_message(tome_mod*, const char* topic, const void* data, size_t
     if (!deliver_message(cb, topic, data, size) && cb->impl->depth == 0) fail_call();
 }
 
+// A message between players: [player i32][replay i32][data]. Its own frame,
+// so the block is freed before fail_call (whose unwind skips destructors).
+bool deliver_net_message(Callback* cb, const tome_net_message* m) {
+    std::string block(8, '\0');
+    for (int i = 0; i < 4; ++i) {
+        block[i] = static_cast<char>(static_cast<uint32_t>(m->player) >> (8 * i));
+        block[4 + i] = static_cast<char>(static_cast<uint32_t>(m->replay) >> (8 * i));
+    }
+    if (m->data && m->data_size) block.append(static_cast<const char*>(m->data), m->data_size);
+    return cb->impl->send(cb->id, [&](uint32_t) { return block; });
+}
+
+void TOME_CALL on_net_message_cb(tome_mod*, const tome_net_message* m, void* user) {
+    auto* cb = static_cast<Callback*>(user);
+    if (!deliver_net_message(cb, m) && cb->impl->depth == 0) fail_call();
+}
+
+// A message in the lobby: [player i32][from_host i32][data].
+bool deliver_lobby_message(Callback* cb, const tome_lobby_message* m) {
+    std::string block(8, '\0');
+    for (int i = 0; i < 4; ++i) {
+        block[i] = static_cast<char>(static_cast<uint32_t>(m->player) >> (8 * i));
+        block[4 + i] = static_cast<char>(static_cast<uint32_t>(m->from_host) >> (8 * i));
+    }
+    if (m->data && m->data_size) block.append(static_cast<const char*>(m->data), m->data_size);
+    return cb->impl->send(cb->id, [&](uint32_t) { return block; });
+}
+
+void TOME_CALL on_lobby_message_cb(tome_mod*, const tome_lobby_message* m, void* user) {
+    auto* cb = static_cast<Callback*>(user);
+    if (!deliver_lobby_message(cb, m) && cb->impl->depth == 0) fail_call();
+}
+
+// The host pressed Start: a block of kLobbyStartBlock zero bytes goes in,
+// [verdict i32][reason, NUL-terminated] comes back. A module that leaves it
+// as it is refuses quietly. Its own frame, so the answer is freed before fail_call.
+constexpr uint32_t kLobbyStartBlock = 256;
+
+bool read_lobby_start(Callback* cb, int32_t& verdict, std::string& reason) {
+    std::vector<uint8_t> answer;
+    if (!cb->impl->send_for_result(cb->id, kLobbyStartBlock, answer)) return false;
+    uint32_t v = 0;
+    for (int i = 0; i < 4; ++i) v |= static_cast<uint32_t>(answer[static_cast<size_t>(i)]) << (8 * i);
+    verdict = static_cast<int32_t>(v);
+    const char* text = reinterpret_cast<const char*>(answer.data()) + 4;
+    reason.assign(text, strnlen(text, kLobbyStartBlock - 4));
+    return true;
+}
+
+int32_t TOME_CALL on_lobby_start_cb(tome_mod*, char* reason, uint32_t reason_size, void* user) {
+    auto* cb = static_cast<Callback*>(user);
+    int32_t verdict = TOME_START_REFUSE;
+    std::string why;
+    if (!read_lobby_start(cb, verdict, why)) {
+        if (cb->impl->depth == 0) fail_call();
+        return TOME_START_REFUSE;
+    }
+    if (reason && reason_size) {
+        const size_t n = std::min<size_t>(why.size(), reason_size - 1);
+        std::memcpy(reason, why.data(), n);
+        reason[n] = 0;
+    }
+    return verdict == TOME_START_ALLOW ? TOME_START_ALLOW : TOME_START_REFUSE;
+}
+
+// A typed hook (docs/wasm-mods.md, "Hooks"; core/wasm_hooks.h has the
+// block): the arguments in, the module's changes out. Its own frame, so the
+// block and answer are freed before fail_call.
+uint32_t word_at(const std::string& s, size_t at) {
+    uint32_t v = 0;
+    for (int i = 0; i < 4; ++i) v |= static_cast<uint32_t>(static_cast<uint8_t>(s[at + static_cast<size_t>(i)])) << (8 * i);
+    return v;
+}
+
+void put_word(std::string& s, size_t at, uint32_t v) {
+    for (int i = 0; i < 4; ++i) s[at + static_cast<size_t>(i)] = static_cast<char>(v >> (8 * i));
+}
+
+bool run_hook(Callback* cb, tome_hook_call* call) {
+    const wasm::HookPoint& point = *cb->point;
+    if (call->arg_count < static_cast<int32_t>(point.args.size())) return true;  // not the layout it was checked for
+    const bool after = cb->phase == TOME_HOOK_AFTER;
+    std::string block(wasm::hook_block_size(point), '\0');
+    if (after) {
+        const uint32_t result = point.result == wasm::HookResult::Float
+                                    ? std::bit_cast<uint32_t>(static_cast<float>(call->result_float))
+                                    : call->result;
+        put_word(block, 4, result);
+    }
+    const wasm::Handles handles = cb->impl->object_handles();
+    for (size_t i = 0; i < point.args.size(); ++i) {
+        uint32_t word = call->args[i];
+        switch (point.args[i]) {
+        case wasm::HookArg::Unit: word = handles(wasm::HandleKind::Unit, reinterpret_cast<const void*>(uintptr_t{word})); break;
+        case wasm::HookArg::Item: word = handles(wasm::HandleKind::Item, reinterpret_cast<const void*>(uintptr_t{word})); break;
+        case wasm::HookArg::Player: word = handles(wasm::HandleKind::Player, reinterpret_cast<const void*>(uintptr_t{word})); break;
+        default: break;
+        }
+        put_word(block, wasm::kHookHeader + 4 * i, word);
+    }
+    std::vector<uint8_t> answer;
+    if (!cb->impl->exchange(cb->id, block, answer)) return false;
+    const std::string back(reinterpret_cast<const char*>(answer.data()), answer.size());
+    const uint32_t flags = word_at(back, 0), result = word_at(back, 4);
+    if (!after) {
+        // Floats and the int arguments the rule lets through may be changed;
+        // objects and index ints are the game's own and stay.
+        for (size_t i = 0; i < point.args.size(); ++i) {
+            if (point.args[i] == wasm::HookArg::Int || point.args[i] == wasm::HookArg::Float)
+                call->args[i] = word_at(back, wasm::kHookHeader + 4 * i);
+        }
+    }
+    if (after || (flags & wasm::kHookSkip)) {
+        if (!after) call->skip_original = 1;
+        if (point.result == wasm::HookResult::Int) call->result = result;
+        else if (point.result == wasm::HookResult::Float) call->result_float = std::bit_cast<float>(result);
+    }
+    return true;
+}
+
+void TOME_CALL on_hook(tome_mod*, tome_hook_call* call, void* user) {
+    auto* cb = static_cast<Callback*>(user);
+    // The module is single-threaded: a hooked function another thread calls
+    // isn't reported to it.
+    if (!frames::on_main_thread()) return;
+    if (!run_hook(cb, call) && cb->impl->depth == 0) fail_call();
+}
+
+// A timer: [timer id][state], state 0 if it fires again, 1 for its last
+// time, 2 if it ended without firing (its game ended; the module only
+// frees its record of it).
+void TOME_CALL on_timer(tome_mod*, uint32_t timer, void* user) {
+    Impl* impl = static_cast<Callback*>(user)->impl;
+    auto it = impl->timer_slots.find(timer);
+    if (it == impl->timer_slots.end()) return;
+    const uint32_t slot = it->second;
+    const bool last = !timers_api::running(timer);
+    if (last) impl->timer_slots.erase(it);
+    if (!impl->send_words(slot, {timer, last ? 1u : 0u}) && impl->depth == 0) fail_call();
+}
+
+void on_timer_ended(tome_mod* mod, uint32_t timer, tome_timer_fn fn, void* user) {
+    if (fn != on_timer) return;
+    Impl* impl = static_cast<Callback*>(user)->impl;
+    auto it = impl->timer_slots.find(timer);
+    if (it == impl->timer_slots.end()) return;
+    const uint32_t slot = it->second;
+    impl->timer_slots.erase(it);
+    guard::run(mod, "timer callback", "(ended)", [&] {
+        if (!impl->send_words(slot, {timer, 2u}) && impl->depth == 0) fail_call();
+    });
+}
+
+// A checksum: 8 bytes the module overwrites with its hash. Its own frame,
+// so the answer is freed before fail_call.
+bool read_checksum(Callback* cb, uint64_t& hash) {
+    std::vector<uint8_t> answer;
+    if (!cb->impl->send_for_result(cb->id, 8, answer)) return false;
+    hash = 0;
+    for (int i = 0; i < 8; ++i) hash |= static_cast<uint64_t>(answer[i]) << (8 * i);
+    return true;
+}
+
+uint64_t TOME_CALL on_checksum(tome_mod*, void* user) {
+    auto* cb = static_cast<Callback*>(user);
+    uint64_t hash = 0;
+    if (!read_checksum(cb, hash) && cb->impl->depth == 0) fail_call();
+    return hash;
+}
+
 // --- imports (module "tome") ------------------------------------------------
 // Results are tome_result values unless they say otherwise. Out-parameters
 // (ptr, capacity) return the full length (UINT32_MAX for a buffer outside
@@ -672,6 +888,13 @@ int32_t w_frame_set_visible(wasm_exec_env_t env, uint32_t frame, int32_t visible
     tome_frame* f = arg_frame(impl, "frame_set_visible", frame);
     if (!f) return TOME_ERR_INVALID_ARGUMENT;
     return api()->frame_set_visible(f, visible);
+}
+
+int32_t w_frame_destroy(wasm_exec_env_t env, uint32_t frame) {
+    Impl* impl = impl_of(env);
+    tome_frame* f = arg_frame(impl, "frame_destroy", frame);
+    if (!f) return TOME_ERR_INVALID_ARGUMENT;
+    return api()->frame_destroy(impl->mod, f);
 }
 
 int32_t w_frame_set_animation(wasm_exec_env_t env, uint32_t frame, uint32_t tags, int32_t count) {
@@ -1089,6 +1312,202 @@ int32_t w_set_property(wasm_exec_env_t env, uint32_t handle, int32_t property, d
     return w_set_keyed_property(env, handle, property, 0, value);
 }
 
+int32_t w_host_player(wasm_exec_env_t) {
+    return api()->host_player();
+}
+
+int32_t w_net_send(wasm_exec_env_t env, uint32_t data, uint32_t size) {
+    Impl* impl = impl_of(env);
+    std::vector<uint8_t> bytes;
+    if (!wasm::read_bytes(impl->memory(), data, size, TOME_NET_MAX_MESSAGE, bytes)) {
+        TOME_ERROR("[%s] net_send: the message is outside the module's memory or larger than %d bytes",
+                   impl->mod->id.c_str(), TOME_NET_MAX_MESSAGE);
+        return TOME_ERR_INVALID_ARGUMENT;
+    }
+    return api()->net_send(impl->mod, bytes.data(), static_cast<uint32_t>(bytes.size()));
+}
+
+int32_t w_on_net_message(wasm_exec_env_t env, uint32_t callback) {
+    Impl* impl = impl_of(env);
+    if (!impl->can_take_callbacks("on_net_message")) return TOME_ERR_INVALID_ARGUMENT;
+    Callback* cb = impl->callback(callback);
+    return impl->registered(cb, api()->on_net_message(impl->mod, on_net_message_cb, cb));
+}
+
+// Timers and desync checks.
+
+int32_t w_timer_start(wasm_exec_env_t env, int32_t clock, double delay, double interval, uint32_t callback,
+                      uint32_t out) {
+    Impl* impl = impl_of(env);
+    if (!impl->can_take_callbacks("timer_start")) return TOME_ERR_INVALID_ARGUMENT;
+    if (out && !wasm::in_bounds(impl->memory(), out, 4)) {
+        TOME_ERROR("[%s] timer_start: the timer id's place is outside the module's memory", impl->mod->id.c_str());
+        return TOME_ERR_INVALID_ARGUMENT;
+    }
+    uint32_t id = 0;
+    const int32_t r = api()->timer_start(impl->mod, clock, delay, interval, on_timer, &impl->timer_cb, &id);
+    if (r != TOME_OK) return r;
+    impl->timer_slots[id] = callback;
+    store(impl, out, id);
+    return r;
+}
+
+int32_t w_timer_stop(wasm_exec_env_t env, uint32_t timer) {
+    Impl* impl = impl_of(env);
+    const int32_t r = api()->timer_stop(impl->mod, timer);
+    if (r == TOME_OK) impl->timer_slots.erase(timer);
+    return r;
+}
+
+int32_t w_version_compare(wasm_exec_env_t env, int32_t kind, uint32_t a_ptr, uint32_t a_len, uint32_t b_ptr,
+                          uint32_t b_len, uint32_t out) {
+    Impl* impl = impl_of(env);
+    std::string a, b;
+    if (!arg_string(impl, "version_compare", a_ptr, a_len, a) || !arg_string(impl, "version_compare", b_ptr, b_len, b))
+        return TOME_ERR_INVALID_ARGUMENT;
+    if (!out || !wasm::in_bounds(impl->memory(), out, 4)) {
+        TOME_ERROR("[%s] version_compare: the result's place is outside the module's memory", impl->mod->id.c_str());
+        return TOME_ERR_INVALID_ARGUMENT;
+    }
+    int32_t order = 0;
+    const int32_t r = api()->version_compare(kind, a.c_str(), b.c_str(), &order);
+    store(impl, out, static_cast<uint32_t>(order));
+    return r;
+}
+
+int32_t w_version_match(wasm_exec_env_t env, int32_t kind, uint32_t range_ptr, uint32_t range_len,
+                        uint32_t version_ptr, uint32_t version_len) {
+    Impl* impl = impl_of(env);
+    std::string range, version;
+    if (!arg_string(impl, "version_match", range_ptr, range_len, range) ||
+        !arg_string(impl, "version_match", version_ptr, version_len, version))
+        return -1;
+    return api()->version_match(kind, range.c_str(), version.c_str());
+}
+
+int32_t w_check_metadata(wasm_exec_env_t env, uint32_t text, uint32_t size, uint32_t out, uint32_t capacity) {
+    Impl* impl = impl_of(env);
+    const bool reason_ok = capacity == 0 || (out && wasm::in_bounds(impl->memory(), out, capacity));
+    // Straight into the module's buffer: check_metadata calls nothing of the
+    // module's, so its memory stays where it is meanwhile.
+    char* reason = capacity && reason_ok ? reinterpret_cast<char*>(impl->memory().base + out) : nullptr;
+    std::vector<uint8_t> bytes;
+    if (!wasm::read_bytes(impl->memory(), text, size, kMaxMessage, bytes)) {
+        TOME_ERROR("[%s] check_metadata: the text is outside the module's memory or larger than %zu bytes",
+                   impl->mod->id.c_str(), kMaxMessage);
+        // Why, so a module doesn't take it for an invalid tome.mod.json with no reason.
+        copy_text("the text is outside the module's memory or larger than 64 KiB", reason, capacity);
+        return -1;
+    }
+    if (!reason_ok) {
+        TOME_ERROR("[%s] check_metadata: the reason's buffer is outside the module's memory", impl->mod->id.c_str());
+        return -1;
+    }
+    return api()->check_metadata(reinterpret_cast<const char*>(bytes.data()), bytes.size(), reason, capacity);
+}
+
+int32_t w_lobby_show(wasm_exec_env_t env, uint32_t ptr, uint32_t len) {
+    Impl* impl = impl_of(env);
+    std::string text;
+    if (!arg_string(impl, "lobby_show", ptr, len, text)) return TOME_ERR_INVALID_ARGUMENT;
+    return api()->lobby_show(impl->mod, text.c_str());
+}
+
+// hook(name, len, phase, priority, callback): a typed hook on a mapped game
+// function (TOME_HOOK_BEFORE or TOME_HOOK_AFTER; REPLACE needs the chain's
+// call_next and isn't offered). Only functions core/wasm_hooks accepts.
+int32_t w_hook(wasm_exec_env_t env, uint32_t ptr, uint32_t len, int32_t phase, int32_t priority, uint32_t callback) {
+    Impl* impl = impl_of(env);
+    std::string name;
+    if (!impl->can_take_callbacks("hook") || !arg_string(impl, "hook", ptr, len, name)) return TOME_ERR_INVALID_ARGUMENT;
+    if (phase != TOME_HOOK_BEFORE && phase != TOME_HOOK_AFTER) {
+        TOME_ERROR("[%s] hook(%s): a module's hook runs BEFORE or AFTER the game's function", impl->mod->id.c_str(),
+                   name.c_str());
+        return TOME_ERR_INVALID_ARGUMENT;
+    }
+    const tome_symbol* symbol = api()->resolve(name.c_str());
+    if (!symbol || symbol->kind != TOME_SYMBOL_FUNCTION) {
+        TOME_ERROR("[%s] hook(%s): not a mapped function for this game", impl->mod->id.c_str(), name.c_str());
+        return TOME_ERR_UNAVAILABLE;
+    }
+    auto point = std::make_shared<wasm::HookPoint>();
+    std::string why;
+    if (!wasm::hook_point(name, symbol->signature ? symbol->signature : "", *point, why)) {
+        TOME_ERROR("[%s] hook(%s): a module can't hook it: %s", impl->mod->id.c_str(), name.c_str(), why.c_str());
+        return TOME_ERR_INVALID_ARGUMENT;
+    }
+    Callback* cb = impl->callback(callback);
+    cb->point = std::move(point);
+    cb->phase = phase;
+    return impl->registered(cb, api()->hook(impl->mod, name.c_str(), phase, priority, on_hook, cb));
+}
+
+int32_t w_lobby_send(wasm_exec_env_t env, int32_t to, uint32_t data, uint32_t size) {
+    Impl* impl = impl_of(env);
+    std::vector<uint8_t> bytes;
+    if (!wasm::read_bytes(impl->memory(), data, size, TOME_LOBBY_MAX_MESSAGE, bytes)) {
+        TOME_ERROR("[%s] lobby_send: the message is outside the module's memory or larger than %d bytes",
+                   impl->mod->id.c_str(), TOME_LOBBY_MAX_MESSAGE);
+        return TOME_ERR_INVALID_ARGUMENT;
+    }
+    return api()->lobby_send(impl->mod, to, bytes.data(), static_cast<uint32_t>(bytes.size()));
+}
+
+int32_t w_on_lobby_message(wasm_exec_env_t env, uint32_t callback) {
+    Impl* impl = impl_of(env);
+    if (!impl->can_take_callbacks("on_lobby_message")) return TOME_ERR_INVALID_ARGUMENT;
+    Callback* cb = impl->callback(callback);
+    return impl->registered(cb, api()->on_lobby_message(impl->mod, on_lobby_message_cb, cb));
+}
+
+int32_t w_on_lobby_start(wasm_exec_env_t env, uint32_t callback) {
+    Impl* impl = impl_of(env);
+    if (!impl->can_take_callbacks("on_lobby_start")) return TOME_ERR_INVALID_ARGUMENT;
+    Callback* cb = impl->callback(callback);
+    return impl->registered(cb, api()->on_lobby_start(impl->mod, on_lobby_start_cb, cb));
+}
+
+// The people in the lobby: how many there are (-1 outside a lobby), and up
+// to `max` of tome_wasm_lobby_player (kLobbyPlayerSize bytes: id, is_host,
+// is_local, runs_tome as u32s, then the name's 32 bytes) into `out`.
+constexpr uint32_t kLobbyPlayerSize = 48;
+
+int32_t w_lobby_players(wasm_exec_env_t env, uint32_t out, int32_t max) {
+    Impl* impl = impl_of(env);
+    // 64-bit product: a huge `max` must not wrap around to a small, in-bounds size
+    // (and then size the vector below).
+    if (max < 0 || static_cast<uint64_t>(max) * kLobbyPlayerSize > UINT32_MAX ||
+        (max > 0 && !wasm::in_bounds(impl->memory(), out, static_cast<uint32_t>(max) * kLobbyPlayerSize)))
+        return -1;
+    std::vector<tome_lobby_player> found(static_cast<size_t>(std::max(max, 0)));
+    const int32_t total = api()->lobby_players(found.data(), max);
+    if (total <= 0 || max == 0) return total;
+    std::string block;
+    for (int32_t i = 0; i < std::min(total, max); ++i) {
+        const tome_lobby_player& p = found[static_cast<size_t>(i)];
+        for (int32_t w : {p.id, p.is_host, p.is_local, p.runs_tome}) {
+            for (int b = 0; b < 4; ++b) block += static_cast<char>(static_cast<uint32_t>(w) >> (8 * b));
+        }
+        char name[32] = {};
+        std::memcpy(name, p.name, sizeof(name) - 1);
+        block.append(name, sizeof(name));
+    }
+    wasm::write_out(impl->memory(), out, static_cast<uint32_t>(max) * kLobbyPlayerSize, block);
+    return total;
+}
+
+int32_t w_lobby_start(wasm_exec_env_t env) {
+    return api()->lobby_start(impl_of(env)->mod);
+}
+
+int32_t w_on_checksum(wasm_exec_env_t env, uint32_t callback) {
+    Impl* impl = impl_of(env);
+    if (callback == 0) return api()->on_checksum(impl->mod, nullptr, nullptr);
+    if (!impl->can_take_callbacks("on_checksum")) return TOME_ERR_INVALID_ARGUMENT;
+    Callback* cb = impl->callback(callback);
+    return impl->registered(cb, api()->on_checksum(impl->mod, on_checksum, cb));
+}
+
 // Every object of a type, as the module's handles (u32s) in `out`, up to
 // `max`; how many there are, or -1.
 int32_t w_list_objects(wasm_exec_env_t env, int32_t type, uint32_t out, int32_t max) {
@@ -1240,6 +1659,7 @@ Instance::Instance(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}
 Instance::~Instance() = default;
 
 std::unique_ptr<Instance> Instance::load(tome_mod* mod, const std::wstring& path, std::string& error) {
+    timers_api::set_ended_hook(on_timer_ended);
     if (!runtime()) {
         error = "the WebAssembly runtime couldn't start";
         return nullptr;

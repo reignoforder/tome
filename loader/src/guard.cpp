@@ -8,6 +8,7 @@
 
 #include <windows.h>
 
+#include <atomic>
 #include <cstddef>
 #include <cstdio>
 #include <string>
@@ -261,6 +262,34 @@ void report(tome_mod* mod, const char* what, const char* detail, const GuardFram
     if (mod && g_sink) g_sink(mod);
 }
 
+// Ticks spent in guarded calls inside the one running on this thread.
+thread_local int64_t t_nested = 0;
+
+uint32_t no_frames() {
+    return 0;
+}
+std::atomic<FrameCounter> g_frames{no_frames};
+
+void record(tome_mod* mod, int64_t ticks, const char* what, const char* detail, bool lifecycle) {
+    static const double frequency = [] {
+        LARGE_INTEGER f;
+        QueryPerformanceFrequency(&f);
+        return static_cast<double>(f.QuadPart);
+    }();
+    const double seconds = ticks > 0 ? static_cast<double>(ticks) / frequency : 0.0;
+    const uint32_t frame = g_frames.load(std::memory_order_relaxed)();
+    if (lifecycle) {
+        mod->add_lifecycle_profile(seconds);
+        return;
+    }
+    if (!mod->add_profile(frame, seconds, what, detail)) return;
+    const profile::Stats stats = mod->profile_stats(frame);
+    TOME_WARN("%s takes %s a frame on average (%s at most) over the last %u frames; slowest call: %s, %s. "
+              "The mod menu's Details page and /tome perf show its times",
+              mod->id.c_str(), profile::format_ms(stats.average_ms).c_str(), profile::format_ms(stats.peak_ms).c_str(),
+              stats.frames, stats.slowest.c_str(), profile::format_ms(stats.slowest_ms).c_str());
+}
+
 } // namespace
 
 bool looks_like_return_address(uint32_t value) {
@@ -271,6 +300,20 @@ void set_fault_sink(FaultSink sink) {
     g_sink = sink;
 }
 
+void set_frame_counter(FrameCounter counter) {
+    g_frames.store(counter ? counter : no_frames, std::memory_order_relaxed);
+}
+
+void uncharged(void (*fn)(void*), void* context) {
+    LARGE_INTEGER start;
+    QueryPerformanceCounter(&start);
+    fn(context);
+    LARGE_INTEGER end;
+    QueryPerformanceCounter(&end);
+    // As if it were a nested guarded call: the enclosing ones subtract it.
+    t_nested += end.QuadPart - start.QuadPart;
+}
+
 bool call(tome_mod* mod, const char* what, const char* detail, void (*fn)(void*), void* context, unsigned flags) {
     if (mod && mod->faulted && !(flags & kEvenIfFaulted)) return false;
     if (mod && !(flags & kEvenIfFaulted)) {
@@ -279,11 +322,28 @@ bool call(tome_mod* mod, const char* what, const char* detail, void (*fn)(void*)
     }
     GuardFrame frame;
     const hooks::ThreadState state = hooks::thread_state();
-    if (!tome_guard_enter(&frame, fn, context)) return true;
+    // The mod's own time: this call's, less the guarded calls inside it
+    // (other mods' handlers it caused, or its own nested ones), which count
+    // for themselves.
+    const int64_t nested_before = t_nested;
+    t_nested = 0;
+    LARGE_INTEGER start;
+    QueryPerformanceCounter(&start);
+    const bool crashed = tome_guard_enter(&frame, fn, context) != 0;
+    LARGE_INTEGER end;
+    QueryPerformanceCounter(&end);
+    const int64_t elapsed = end.QuadPart - start.QuadPart;
+    const int64_t own = elapsed - t_nested;
+    t_nested = nested_before + elapsed;
+    if (!crashed) {
+        if (mod) record(mod, own, what, detail, flags & kLifecycle);
+        return true;
+    }
     // Hook calls the crash skipped over still count as running on this thread.
     hooks::restore_thread_state(state);
     if (frame.code == EXCEPTION_STACK_OVERFLOW) rearm_stack_guard();
     report(mod, what, detail, frame);
+    if (mod) record(mod, own, what, detail, flags & kLifecycle);
     return false;
 }
 
