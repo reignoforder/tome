@@ -140,6 +140,12 @@ env_game() {
         name="$(basename "$entry")"
         env_link "$entry" "$dir/Maps/$name"
     done
+    # An install with its Movies folder renamed to skip the intros
+    # (Movies.off) still has them: the test folder (never input/) links it as
+    # Movies, so the movies play in the tests, as in the player's game.
+    if [[ ! -e "$GAME_DIR/Movies" && -d "$GAME_DIR/Movies.off" ]]; then
+        env_link "$GAME_DIR/Movies.off" "$dir/Movies"
+    fi
     cp "$mix" "$dir/tome.mix"
 }
 
