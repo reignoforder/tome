@@ -99,7 +99,13 @@ tome_result TOME_CALL api_timer_start(tome_mod* mod, int32_t clock, double delay
 tome_result TOME_CALL api_timer_stop(tome_mod* mod, uint32_t timer) {
     if (!mod) return TOME_ERR_INVALID_ARGUMENT;
     ExclusiveLock hold(g_lock);
-    if (!g_schedule.stop(mod, timer)) return TOME_ERR_INVALID_ARGUMENT;
+    if (!g_schedule.stop(mod, timer)) {
+        // A one-shot timer that is due in the batch fire() is running is
+        // gone from the schedule but hasn't fired yet: an earlier callback
+        // may still stop it, and fire() then skips it.
+        auto it = g_callbacks.find(timer);
+        if (it == g_callbacks.end() || it->second.mod != mod) return TOME_ERR_INVALID_ARGUMENT;
+    }
     g_callbacks.erase(timer);
     update_count();
     return TOME_OK;

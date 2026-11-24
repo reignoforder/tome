@@ -1458,6 +1458,17 @@ doesn't: it sets up a projection of its own (below), which kept the 4:3
 one, so units answered clicks further from the middle of the screen than
 they were drawn.
 
+The world frame (`CGameUI+0x3BC`) is the area between the top bar and the
+console, always 0.13 to 0.58 high (0.45) and, with the 2D part, as wide as the
+window. Its camera therefore gets `aspect` 1.78 at exactly 4:3, 2.47 at 16:9
+and 3.2 at 21:9, and since Perspective spreads `fov` over the diagonal
+(`t = tan(fov / 2 / sqrt(aspect^2 + 1))`), the vertical angle shrinks as the
+window widens: `m[5]` 3.24, 4.29, 5.43 for a 70 degree camera. The widescreen
+patch sets `m[5]` back to the 4:3 value and `m[0] = m[5] / aspect` for the world
+camera (the minimap's camera box, `0x3C0810`, is the frustum of the same
+world frame camera on the ground, through `CSpriteFrame::SetupCamera` and the
+transform readers `0x137270`/`0x137180`, so it follows).
+
 Every camera reaches Perspective through the wrapper `0x1ADE90`, which has
 three callers. Counted per 2 s at 16:9 by hooking the wrapper:
 

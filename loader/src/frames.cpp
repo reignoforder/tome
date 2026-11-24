@@ -759,6 +759,15 @@ void* get(const char* name, int context) {
     return g_get_frame(name, context);
 }
 
+bool rect(void* frame, float out[4]) {
+    const uint32_t slot = g_build ? g_build->widescreen.layout_get_rect_slot : 0;
+    if (!frame || !slot) return false;
+    char* layout = static_cast<char*>(frame) + g_build->ui.layout_offset;
+    auto vtable = *reinterpret_cast<void***>(layout);
+    reinterpret_cast<int(__thiscall*)(void*, float*)>(vtable[slot / sizeof(void*)])(layout, out);
+    return true;
+}
+
 void* create(const char* definition, void* parent, int priority, int context) {
     return g_create_frame(definition, parent, 0, priority, context);
 }

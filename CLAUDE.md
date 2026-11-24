@@ -126,7 +126,9 @@ default) puts it in its own Xvfb; `tools/game.sh` shows it on screen unless
 - **Screenshots:** `tools/game.sh shot file.png` (ImageMagick `import` of the
   game's display). Simulate input with `TOME_DEBUG_CLICKS="x,y;..."`
   (fractions of the window; `move:x,y` moves the cursor without a click, 1
-  being the last pixel, for edge scrolling; `core/debug_script.h`). Prefer
+  being the last pixel, for edge scrolling; `dump:<FrameName>` logs a frame's
+  rectangle in UI units, to check a layout without reading pixels;
+  `core/debug_script.h`). Prefer
   `click:<FrameName>[,<context>]` (the game's own click on a named control:
   FDF names, e.g. `SinglePlayerButton`, `TomeModsRow0Button`). **Never
   pace it with times** (`@ms` still parses): a game screen or panel drops

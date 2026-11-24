@@ -51,11 +51,15 @@ bool parse_step(std::string_view item, Step& step) {
             return true;
         }
     }
-    std::string_view click = "click:", focus = "focus:";
-    const bool is_click = head.substr(0, click.size()) == click;
-    if (is_click || head.substr(0, focus.size()) == focus) {
-        step.kind = is_click ? Kind::ClickFrame : Kind::Focus;
-        std::string_view rest = head.substr(is_click ? click.size() : focus.size());
+    struct FrameStep {
+        std::string_view prefix;
+        Kind kind;
+    };
+    for (const FrameStep& fs : {FrameStep{"click:", Kind::ClickFrame}, FrameStep{"focus:", Kind::Focus},
+                                FrameStep{"dump:", Kind::Dump}}) {
+        if (head.substr(0, fs.prefix.size()) != fs.prefix) continue;
+        step.kind = fs.kind;
+        std::string_view rest = head.substr(fs.prefix.size());
         size_t comma = rest.find(',');
         std::string_view name = rest.substr(0, comma);
         if (name.empty()) return false;

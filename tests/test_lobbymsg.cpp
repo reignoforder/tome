@@ -55,6 +55,25 @@ TEST(lobbymsg_encode_refuses) {
     CHECK(encode("my-mod", 1, bytes(kMaxMessage + 1)).empty());
 }
 
+// Chat may trim a line's end: an empty message's "1/1: " arrives as "1/1:".
+TEST(lobbymsg_empty_message_survives_trimmed_space) {
+    const std::vector<std::string> lines = encode("my-mod", 7, "");
+    CHECK_EQ(lines.size(), size_t(1));
+    std::string trimmed = lines[0];
+    while (!trimmed.empty() && trimmed.back() == ' ') trimmed.pop_back();
+    CHECK(trimmed.size() < lines[0].size());
+    Reassembler r;
+    Message m;
+    CHECK(r.add(1, trimmed, m) == Reassembler::Result::Complete);
+    CHECK_EQ(m.mod_id, std::string("my-mod"));
+    CHECK(m.data.empty());
+    // A part with text still needs its space, and an empty first part of
+    // several is no message.
+    const std::string head = lines[0].substr(0, lines[0].find("1/1"));
+    CHECK(r.add(1, head + "1/1:QQ==", m) == Reassembler::Result::Bad);
+    CHECK(r.add(1, head + "1/2:", m) == Reassembler::Result::Bad);
+}
+
 TEST(lobbymsg_people_and_other_lines) {
     Reassembler r;
     Message m;

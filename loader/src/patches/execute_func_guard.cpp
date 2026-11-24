@@ -52,11 +52,13 @@ StringTextFn g_string_text = nullptr;
 void* volatile g_orig = nullptr;
 
 // The functions of the current map's scripts that take parameters; g_known
-// false if the scripts couldn't be read. From the last loading screen once
-// g_from_events; before that, read on the first call in each map load
-// (g_loaded_for, natives::map_load_count). Main thread.
+// false if the scripts couldn't be read. From the loading screen's scan when
+// one ran since the last map load that called ExecuteFunc (g_fresh);
+// otherwise read on the first call in each map load (g_loaded_for,
+// natives::map_load_count), so a load the scan missed never uses the
+// previous map's functions. Main thread.
 std::unordered_set<std::string> g_taking;
-bool g_from_events = false;
+bool g_fresh = false;
 unsigned g_loaded_for = 0;
 bool g_known = false;
 unsigned long g_refused = 0;
@@ -73,7 +75,7 @@ void collect(const std::string& script, const std::vector<std::string_view>& pre
 
 // events.h MapScriptHook: at the loading screen.
 void on_map_script(const std::string* script, const std::vector<std::string_view>& prelude) {
-    g_from_events = true;
+    g_fresh = true;
     if (script) {
         collect(*script, prelude);
         return;
@@ -106,9 +108,12 @@ uint32_t __cdecl wrapped_execute_func(uint32_t name_arg) {
     const char* name = name_arg ? g_string_text(reinterpret_cast<const void*>(name_arg)) : nullptr;
     if (name && *name) {
         const unsigned load = natives::map_load_count();
-        if (!g_from_events && g_loaded_for != load) {
+        if (g_loaded_for != load) {
             g_loaded_for = load;
-            load_functions();
+            // The scan's result is for this load once; a load it didn't
+            // scan reads the scripts itself.
+            if (g_fresh) g_fresh = false;
+            else load_functions();
         }
         if (g_known && g_taking.count(name)) {
             ++g_refused;

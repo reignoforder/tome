@@ -67,6 +67,12 @@ void TOME_CALL stop_self(tome_mod* mod, uint32_t timer, void*) {
     g_self_stop = g_api->timer_stop(mod, timer);
 }
 
+// Stops the timer `user` points at, as a callback of the same batch.
+void TOME_CALL stop_other(tome_mod* mod, uint32_t, void* user) {
+    g_fired.push_back(mod->id + " stopper");
+    g_self_stop = g_api->timer_stop(mod, *static_cast<uint32_t*>(user));
+}
+
 size_t count(const std::string& prefix) {
     size_t n = 0;
     for (const std::string& s : g_fired) n += s.rfind(prefix, 0) == 0;
@@ -112,6 +118,32 @@ TEST(host_timers_real_clock) {
     uint32_t id = 123;
     CHECK_EQ(api->timer_start(mod, TOME_CLOCK_GAME, 1, 0, record, nullptr, &id), TOME_ERR_UNAVAILABLE);
     CHECK_EQ(id, 0u);
+    mod->revoke_all();
+}
+
+// Two one-shot timers due in the same frame: the first one's callback stops
+// the second, which is already out of the schedule but hasn't fired.
+TEST(host_timers_stop_one_due_in_the_same_batch) {
+    Home home;
+    Session session;
+    const tome_api* api = start(home, session);
+    CHECK(api != nullptr);
+    if (!api) return;
+    tome_mod* mod = make_mod("batch");
+    uint32_t victim = 0, stopper = 0;
+    // The victim starts first, so it would run first: start the stopper
+    // first, and the victim after it.
+    uint32_t* victim_ptr = &victim;
+    CHECK_EQ(api->timer_start(mod, TOME_CLOCK_REAL, 0.5, 0, stop_other, victim_ptr, &stopper), TOME_OK);
+    CHECK_EQ(api->timer_start(mod, TOME_CLOCK_REAL, 0.5, 0, record, const_cast<char*>("victim"), &victim), TOME_OK);
+    g_fired.clear();
+    frame(0.5);
+    CHECK_EQ(count("batch stopper"), 1u);
+    CHECK_EQ(g_self_stop, static_cast<uint32_t>(TOME_OK));
+    CHECK_EQ(count("batch victim"), 0u);  // stopped before it fired
+    CHECK_EQ(api->timer_stop(mod, victim), TOME_ERR_INVALID_ARGUMENT);  // already gone
+    frame(0.5);
+    CHECK_EQ(count("batch victim"), 0u);
     mod->revoke_all();
 }
 

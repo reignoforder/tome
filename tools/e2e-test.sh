@@ -301,6 +301,31 @@ check_count() {
     fail "$3 (expected $2 log lines matching: $1, got $(count "$1"))"
 }
 
+# check_cinematic_borders: the dumps of CinematicPanel, CinematicTopBorder and
+# CinematicBottomBorder (debug script dump:) say the borders span the panel:
+# from its left edge to its right edge (they're 0.8 wide in the game's FDF,
+# which in a UI wider than 4:3 left the bottom border's left part and the top
+# border's right part missing). The raw log: log_from hides "Debug" lines (a
+# test mustn't pass on the script's own echoes), and a dump is a result.
+check_cinematic_borders() {
+    local deadline dumps panel top bottom
+    deadline=$(deadline)
+    while ((SECONDS < deadline)); do
+        grep -aq 'Debug dump CinematicBottomBorder: ' "$LOG" 2>/dev/null && break
+        sleep 0.2
+    done
+    dumps="$(grep -aE 'Debug dump Cinematic(Panel|TopBorder|BottomBorder): ' "$LOG" 2>/dev/null)"
+    panel="$(sed -n 's/.*Debug dump CinematicPanel: left \([0-9.]*\) .* right \([0-9.]*\) .*/\1 \2/p' <<<"$dumps" | head -n 1)"
+    top="$(sed -n 's/.*Debug dump CinematicTopBorder: left \([0-9.]*\) .* right \([0-9.]*\) .*/\1 \2/p' <<<"$dumps" | head -n 1)"
+    bottom="$(sed -n 's/.*Debug dump CinematicBottomBorder: left \([0-9.]*\) .* right \([0-9.]*\) .*/\1 \2/p' <<<"$dumps" | head -n 1)"
+    UI_WIDTH="${panel#* }"  # the UI's width in UI units (0.8305 for the default window)
+    if [[ -n "$panel" && "$panel" == "$top" && "$panel" == "$bottom" ]]; then
+        pass "the cinematic panel's borders span the panel (left and right: $panel)"
+    else
+        fail "the cinematic panel's borders span the panel (panel '$panel', top '$top', bottom '$bottom')"
+    fi
+}
+
 # probe_sequence <n>: the hook handlers that ran during hook-b's nth probe
 # call of RCString::GetText, in order, then what the call returned.
 probe_sequence() {
@@ -873,7 +898,11 @@ if ((${#MAP_ARG[@]})); then
         echo "movie: skipped (the game has no Movies folder)"
         MOVIE_INPUT="" MOVIE_WAIT=""
     fi
-    TOME_DEBUG_CLICKS="wait:TomeLogInteger(8604);settle;${MOVIE_INPUT}\
+    # dump: the cinematic panel's frames (hidden outside cinematics, laid out in
+    # every game): the widescreen patch holds the two borders by both sides of
+    # the panel, so they end where it does however wide the window is.
+    TOME_DEBUG_CLICKS="wait:TomeLogInteger(8604);settle;dump:CinematicPanel;dump:CinematicTopBorder;\
+dump:CinematicBottomBorder;${MOVIE_INPUT}\
 key:F10;settle;click:EndGameButton;settle;click:QuitButton;${MOVIE_WAIT}wait:Screen: score screen" \
         launch
     check "hello +1\.0\.0 +disabled" "hello starts disabled" 30
@@ -889,6 +918,7 @@ key:F10;settle;click:EndGameButton;settle;click:QuitButton;${MOVIE_WAIT}wait:Scr
     check "\[hello\] loaded a saved game: Save\\\\.+\\\\TomeE2E\.w3z" "loaded event with the saved game's path" 30
     check_count "Game started: " 2 "the loaded game started" 30
     check "\[map\] TomeLogInteger\(8604\)" "the loaded game's timers run (and don't load again)" 15
+    check_cinematic_borders
     if ((MOVIES)); then
         check "movie-frame-length: blizzard\.ax patched" "a movie (queued by the map, played as it ends): blizzard.ax patched" 30
         check "Debug: skipping the movie" "the movie played, and was skipped" 15
@@ -1164,8 +1194,13 @@ printf '{"harden_heap": true, "patch.background-mute": false}\n' >"$HOME_DIR/tom
 MAP_ARG=(-tomesafe -TomeNoPatch=ambient-sound,no-such-patch)
 # Three starts before this one stopped short of the main menu: a crash loop
 # turns safe mode on too.
-STARTS=3 TOME_DEBUG_CLICKS="wait:Screen ready: main menu;0.874,0.84;until:Mod menu opened;settle;\
-0.447,0.227;until:Mod menu: enabling hello" launch
+# The positions are fractions of the window as measured at the default window
+# (UI 0.8305 wide); the Mods button hangs from the right edge and the panel
+# from the left, so in a wider window they move with the edges.
+MODS_X="$(awk -v w="${UI_WIDTH:-0.8305}" 'BEGIN { printf "%.4f", 1 - (1 - 0.874) * 0.8305 / w }')"
+TOGGLE_X="$(awk -v w="${UI_WIDTH:-0.8305}" 'BEGIN { printf "%.4f", 0.447 * 0.8305 / w }')"
+STARTS=3 TOME_DEBUG_CLICKS="wait:Screen ready: main menu;$MODS_X,0.84;until:Mod menu opened;settle;\
+$TOGGLE_X,0.227;until:Mod menu: enabling hello" launch
 MAP_ARG=("${SAVED_MAP_ARG[@]}")
 check "Safe mode \(-tomesafe, tome/safe, the last 3 starts didn't reach the main menu\): no mod starts this session" \
     "-tomesafe, tome/safe and a crash loop turn safe mode on" 30

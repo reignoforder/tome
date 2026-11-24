@@ -491,13 +491,62 @@ the art left the frames off their places (the loading screen's minimap
 preview off its border). Checked at 1280 x 720 on the main menu, Single
 Player, Campaign, Options (and its Video page), Custom Game, LAN, LAN game
 creation and the lobby, the loading screen, the score screen and in a game.
+**A second pass over everything a wide window shows (Nov 2026).** Checked at
+1280 x 720, 2520 x 1080 (21:9) and 1280 x 1024 (5:4), against 4:3 and against
+the unpatched game, on the menus (single player, campaign, custom campaign,
+load game, replays, custom game, options, LAN, the Battle.net error), the
+loading and score screens, the credits, a campaign's briefing and
+cinematics, movies, a melee game with a hero and its panels, the quest log,
+message log, script dialog, multiboard, leaderboard, timer dialogs, game
+messages, tooltips, the Esc menu, a replay and Tome's own menu:
+
+- **The camera's vertical angle.** The game's `Perspective` spreads the field
+  of view over the viewport's diagonal. With the 2D part the world frame
+  (always 0.45 UI units high) is as wide as the window, so its aspect
+  grew (1.85 at 4:3, 2.47 at 16:9, 3.2 at 21:9) and the vertical angle shrank
+  with it: a 16:9 window saw 4% more than 4:3 at the sides and 22% less above
+  and below (38% less at 21:9), the picture zoomed in, where 1.29 shows more.
+  The world camera now keeps the vertical angle the same viewport has at 4:3
+  (`widescreen::wide_projection`, from the aspect and the UI's width) and
+  only widens: 33% more at the sides at 16:9, as the old fix did. Picking
+  follows (checked: a peasant, the gold mine and the town hall at the
+  middle and off to the sides selected where clicked), and the minimap's
+  camera box (computed from the same camera) widens with it, which was the
+  open "box keeps its 4:3 size" item.
+- **Cinematic mode's bars.** `CinematicPanel.fdf` makes its top and bottom
+  borders 0.8 wide, the top one from the left edge and the bottom one to the
+  right edge: in a wider UI each covered part of the window (the speaker's
+  panel hung on black, the credits and every campaign cinematic). They're
+  held by both sides of the panel, which fills the window.
+- **The campaign screen's fade.** Its sliding doors (`SlidingDoors`, a flat
+  full-screen model) went to the middle in proportion, so the screen faded
+  in from a black 4:3 box with the menu showing beside it; they're stretched
+  across the window like Battle.net's doors (`kWarpedFrames`).
+
 **Still open:**
 
-- Untested with the enhanced-options mod's HUD scale below 100% (both move
-  the console's frames).
-- A minimap camera box that keeps its 4:3 size (unchanged).
+- The enhanced-options mod's HUD scale below 100% in a window wider than 4:3:
+  its camera options (field of view, zoom, angle) work with the widescreen
+  camera (checked), but the HUD scale lays the console out for a UI 0.8
+  wide (`kWidth` in its `hud.cpp`: the room it leaves at each side, the
+  portrait's and the clock's places) while the UI is wider, so at 80% and 60%
+  the hero's portrait sits left of its arch and the console is off-center.
+  At 4:3 it's right. Needs the mod to use the UI's real width (and to count
+  Tome's shift of the console's middle), not Tome.
 - Changing the setting applies to the 2D UI from the next screen (the next
   menu screen or game), not at once: text keeps the layout it was made with.
+- Not reached from a test: the allies dialog (it needs allies), Battle.net's
+  friends, clan and tournament panes. Checked since: Battle.net's login, home,
+  chat, profile, custom games, create game, standard game and its lobby
+  against a PvPGN server (with pvpgn-connect); the credits of both editions
+  played to the end; both editions' campaign loading screens and
+  cinematics; Direct3D as well as OpenGL; a resize during a movie (the movie
+  window keeps its size and the game's window comes back as it was).
+- The e2e test's fixed click positions (the mod menu in safe mode, the LAN
+  game's row) follow the UI's width, so the suite runs at any window shape
+  (`TEST_WIDTH=800 TEST_HEIGHT=450 make e2e`, a 16:9 window, passes); at large
+  sizes the two-instance test is slow and sometimes hangs under software
+  rendering.
 
 Like 1.29, a wider window sees more of the map in multiplayer.
 

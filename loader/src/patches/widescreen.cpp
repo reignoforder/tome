@@ -101,6 +101,8 @@ struct SpriteCamera {
 std::vector<SpriteCamera> g_sprite_cameras;
 
 GameUiGetFn g_game_ui_get = nullptr;
+using GetFrameByNameFn = void*(__fastcall*)(const char* name, int context);
+GetFrameByNameFn g_frame_by_name = nullptr;
 uint32_t g_world_frame_offset = 0;  // CGameUI.world_frame
 bool g_wide_ui = false;             // the 2D part is installed
 
@@ -169,7 +171,7 @@ struct Ui {
 };
 Ui g_ui;
 
-constexpr int kTopLeft = 0, kBottomLeft = 6, kBottomRight = 8;
+constexpr int kTopLeft = 0, kTopRight = 2, kBottomLeft = 6, kBottomRight = 8;
 
 template <class T>
 T field(const void* object, uint32_t offset) {
@@ -412,6 +414,43 @@ void lay_pieces(float wide) {
     }
 }
 
+// The cinematic panel's two borders (CinematicPanel.fdf: the letterbox's wood
+// bars) are 0.8 wide, the top one from the panel's left edge and the bottom
+// one to its right edge: in a wider UI each covers only part of the window and
+// the rest of the bar is missing (the bottom one's left part, behind the
+// portrait). They're held by both sides of the panel, which fills the window,
+// instead. The game makes the panel with its UI and shows it for cinematic
+// mode; it's looked up by name, and read back each frame since it may place
+// the borders again.
+void follow_cinematic_borders() {
+    struct Border {
+        const char* name;
+        int left, right;
+    };
+    constexpr Border kBorders[] = {{"CinematicTopBorder", kTopLeft, kTopRight}, {"CinematicBottomBorder", kBottomLeft, kBottomRight}};
+    char* panel = static_cast<char*>(g_frame_by_name("CinematicPanel", 0));
+    if (!panel) return;
+    void* panel_layout = panel + g_ui.frame_layout;
+    for (const Border& b : kBorders) {
+        char* border = static_cast<char*>(g_frame_by_name(b.name, 0));
+        if (!border) continue;
+        void* layout = border + g_ui.frame_layout;
+        Anchor left, right;
+        if (read_anchor(layout, b.left, left) && read_anchor(layout, b.right, right) &&
+            left.relative == panel_layout && right.relative == panel_layout && left.x == 0.0f && right.x == 0.0f) {
+            continue;  // already held by both sides
+        }
+        // The vertical placement stays as the FDF made it: the point's y, and
+        // the corner (top or bottom) it hangs from.
+        Anchor now;
+        const bool had = read_anchor(layout, b.left, now) || read_anchor(layout, b.right, now);
+        const float y = had ? now.y : 0.0f;
+        g_ui.clear_points(layout);
+        g_ui.set_point(layout, b.left, panel_layout, b.left, 0.0f, y, 1);
+        g_ui.set_point(layout, b.right, panel_layout, b.right, 0.0f, y, 1);
+    }
+}
+
 // Once per frame in a game (from the world camera's setup): lays the game
 // UI out for the window's width, and keeps it so.
 void follow_ui() {
@@ -428,6 +467,7 @@ void follow_ui() {
     const float wide = ui_width();
     const bool wider = wide > widescreen::kBaseWidth;
     const float shift = widescreen::middle_shift(wide);
+    if (wider) follow_cinematic_borders();
     // The game UI's root takes the screen's width when it's made and when
     // the window changes size; after the setting changes, it has to again.
     if (g_laid.root_wide != wide) {
@@ -646,8 +686,6 @@ void box_screen() {
 // (widescreen::kSlicedFrames) is drawn in pieces (draw_sliced, on_ortho).
 // The named frames are looked up once a frame (events::frames): frames come
 // and go with screens.
-using GetFrameByNameFn = void*(__fastcall*)(const char* name, int context);
-GetFrameByNameFn g_frame_by_name = nullptr;
 uintptr_t g_highlight_vtable = 0;  // 0: not mapped
 constexpr size_t kWarpedCount = std::size(widescreen::kWarpedFrames);
 constexpr size_t kSlicedCount = std::size(widescreen::kSlicedFrames);
@@ -1025,10 +1063,23 @@ void TOME_CALL on_ortho(tome_mod*, tome_hook_call* call, void*) {
 // AFTER C44Matrix::Perspective(this, fov, aspect, near, far).
 void TOME_CALL on_perspective(tome_mod*, tome_hook_call* call, void*) {
     if (g_in_world_camera == 0 || call->arg_count < 1 || !tome_settings::widescreen()) return;
-    // A wide UI gives the world frame, and so its camera, the window's shape.
-    if (ui_width() > widescreen::kBaseWidth) return;
     float* m = reinterpret_cast<float*>(call->args[0]);
     if (!m) return;
+    // A wide UI gives the world frame, and so its camera, the window's shape.
+    // The game's projection would then zoom in (its fov is spread over the
+    // wider diagonal): the vertical angle stays what it is at 4:3 instead, and
+    // the view widens (widescreen::wide_projection).
+    const float wide = ui_width();
+    if (wide > widescreen::kBaseWidth) {
+        if (call->arg_count < 3) return;
+        const widescreen::Projection p =
+            widescreen::wide_projection(tome_hook_arg_float(call, 1), tome_hook_arg_float(call, 2), wide);
+        if (p.m5 > 0.0f) {
+            m[0] = p.m0;
+            m[5] = p.m5;
+        }
+        return;
+    }
     int width = 0, height = 0;
     main_thread::client_size(width, height);
     widescreen::Scale s = widescreen::projection_scale(width, height);

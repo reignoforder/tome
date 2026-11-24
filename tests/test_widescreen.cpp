@@ -160,6 +160,17 @@ TEST(widescreen_constant_operands) {
     CHECK(constant_operands(width, sizeof width, 0x6faa9328, at));
     CHECK(at.size() == 1 && at[0] == 8);
 
+    // Not a memory operand: add/or/... eax, imm32 (05 0D 15 1D 25 2D 35 3D)
+    // and a mod-01 form ending in four bytes equal to the constant.
+    const uint8_t immediates[] = {0x05, 0x28, 0x93, 0xaa, 0x6f, 0x3d, 0x28, 0x93, 0xaa, 0x6f,
+                                  0x81, 0x7d, 0x08, 0x28, 0x93, 0xaa, 0x6f, 0xc3};
+    CHECK(constant_operands(immediates, sizeof immediates, 0x6faa9328, at));
+    CHECK(at.empty());
+    // A SIB with no base is an absolute address too: mov eax, [ecx*4 + abs].
+    const uint8_t sib_abs[] = {0x8b, 0x04, 0x8d, 0x28, 0x93, 0xaa, 0x6f, 0xc3};
+    CHECK(constant_operands(sib_abs, sizeof sib_abs, 0x6faa9328, at));
+    CHECK(at.size() == 1 && at[0] == 3);
+
     // 1.26a's x87 forms: the 0.8 is a double at 0x6f8768b0, read once by the
     // Rect forms (fld QWORD, then fmul st(1),st reused), by fmul/fdiv QWORD
     // in the others.
@@ -243,4 +254,31 @@ TEST(widescreen_slice_art) {
     }
     // A gap smaller than half a tile still gets one, squeezed.
     CHECK_EQ(slice_art(0.82f, 0.6f, 0.05f).size(), static_cast<size_t>(3));
+}
+
+// The world camera's projection in a wide UI keeps the vertical angle of the
+// same viewport at 4:3 (the game's own at kBaseWidth) and only widens.
+TEST(widescreen_wide_projection_keeps_the_vertical_angle) {
+    const float fov = 1.2217f;           // 70 degrees, a melee map's camera
+    const float base = 0.8f / 0.45f;     // the world frame's shape at 4:3
+    // At kBaseWidth: exactly what the game's Perspective makes.
+    Projection at43 = wide_projection(fov, base, 0.8f);
+    CHECK(at43.m5 > 3.2f && at43.m5 < 3.3f);
+    CHECK(std::fabs(at43.m0 - at43.m5 / base) < 1e-4f);
+    // 16:9: the world frame is 1.1125 wide (aspect 2.4722) and 0.45 high.
+    Projection w169 = wide_projection(fov, 1.1125f / 0.45f, 1.1125f);
+    CHECK(std::fabs(w169.m5 - at43.m5) < 1e-3f);                       // same vertical angle
+    CHECK(std::fabs(w169.m0 - at43.m5 * 0.45f / 1.1125f) < 1e-4f);     // x term from the wider shape
+    CHECK(w169.m0 < at43.m0);                                           // sees more at the sides
+    // Ultrawide: the same again.
+    Projection w219 = wide_projection(fov, 1.4f / 0.45f, 1.4f);
+    CHECK(std::fabs(w219.m5 - at43.m5) < 1e-3f);
+    CHECK(w219.m0 < w169.m0);
+    // The visible width grows with the window: 1 / m0 is the half-width at unit depth.
+    CHECK(std::fabs((1.0f / w169.m0) / (1.0f / at43.m0) - 1.1125f / 0.8f) < 1e-3f);
+    // A campaign's 60-degree camera works too; nonsense gives nothing.
+    CHECK(wide_projection(1.0466f, 2.0f, 0.9f).m5 > 0.0f);
+    CHECK(wide_projection(0.0f, 2.0f, 1.0f).m5 == 0.0f);
+    CHECK(wide_projection(1.0f, 0.0f, 1.0f).m5 == 0.0f);
+    CHECK(wide_projection(1.0f, 2.0f, 0.5f).m5 == 0.0f);  // narrower than kBaseWidth: not for it
 }

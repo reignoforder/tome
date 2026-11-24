@@ -105,6 +105,13 @@ tome_result TOME_CALL api_lobby_send(tome_mod* mod, int32_t to, const void* data
     }
     // Who gets it: people whose Tome hides the lines (anyone else would see
     // them in the chat). A joined player talks to the host only.
+    if (!hosting && to == TOME_LOBBY_EVERYONE) {
+        if (warn_once(mod, "lobby_send everyone")) {
+            TOME_WARN("[%s] lobby_send: a joined player can't send to everyone, only to the host (the host's "
+                      "player id); said once", mod->id.c_str());
+        }
+        return TOME_ERR_INVALID_ARGUMENT;
+    }
     std::vector<int> recipients;
     for (const handshake::LobbyMember& m : members) {
         if (m.local || !m.tome) continue;

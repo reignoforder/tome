@@ -108,8 +108,19 @@ tome_result TOME_CALL api_net_send(tome_mod* mod, const void* data, uint32_t siz
     const std::vector<netmsg::Part> parts =
         netmsg::encode(mod->id, id, std::string_view(static_cast<const char*>(data), size));
     if (parts.empty()) return TOME_ERR_INVALID_ARGUMENT;  // not a valid mod id: can't happen for a loaded mod
+    size_t sent = 0;
     for (const netmsg::Part& p : parts) {
-        if (!handshake::send_sync_action(netmsg::kCacheFile, p.mission, p.key, p.value)) return TOME_ERR_UNAVAILABLE;
+        if (!handshake::send_sync_action(netmsg::kCacheFile, p.mission, p.key, p.value)) {
+            // Parts already out stay with the receivers as an unfinished
+            // message; it's dropped when the sender's next message starts
+            // (the reassembler restarts at part 1), never delivered.
+            if (sent) {
+                TOME_WARN("[%s] net_send: part %zu of %zu couldn't be sent; the message is lost (the parts "
+                          "before it were sent, and receivers drop them)", mod->id.c_str(), sent + 1, parts.size());
+            }
+            return TOME_ERR_UNAVAILABLE;
+        }
+        ++sent;
     }
     return TOME_OK;
 }
@@ -140,8 +151,10 @@ void deliver(int sender, const netmsg::Message& message, bool replay) {
         }
     }
     // In a multiplayer game only required mods send (api_net_send): a
-    // message for another mod there comes from a modified client.
-    const bool locked = !replay && mod_manager().game_locked();
+    // message for another mod there comes from a modified client. A replay
+    // is locked too (game_lock::applies), so a mod that never saw the
+    // message in the live game doesn't get it on playback either.
+    const bool locked = mod_manager().game_locked();
     tome_net_message m = {};
     m.size = sizeof(m);
     m.player = sender;

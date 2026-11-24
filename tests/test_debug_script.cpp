@@ -108,6 +108,18 @@ TEST(debug_script_click_frame) {
     }
 }
 
+TEST(debug_script_dump_frame) {
+    std::vector<std::string> bad;
+    auto steps = parse("dump:CinematicBottomBorder;dump:Box,3;dump:;dump:a b;dump:X,y", bad);
+    CHECK_EQ(steps.size(), size_t(2));
+    if (steps.size() == 2) {
+        CHECK(steps[0].kind == Kind::Dump);
+        CHECK_EQ(steps[0].text, std::string("CinematicBottomBorder"));
+        CHECK(steps[1].kind == Kind::Dump && steps[1].context == 3);
+    }
+    CHECK_EQ(bad.size(), size_t(3));
+}
+
 TEST(debug_script_empty) {
     std::vector<std::string> bad;
     CHECK(parse("", bad).empty());

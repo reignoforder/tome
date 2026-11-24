@@ -1195,6 +1195,9 @@ ship it as a mod.
     (`widescreen::console_layout`, `console_fdf`, unit-tested: SIMPLEFRAMEs
     from `UI\FrameDef\UI\TomeWideConsole.fdf` in Tome's overlay, made with
     `CreateSimpleFrame` as the console's children, shown and hidden with it);
+    the cinematic panel's two borders (`CinematicTopBorder`,
+    `CinematicBottomBorder`, 0.8 wide in the FDF) are held by both sides of
+    the panel instead, looked up by name each frame (`follow_cinematic_borders`);
     whatever the game put in the middle of a 4:3 screen moves to the middle
     (frames on the bottom corners of the console, the second console and the
     portrait's and minimap's layers between x 0.19 and 0.61 at 4:3, the clock,
@@ -1242,12 +1245,18 @@ ship it as a mod.
     take the screen's width again before and after `CGlueMgr::SetScreen` and,
     in a game, after the setting changes (`CLayoutFrame.vtable.UpdateScreenRect`).
   - The 3D view. With the 2D part the world frame is the window's shape and
-    its camera follows. Otherwise (not mapped, or narrower than 4:3) an AFTER
-    handler on `C44Matrix::Perspective` scales the projection's x term (or,
-    narrower than 4:3, its y term) by the client area's aspect against 4:3
-    (`core/widescreen.*`), only while `WorldView::SetupCamera` runs or
-    `CSpriteFrame::SetupCamera` for the world frame (unit picking), so more of
-    the map shows instead.
+    its camera follows, but the game's `Perspective` would spread the fov
+    over the wider diagonal (the world frame is 0.45 units high at any
+    width) and zoom the picture in, so the same AFTER handler on
+    `C44Matrix::Perspective` sets the projection's x and y terms from the
+    vertical angle the viewport has at 4:3 (`widescreen::wide_projection`):
+    the view grows at the sides only, and the minimap's camera box (the
+    frustum on the ground, from the same world frame camera) follows.
+    Otherwise (not mapped, or narrower than 4:3) the handler scales the x term
+    (or, narrower than 4:3, the y term) by the client area's aspect against 4:3
+    (`core/widescreen.*`). Either way only while `WorldView::SetupCamera`
+    runs or `CSpriteFrame::SetupCamera` for the world frame (unit picking),
+    so picking and drawing agree.
 
   The window size comes from `main_thread::client_size` (kept from
   `WM_SIZE`). The player can turn it off (Tome > Settings > Widescreen, on by

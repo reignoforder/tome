@@ -844,7 +844,7 @@ TEST(host_wasm_lobby_outside_a_lobby) {
     Home home;
     CHECK(install_wasm(home, "wasm-lobby", f.b.bytes()));
     Session session;
-    CHEkCK(session.start(home));
+    CHECK(session.start(home));
     mod_manager().set_enabled("wasm-lobby", true);
     CHECK(running("wasm-lobby"));
     for (int i = 1; i <= checks; ++i) {

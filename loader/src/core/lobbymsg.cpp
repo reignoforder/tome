@@ -42,8 +42,12 @@ bool parse(std::string_view text, Parsed& out) {
     if (!take_until(text, ' ', mod) || !is_valid_mod_id(mod)) return false;
     if (!take_until(text, '/', part) || !parse_number(part, 2, out.part)) return false;
     if (!take_until(text, ':', count) || !parse_number(count, 2, out.count)) return false;
-    if (text.empty() || text[0] != ' ') return false;
-    text.remove_prefix(1);
+    // The space after the colon may be gone from an empty message's line
+    // (chat can trim a line's end).
+    if (!text.empty()) {
+        if (text[0] != ' ') return false;
+        text.remove_prefix(1);
+    }
     std::vector<uint8_t> bytes;
     // An empty message is one part with nothing after the colon.
     if (!text.empty() && !signature::base64_decode(text, bytes)) return false;

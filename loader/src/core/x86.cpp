@@ -197,6 +197,8 @@ bool decode(const uint8_t* code, size_t available, Insn& out, std::string& error
     if (!o.known) return fail(error, "unknown opcode", code, i);
     const uint8_t opcode = code[i++];
 
+    bool has_abs = false;
+    size_t abs_at = 0;
     if (o.modrm) {
         if (i >= available) return truncated(error);
         const uint8_t modrm = code[i++];
@@ -209,9 +211,17 @@ bool decode(const uint8_t* code, size_t available, Insn& out, std::string& error
             if (mod != 3 && rm == 4) {
                 if (i >= available) return truncated(error);
                 const uint8_t sib = code[i++];
-                if (mod == 0 && (sib & 7) == 5) i += 4;
+                if (mod == 0 && (sib & 7) == 5) {
+                    has_abs = true;
+                    abs_at = i;
+                    i += 4;
+                }
             }
-            if (mod == 0 && rm == 5) i += 4;
+            if (mod == 0 && rm == 5) {
+                has_abs = true;
+                abs_at = i;
+                i += 4;
+            }
             else if (mod == 1) i += 1;
             else if (mod == 2) i += 4;
         }
@@ -244,6 +254,8 @@ bool decode(const uint8_t* code, size_t available, Insn& out, std::string& error
     out.length = i;
     out.falls_through = o.falls_through;
     out.branch = o.branch;
+    out.has_abs_disp32 = has_abs;
+    out.abs_disp32_at = abs_at;
     if (o.branch != Branch::None) {
         if (o.imm == I8) {
             out.displacement = static_cast<int8_t>(code[imm_at]);

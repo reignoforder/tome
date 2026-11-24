@@ -23,6 +23,18 @@ Scale projection_scale(int width, int height) {
     return s;
 }
 
+Projection wide_projection(float fov, float aspect, float ui_wide) {
+    Projection out;
+    if (!(fov > 0.0f && fov < 3.0f) || !(aspect > 0.0f) || !(ui_wide >= kBaseWidth)) return out;
+    // The viewport's shape at kBaseWidth: its height is the same.
+    const double base_aspect = static_cast<double>(aspect) * kBaseWidth / ui_wide;
+    const double t = std::tan(static_cast<double>(fov) * 0.5 / std::sqrt(base_aspect * base_aspect + 1.0));
+    if (!(t > 0.0)) return out;
+    out.m5 = static_cast<float>(1.0 / t);
+    out.m0 = static_cast<float>(1.0 / (t * aspect));
+    return out;
+}
+
 float ui_width(int width, int height) {
     if (width <= 0 || height <= 0) return kBaseWidth;
     // As in projection_scale: 4:3 sizes give exactly kBaseWidth.
@@ -185,10 +197,11 @@ bool constant_operands(const uint8_t* code, size_t available, uint32_t constant,
         if (!x86::decode(code + at, available - at, insn, error)) return false;
         const uint8_t op = code[at];
         if (op == 0xC3 || op == 0xC2) return true;  // ret, ret N
-        if (insn.length >= 5 && (code[at + insn.length - 5] & 0xC7) == 0x05) {
+        if (insn.has_abs_disp32) {
+            const size_t where = at + insn.abs_disp32_at;
             uint32_t disp = 0;
-            for (int i = 0; i < 4; ++i) disp |= static_cast<uint32_t>(code[at + insn.length - 4 + i]) << (8 * i);
-            if (disp == constant) out.push_back(at + insn.length - 4);
+            for (int i = 0; i < 4; ++i) disp |= static_cast<uint32_t>(code[where + i]) << (8 * i);
+            if (disp == constant) out.push_back(where);
         }
         at += insn.length;
     }

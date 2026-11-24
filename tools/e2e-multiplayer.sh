@@ -255,8 +255,16 @@ check "$HOST_LOG" "Screen ready: lobby" "host: the lobby takes input" || exit 1
 # desync check to match and nothing else before skewing: waits only look at
 # lines after the previous wait's, and that line can come before or after the
 # host's message (the round is at 3 s of game time).
+# The game's row is at a position as measured in the default window (the
+# client area 788 x 564 there: the test size minus 12 x 36 pixels); the list
+# hangs from the left edge, so in a wider window the row's fraction shrinks
+# with the UI's width (0.6 x the client area's aspect, at least 0.8).
+GAME_X="$(awk -v w="${TEST_WIDTH:-800}" -v h="${TEST_HEIGHT:-600}" 'BEGIN {
+    ui = 0.6 * (w - 12) / (h - 36); if (ui < 0.8) ui = 0.8
+    base = 0.6 * 788 / 564
+    printf "%.4f", 0.26 * base / ui }')"
 launch client "wait:Screen ready: main menu;click:LocalAreaNetworkButton;wait:Screen ready: LAN;\
-focus:PlayerNameEditBox;text:Guest;frames:120;0.26,0.335;settle;click:JoinButton;wait:Screen ready: lobby;\
+focus:PlayerNameEditBox;text:Guest;frames:120;$GAME_X,0.335;settle;click:JoinButton;wait:Screen ready: lobby;\
 wait:Game started: ;wait:Handshake: every player;type:/synctest hello;wait:message from player 1 (5 bytes;\
 type:/synctest big;\
 wait:Desync check: sync-test's state matches;type:/synctest skew"

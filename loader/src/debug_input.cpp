@@ -156,8 +156,26 @@ void frame_action(const std::string& name, int context, bool focus) {
     pause_frames(1);
 }
 
+// Logs the named frame's rectangle (UI units).
+void dump_frame(const std::string& name, int context) {
+    on_main([name, context] {
+        void* frame = frames::get(name.c_str(), context);
+        float r[4] = {0, 0, 0, 0};  // {bottom, left, top, right}
+        if (!frame) {
+            TOME_WARN("Debug dump of %s (context %d): no such frame", name.c_str(), context);
+        } else if (!frames::rect(frame, r)) {
+            TOME_WARN("Debug dump of %s: the build doesn't map GetRect", name.c_str());
+        } else {
+            TOME_INFO("Debug dump %s: left %.4f bottom %.4f right %.4f top %.4f (width %.4f)", name.c_str(), r[1],
+                      r[0], r[3], r[2], r[3] - r[1]);
+        }
+    });
+    pause_frames(1);
+}
+
 void act(HWND window, const Step& step) {
     switch (step.kind) {
+    case Kind::Dump: dump_frame(step.text, step.context); break;
     case Kind::ClickFrame: frame_action(step.text, step.context, false); break;
     case Kind::Focus: frame_action(step.text, step.context, true); break;
     case Kind::Close:

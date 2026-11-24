@@ -35,3 +35,8 @@ Blizzard's: never commit them.
 To install a build into a game you play, copy `build/loader/tome.mix` into
 that game's folder, or `make deploy INSTALL_DIR=/path/to/it` (never a
 folder here).
+
+An install whose `Movies` folder was renamed `Movies.off` (to skip the intro
+movies) still has its movies: the test game folder links it as `Movies`
+(`tools/test-env.sh`), so they play in the tests. Without either, the tests
+that need a movie are skipped.

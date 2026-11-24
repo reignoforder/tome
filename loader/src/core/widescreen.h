@@ -36,6 +36,21 @@ struct Scale {
 // empty area (minimized).
 Scale projection_scale(int width, int height);
 
+// The world camera's projection terms for a UI `ui_wide` units across (a
+// window wider than 4:3): the game's Perspective(fov, aspect) spreads the
+// field of view over the viewport's diagonal, so the wider world frame of a
+// wide UI (its aspect grows with the window) would narrow the vertical angle
+// and zoom the picture in, seeing barely more at the sides and less above and
+// below than at 4:3. These keep the vertical angle the same viewport has at
+// 4:3 (the same UI height at kBaseWidth), so the view grows at the sides only:
+// m5 as at 4:3, m0 = m5 / aspect. m0 and m5 are 0 if an argument is out of
+// range (leave the matrix as it is).
+struct Projection {
+    float m0 = 0.0f;
+    float m5 = 0.0f;
+};
+Projection wide_projection(float fov, float aspect, float ui_wide);
+
 // The UI's width in UI units for a client area: 0.6 * width / height, but
 // never less than the game's 0.8 (a 4:3 or narrower window, or an empty one,
 // keeps 0.8).
@@ -90,10 +105,12 @@ float middle_shift(float wide);
 // the game draws them at any shape, instead of drawn in proportion: art
 // whose frames the game anchors to the window's edges, which in proportion
 // would leave those frames off the art and black at the sides (Battle.net's
-// login doors, its chat screen's button bar). By FDF frame name; the layer
-// that dims a screen behind a dialog (a CHighlightFrame) is warped too.
+// login doors, its chat screen's button bar, the campaign screen's fade). By
+// FDF frame name; the layer that dims a screen behind a dialog (a
+// CHighlightFrame) is warped too.
 inline constexpr const char* kWarpedFrames[] = {
     "BattleNetMainBackground",  // BattleNetMain.fdf: the login screen's doors
+    "SlidingDoors",             // CampaignMenu.fdf: the black the campaign screen fades in from
 };
 
 // Full-screen models drawn in pieces on a wider UI: art [0, cut] at the

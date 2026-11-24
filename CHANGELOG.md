@@ -28,6 +28,21 @@ API version of each addition in `tome.h` and `sdk/README.md` ("[14]").
 
 API version 21.
 
+- **Widescreen: the world view no longer zooms in** (no API change). With
+  the 2D UI the game's projection spread the field of view over the wider
+  diagonal, so a 16:9 window saw 4% more than 4:3 at the sides and 22% less
+  above and below (21:9: 38% less): the picture was zoomed in. The vertical
+  angle now stays what it is at 4:3 and the view widens at the sides (33%
+  more at 16:9). Picking, and the minimap's camera box (which was drawn at its
+  4:3 size), follow.
+- **Widescreen: cinematics and the campaign screen.** The letterbox bars of
+  cinematic mode (the credits, every campaign cinematic) were 0.8 wide and
+  left part of a wide window bare (the speaker's panel hung on black); they
+  span the window. The campaign screen faded in from a black 4:3 box; the fade
+  covers the window.
+- **Debug script `dump:<Frame>`** logs a frame's rectangle in UI units
+  (developer builds), used by the e2e test for the cinematic panel; the test
+  folder links `Movies.off` as `Movies` so movies play in the tests.
 - **Typed hooks and game calls** (no API change): `sdk/include/tome/tome_game.h`,
   generated from the mapping files (`tools/gen-game-header.py`, checked by a
   test), gives every mapped function with a signature a name macro
