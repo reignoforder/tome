@@ -35,6 +35,14 @@
 # input waits for log lines and frames, like tools/e2e-test.sh. Needs
 # unprivileged user namespaces, ip (iproute2) and nsenter; without them it
 # says it's skipped.
+#
+# TEST_WIDTH / TEST_HEIGHT pick the window as in tools/test-env.sh, and the
+# client's click on the game's row follows the UI's width, so a wide window
+# works (800x450, 16:9, passes). At 1056x552 both games' windows land mostly
+# off the Xvfb screen (E2E_SHOTS shows it) and the client's click misses: use
+# a size whose window fits. E2E_SHOTS=<folder> takes a screenshot of each
+# instance every E2E_SHOTS_EVERY seconds (default 5) to see where a check
+# that fails was waiting.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -89,6 +97,19 @@ if [[ -z "${TOME_MP_INSIDE:-}" ]]; then
 
     env_xvfb; XVFB_PIDS+=("$NEW_XVFB_PID"); HOST_DISPLAY="$NEW_XVFB_DISPLAY"
     env_xvfb; XVFB_PIDS+=("$NEW_XVFB_PID"); CLIENT_DISPLAY="$NEW_XVFB_DISPLAY"
+    # E2E_SHOTS=<folder>: a screenshot of each instance's screen every
+    # E2E_SHOTS_EVERY seconds (default 5), <folder>/host-<n>.png and client-<n>.png,
+    # to see what a check that fails was waiting at.
+    if [[ -n "${E2E_SHOTS:-}" ]]; then
+        mkdir -p "$E2E_SHOTS"
+        for who in host client; do
+            [[ "$who" == host ]] && shot_display="$HOST_DISPLAY" || shot_display="$CLIENT_DISPLAY"
+            (n=0; while sleep "${E2E_SHOTS_EVERY:-5}"; do
+                n=$((n + 1)); DISPLAY="$shot_display" import -window root "$E2E_SHOTS/$who-$n.png" 2>/dev/null
+            done) &
+            XVFB_PIDS+=("$!")
+        done
+    fi
     env_sound
     TOME_MP_INSIDE=1 WORK="$WORK" HOST_DISPLAY="$HOST_DISPLAY" CLIENT_DISPLAY="$CLIENT_DISPLAY" \
         unshare -rn bash "$0" "$BUILD" &

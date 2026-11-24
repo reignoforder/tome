@@ -7,7 +7,7 @@
   "description": "A Tome mod in C++, from sdk/templates/cpp.",
   "authors": ["You"],
   "game": "1.27b",
-  "tome": ">=0.1.0 <0.2.0",
+  "tome": ">=0.2.0 <0.3.0",
   "entry": "my-cpp-mod.dll",
   "sync": "client",
   "natives": ["native MyCppModAdd takes integer a, integer b returns integer"]

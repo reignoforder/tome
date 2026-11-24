@@ -76,4 +76,28 @@ private:
     std::map<int, Pending> pending_;
 };
 
+// --- who a message goes to ------------------------------------------------------
+
+// A person in the lobby, as the handshake knows them.
+struct Member {
+    int id = 0;          // net player id
+    bool host = false;   // the game's host
+    bool local = false;  // this computer
+    bool tome = false;   // runs Tome (the handshake heard from it)
+};
+
+// lobby_send's `to` for every player who runs Tome (TOME_LOBBY_EVERYONE).
+constexpr int kEveryone = -1;
+
+enum class Route {
+    Ok,                  // the recipients are in `recipients` (none: a host alone in its lobby)
+    EveryoneFromClient,  // a joined player can only talk to the host
+    NoRecipient,         // `to` isn't someone this computer can reach
+};
+
+// The net ids a message to `to` (a net id, or kEveryone) reaches. Only
+// people whose Tome hides the lines are reached (anyone else would see them
+// in the chat), never this computer; a joined player reaches the host only.
+Route route(const std::vector<Member>& members, bool hosting, int to, std::vector<int>& recipients);
+
 } // namespace tome::lobbymsg

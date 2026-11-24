@@ -45,12 +45,12 @@ release carries `toolchain.txt`, the image's exact package versions. To
 check a release:
 
 ```sh
-git checkout v0.1.0
+git checkout v0.2.0
 make container IMAGE_TARGET=ci                          # then compare its packages with toolchain.txt:
 podman run --rm tome-dev rpm -qa --qf '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\n' | sort | diff - toolchain.txt
 make container-sdk IMAGE_READY=1 DEV=OFF                # as ci.yml does
 make container-dist IMAGE_READY=1 CONTAINER_RELEASE_BUILD=build-container
-sha256sum build-container/tome-0.1.0.zip build-container/tome-sdk-0.1.0.zip
+sha256sum build-container/tome-0.2.0.zip build-container/tome-sdk-0.2.0.zip
 # compare with the release's SHA256SUMS
 ```
 
@@ -66,7 +66,7 @@ this repository's workflow built each file from the tagged commit. Anyone
 can check a file, including an installed `tome.mix`:
 
 ```sh
-gh attestation verify tome-0.1.0.zip --repo reignoforder/tome
+gh attestation verify tome-0.2.0.zip --repo reignoforder/tome
 ```
 
 GitHub only makes attestations for public repositories on this plan, so
@@ -114,21 +114,21 @@ python3 tools/release_sign.py keygen ~/tome-release-backup.key   # kept elsewher
 ## Making a release
 
 1. Set the version in `CMakeLists.txt`, update `CHANGELOG.md`, commit.
-2. Tag and push: `git tag v0.1.0 && git push origin v0.1.0`. CI builds,
+2. Tag and push: `git tag v0.2.0 && git push origin v0.2.0`. CI builds,
    tests, attests and makes a **draft** release with the zips, the WAMR
    archive and `SHA256SUMS`.
 3. Check what CI made, then sign it:
 
    ```sh
    mkdir release && cd release
-   gh release download v0.1.0 --pattern SHA256SUMS --pattern 'tome-*.zip' --pattern 'WAMR-*.tar.gz' \
+   gh release download v0.2.0 --pattern SHA256SUMS --pattern 'tome-*.zip' --pattern 'WAMR-*.tar.gz' \
        --pattern toolchain.txt
    sha256sum --check SHA256SUMS                         # the files match it
-   gh attestation verify tome-0.1.0.zip --repo reignoforder/tome   # CI built them (public repository)
+   gh attestation verify tome-0.2.0.zip --repo reignoforder/tome   # CI built them (public repository)
    # optionally: rebuild the tag in the container and compare (above)
    python3 ../tools/release_sign.py sign SHA256SUMS ~/tome-release.key
    python3 ../tools/release_sign.py verify SHA256SUMS
-   gh release upload v0.1.0 SHA256SUMS.sig
+   gh release upload v0.2.0 SHA256SUMS.sig
    ```
 
 4. Publish the draft. `release-check.yml` verifies the signature and the

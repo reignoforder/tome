@@ -112,4 +112,17 @@ Reassembler::Result Reassembler::add(int sender, std::string_view text, Message&
     return Result::Complete;
 }
 
+
+Route route(const std::vector<Member>& members, bool hosting, int to, std::vector<int>& recipients) {
+    recipients.clear();
+    if (!hosting && to == kEveryone) return Route::EveryoneFromClient;
+    for (const Member& m : members) {
+        if (m.local || !m.tome) continue;
+        if (!hosting && !m.host) continue;
+        if (to == kEveryone ? hosting : m.id == to) recipients.push_back(m.id);
+    }
+    if (recipients.empty() && !(to == kEveryone && hosting)) return Route::NoRecipient;
+    return Route::Ok;
+}
+
 } // namespace tome::lobbymsg

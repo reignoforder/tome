@@ -34,7 +34,7 @@
       "enum": ["roc", "tft"],
       "description": "The one game the mod is for: \"roc\" (Reign of Chaos) or \"tft\" (The Frozen Throne). Leave it out for both."
     },
-    "tome": { "type": "string", "description": "Supported Tome versions: a semver range such as \">=0.1.0 <0.2.0\"." },
+    "tome": { "type": "string", "description": "Supported Tome versions: a semver range such as \">=0.2.0 <0.3.0\"." },
     "depends": { "$ref": "#/definitions/dependencies", "description": "Must be installed and enabled first: { \"id\": \"range\" }." },
     "recommends": { "$ref": "#/definitions/dependencies", "description": "Mentioned in the mod's warnings when missing." },
     "conflicts": { "$ref": "#/definitions/dependencies", "description": "A warning when both run." },

@@ -23,7 +23,7 @@ completes the fields and flags mistakes as you type. Tome ignores `$schema`.
   "license": "MIT",
   "icon": "icon.blp",
   "game": "1.27b",
-  "tome": ">=0.1.0 <0.2.0",
+  "tome": ">=0.2.0 <0.3.0",
   "depends": { "ui-lib": "^1.0" },
   "entry": "hp-bars.dll",
   "requires": ["CTextFrame::SetText"],
@@ -52,7 +52,7 @@ and can't leave it: no absolute paths, drive letters or `..`.
 | `icon` | path | A `.blp` or `.tga`, shown in the mod list. |
 | `game` **\*** | game range | The game builds the mod works on, e.g. `"1.27b"`. Tome doesn't load it on others. |
 | `edition` | `"roc"` or `"tft"` | The one game the mod is for: Reign of Chaos or The Frozen Throne. Tome doesn't load it in the other. Leave it out for a mod that works in both (most do: one `game.dll` runs both). |
-| `tome` **\*** | version range | The Tome versions it works with, e.g. `">=0.1.0 <0.2.0"`. |
+| `tome` **\*** | version range | The Tome versions it works with, e.g. `">=0.2.0 <0.3.0"`. |
 | `depends` | `{ id: range }` | Mods that must be installed and enabled. They load first, and when one is disabled, this mod is disabled first. |
 | `recommends` | `{ id: range }` | A warning when one is missing. |
 | `conflicts` | `{ id: range }` | A warning when both run. |

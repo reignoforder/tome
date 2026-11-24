@@ -107,3 +107,20 @@ TEST(netmsg_bad_parts_are_dropped) {
     r.reset();
     CHECK_EQ(r.pending(), size_t(0));
 }
+
+// A send that fails partway stops there and says how far it got: the caller
+// tells a mod (and the log) that the message is lost, not just refused.
+TEST(netmsg_send_all_stops_at_the_first_failure) {
+    const std::vector<Part> parts = encode("my-mod", 5, std::string(kChunk * 3 - 10, 'x'));
+    CHECK_EQ(parts.size(), size_t(3));
+    size_t calls = 0;
+    CHECK_EQ(send_all(parts, [&](const Part&) { ++calls; return true; }), size_t(3));
+    CHECK_EQ(calls, size_t(3));
+    calls = 0;
+    CHECK_EQ(send_all(parts, [&](const Part&) { return ++calls < 3; }), size_t(2));  // the third fails
+    CHECK_EQ(calls, size_t(3));
+    calls = 0;
+    CHECK_EQ(send_all(parts, [&](const Part&) { ++calls; return false; }), size_t(0));  // the first: nothing out
+    CHECK_EQ(calls, size_t(1));
+    CHECK_EQ(send_all(std::vector<Part>{}, [](const Part&) { return true; }), size_t(0));
+}

@@ -44,6 +44,19 @@ struct Part {
     int32_t value = 0;
 };
 
+// Hands each part to `send` in order until one fails (it returns false);
+// how many went out. A message with only some of its parts out is never
+// delivered: a receiver drops it when the sender's next message starts.
+template <class Send>
+size_t send_all(const std::vector<Part>& parts, Send&& send) {
+    size_t sent = 0;
+    for (const Part& p : parts) {
+        if (!send(p)) break;
+        ++sent;
+    }
+    return sent;
+}
+
 // The parts of a message for mod `mod_id` (a valid mod id; data at most
 // kMaxMessage bytes, possibly empty). Empty if either doesn't hold.
 std::vector<Part> encode(std::string_view mod_id, uint32_t message_id, std::string_view data);

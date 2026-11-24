@@ -544,9 +544,14 @@ messages, tooltips, the Esc menu, a replay and Tome's own menu:
   window keeps its size and the game's window comes back as it was).
 - The e2e test's fixed click positions (the mod menu in safe mode, the LAN
   game's row) follow the UI's width, so the suite runs at any window shape
-  (`TEST_WIDTH=800 TEST_HEIGHT=450 make e2e`, a 16:9 window, passes); at large
-  sizes the two-instance test is slow and sometimes hangs under software
-  rendering.
+  (`TEST_WIDTH=800 TEST_HEIGHT=450 make e2e`, a 16:9 window, passes). The
+  two-instance test at 1056 x 552 doesn't: both games' windows land mostly
+  off the screen (`E2E_SHOTS=<folder>` takes screenshots of both) and the
+  client's click on the game's row misses; at larger sizes it is also slow
+  and sometimes hangs under software rendering. The Reign of Chaos
+  two-instance test failed to join in about a third of the runs while the
+  machine was busy and passed 4 of 4 on a quiet one: a timing race in the
+  test, not seen on The Frozen Throne.
 
 Like 1.29, a wider window sees more of the map in multiplayer.
 

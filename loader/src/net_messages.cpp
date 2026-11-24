@@ -108,19 +108,18 @@ tome_result TOME_CALL api_net_send(tome_mod* mod, const void* data, uint32_t siz
     const std::vector<netmsg::Part> parts =
         netmsg::encode(mod->id, id, std::string_view(static_cast<const char*>(data), size));
     if (parts.empty()) return TOME_ERR_INVALID_ARGUMENT;  // not a valid mod id: can't happen for a loaded mod
-    size_t sent = 0;
-    for (const netmsg::Part& p : parts) {
-        if (!handshake::send_sync_action(netmsg::kCacheFile, p.mission, p.key, p.value)) {
-            // Parts already out stay with the receivers as an unfinished
-            // message; it's dropped when the sender's next message starts
-            // (the reassembler restarts at part 1), never delivered.
-            if (sent) {
-                TOME_WARN("[%s] net_send: part %zu of %zu couldn't be sent; the message is lost (the parts "
-                          "before it were sent, and receivers drop them)", mod->id.c_str(), sent + 1, parts.size());
-            }
-            return TOME_ERR_UNAVAILABLE;
+    const size_t sent = netmsg::send_all(parts, [](const netmsg::Part& p) {
+        return handshake::send_sync_action(netmsg::kCacheFile, p.mission, p.key, p.value);
+    });
+    if (sent < parts.size()) {
+        // Parts already out stay with the receivers as an unfinished message;
+        // it's dropped when the sender's next message starts (the reassembler
+        // restarts at part 1), never delivered.
+        if (sent) {
+            TOME_WARN("[%s] net_send: part %zu of %zu couldn't be sent; the message is lost (the parts "
+                      "before it were sent, and receivers drop them)", mod->id.c_str(), sent + 1, parts.size());
         }
-        ++sent;
+        return TOME_ERR_UNAVAILABLE;
     }
     return TOME_OK;
 }

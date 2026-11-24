@@ -9,7 +9,7 @@ lines of each source file over all the modules that compiled it (tome.mix,
 the test programs, mods) and prints each section's share of lines run. A
 section is a source folder; sdk/examples/* and sdk/templates/* count as one
 each. Vendored code (loader/third_party) and the tests themselves aren't
-counted. --min: exit 1 if a section is below it. --files: the files below
+counted. --min: exit 1 if a section of 10 lines or more is below it. --files: the files below
 it too, most lines missed first. --lines FILE: the lines never run, file by
 file (for finding what to test next).
 """
@@ -78,6 +78,9 @@ def read(build, gcov):
     return lines
 
 
+MIN_SECTION_LINES = 10
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("build")
@@ -103,8 +106,12 @@ def main():
     for name, (run, total) in sorted(sections.items()):
         share = 100.0 * run / total
         low = share < args.min
-        failed |= low
-        print("%6.1f%%  %6d/%-6d %s%s" % (share, run, total, name, "  (below %g%%)" % args.min if low else ""))
+        # A section of a few lines (sdk/support: one empty function the CRT
+        # calls from a thread-start callback) says nothing: listed, not judged.
+        judged = total >= MIN_SECTION_LINES
+        failed |= low and judged
+        note = "  (below %g%%)" % args.min if low and judged else "  (too small to judge)" if low else ""
+        print("%6.1f%%  %6d/%-6d %s%s" % (share, run, total, name, note))
     print("%6.1f%%  %6d/%-6d total" % (100.0 * run_total / all_total, run_total, all_total))
 
     if args.files:

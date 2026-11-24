@@ -8,8 +8,8 @@ version (0.2.0) may change what mods or players rely on, and says so here.
 
 Tome has three version numbers, which move on their own:
 
-- **The release version** (`0.1.0`: the project version in `CMakeLists.txt`,
-  the tag `v0.1.0`, the zips' names, `[Tome 0.1.0]` in the window title).
+- **The release version** (`0.2.0`: the project version in `CMakeLists.txt`,
+  the tag `v0.2.0`, the zips' names, `[Tome 0.2.0]` in the window title).
 - **The API version** (`TOME_API_VERSION` in `sdk/include/tome/tome.h`, the
   `api_version` a mod receives). It goes up by one whenever `tome.h` gains
   functions or fields, never for anything else. `tome.h` is append-only:
@@ -24,9 +24,23 @@ Tome has three version numbers, which move on their own:
 A release lists the API version it ships. A release that adds API keeps the
 API version of each addition in `tome.h` and `sdk/README.md` ("[14]").
 
-## Unreleased
+## [0.2.0] - unreleased
 
-API version 21.
+API version 21 (0.1.0 shipped 16: this release adds versions 17 to 21).
+
+**Upgrading from 0.1.0.** A mod names the Tome versions it works with
+(`"tome"` in `tome.mod.json`), and Tome 0.2.0 refuses one that says
+`">=0.1.0 <0.2.0"` until its range is changed (`">=0.2.0 <0.3.0"`). Nothing
+else is needed: `tome.h` only grew, so a mod built against 0.1.0 runs as it
+did, and the SDK's examples and templates have the new range.
+
+In short, for players: widescreen is finished (the camera shows more at the
+sides instead of zooming in, cinematics and the campaign screen fill a wide
+window), the loading, credits and campaign screens were checked in 16:9, 21:9
+and 5:4 on both renderers, and some bugs found in review are fixed. For mod
+makers: messages in the lobby and between players, timers, desync checks, a
+profiler, typed hooks for C, C++, Rust and WebAssembly mods, destroying
+frames, and the installed mods' list for mod managers.
 
 - **Widescreen: the world view no longer zooms in** (no API change). With
   the 2D UI the game's projection spread the field of view over the wider
@@ -43,6 +57,13 @@ API version 21.
 - **Debug script `dump:<Frame>`** logs a frame's rectangle in UI units
   (developer builds), used by the e2e test for the cinematic panel; the test
   folder links `Movies.off` as `Movies` so movies play in the tests.
+- **`tools/ui-shots.sh`** takes scripted screenshots of the UI at any window
+  shape (`TEST_WIDTH`/`TEST_HEIGHT`), with a showcase map
+  (`tools/showcase-map.py`) that puts a hero, multiboard, leaderboard, timers,
+  quests, dialogs, cinematics with fades and the victory screen on screen by
+  chat command (`docs/building.md`, "Looking at the UI"). The e2e tests follow
+  the window's shape. The coverage gate is 80% a section (sections under 10
+  lines are listed, not judged).
 - **Typed hooks and game calls** (no API change): `sdk/include/tome/tome_game.h`,
   generated from the mapping files (`tools/gen-game-header.py`, checked by a
   test), gives every mapped function with a signature a name macro
@@ -173,7 +194,7 @@ API version 21.
   than the pointer (a third at 16:9, in menus and games), and clicks landed
   left of it.
 
-## [0.1.0] - unreleased
+## [0.1.0] - 2026-11-05
 
 The first public release. Warcraft III 1.27b (game.dll 1.27.1.7085) only;
 API version 16.

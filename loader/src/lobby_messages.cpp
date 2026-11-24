@@ -103,22 +103,22 @@ tome_result TOME_CALL api_lobby_send(tome_mod* mod, int32_t to, const void* data
         }
         return TOME_ERR_UNAVAILABLE;
     }
-    // Who gets it: people whose Tome hides the lines (anyone else would see
-    // them in the chat). A joined player talks to the host only.
-    if (!hosting && to == TOME_LOBBY_EVERYONE) {
+    // Who gets it (lobbymsg::route): people whose Tome hides the lines
+    // (anyone else would see them in the chat). A joined player talks to the
+    // host only.
+    static_assert(lobbymsg::kEveryone == TOME_LOBBY_EVERYONE);
+    std::vector<lobbymsg::Member> people;
+    for (const handshake::LobbyMember& m : members) people.push_back({m.id, m.host, m.local, m.tome});
+    std::vector<int> recipients;
+    switch (lobbymsg::route(people, hosting, to, recipients)) {
+    case lobbymsg::Route::Ok: break;
+    case lobbymsg::Route::EveryoneFromClient:
         if (warn_once(mod, "lobby_send everyone")) {
             TOME_WARN("[%s] lobby_send: a joined player can't send to everyone, only to the host (the host's "
                       "player id); said once", mod->id.c_str());
         }
         return TOME_ERR_INVALID_ARGUMENT;
-    }
-    std::vector<int> recipients;
-    for (const handshake::LobbyMember& m : members) {
-        if (m.local || !m.tome) continue;
-        if (!hosting && !m.host) continue;
-        if (to == TOME_LOBBY_EVERYONE ? hosting : m.id == to) recipients.push_back(m.id);
-    }
-    if (recipients.empty() && !(to == TOME_LOBBY_EVERYONE && hosting)) {
+    case lobbymsg::Route::NoRecipient:
         if (warn_once(mod, "lobby_send recipient")) {
             TOME_WARN("[%s] lobby_send: lobby player %d doesn't run Tome as far as this computer knows%s "
                       "(said once)", mod->id.c_str(), static_cast<int>(to), hosting ? "" : ", or isn't the host");

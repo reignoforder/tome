@@ -148,3 +148,34 @@ TEST(lobbymsg_bad_parts) {
         CHECK_EQ(r.pending(), size_t(0));
     }
 }
+
+// Who a lobby_send reaches.
+TEST(lobbymsg_route) {
+    // 128 hosts; 129 is this computer; 130 runs Tome; 131 doesn't.
+    auto room = [](int local) {
+        std::vector<Member> m = {{128, true, false, true}, {129, false, false, true},
+                                 {130, false, false, true}, {131, false, false, false}};
+        for (Member& x : m) x.local = x.id == local;
+        return m;
+    };
+    std::vector<int> to;
+    // The host: everyone with Tome but itself, or one of them.
+    CHECK(route(room(128), true, kEveryone, to) == Route::Ok);
+    CHECK((to == std::vector<int>{129, 130}));
+    CHECK(route(room(128), true, 130, to) == Route::Ok);
+    CHECK((to == std::vector<int>{130}));
+    CHECK(route(room(128), true, 131, to) == Route::NoRecipient);  // no Tome there
+    CHECK(to.empty());
+    CHECK(route(room(128), true, 128, to) == Route::NoRecipient);  // not itself
+    CHECK(route(room(128), true, 999, to) == Route::NoRecipient);
+    // A host alone (or with no one who runs Tome): everyone is fine, reaching no one.
+    CHECK(route({{128, true, true, true}}, true, kEveryone, to) == Route::Ok);
+    CHECK(to.empty());
+    // A joined player: the host only; everyone isn't an option.
+    CHECK(route(room(129), false, kEveryone, to) == Route::EveryoneFromClient);
+    CHECK(to.empty());
+    CHECK(route(room(129), false, 128, to) == Route::Ok);
+    CHECK((to == std::vector<int>{128}));
+    CHECK(route(room(129), false, 130, to) == Route::NoRecipient);  // another client
+    CHECK(route(room(129), false, 129, to) == Route::NoRecipient);
+}

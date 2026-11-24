@@ -1,6 +1,6 @@
 # Tome roadmap
 
-Status as of 2026-10-30. Design rationale: `research.md`. How it works:
+Status as of 2026-11-23 (0.2.0 in preparation). Design rationale: `research.md`. How it works:
 `architecture.md`. Game internals: `reverse-engineering.md`.
 
 ## Done
@@ -38,7 +38,7 @@ Status as of 2026-10-30. Design rationale: `research.md`. How it works:
 | The host and messages between players | API versions 17 and 18. The host is player number 1 (`NetGetPlayerNumber`, 1.27b and 1.26a): the lobby handshake counts only its set, and `host_player` gives mods its slot in games and replays. Lobby senders are stamped by the host's router (a client claiming the host's id arrives under its own: checked). `net_send`/`on_net_message`: up to 1 KiB per message to the same mod on every computer, as SyncStoredInteger actions (`core/netmsg.*`: unit tests, fuzz target), the same game step everywhere, 16 messages a second per mod, required mods only in multiplayer; C, Rust and Wasm SDKs. e2e: the LAN game sends both ways, 1000 bytes whole |
 | The lobby | API version 21: required mods' messages in a game's lobby (`lobby_send`, `on_lobby_message`: hidden lobby lines, `core/lobbymsg.*`, unit tests, fuzz target, only to players whose Tome answered), `lobby_players`, and a say in the start (`on_lobby_start`, not overridable by a second press; `lobby_start`). For the Geomancer mod. C and Rust SDKs; Wasm: `lobby_show`, `lobby_start` |
 | Versions and the installed mods | API version 20, for mods that install and update others (an updater, a mod browser): `version_compare`/`version_match` are Tome's own semver and game-version rules (`core/version.*`; also Wasm imports), `list_mods` the mod menu's rows (id, version, folder, state, reason, provides...) from an immutable snapshot of each refresh (`core/mod_list.*`: unit tests) behind its own lock, so it works from any thread and from callbacks under the mod manager's lock; `TOME_EVENT_MODS_CHANGED` when the rows change, posted to the main thread after the lock is released; `mods_dir`; `check_metadata` (a release's `tome.mod.json` through discovery's and the resolver's own checks, `core/metadata_check.*`). Rust wrappers (`Tome::list_mods`...). Host tests (install, toggle, remove; Wasm imports); e2e: hello hears the removals and its count matches Tome's |
-| Widescreen (§11.4) | Built-in patch, on by default (Tome > Settings > Widescreen). The 3D view keeps its proportions and shows more at the sides; the 2D UI does too (1.27b and 1.26a): the UI-to-screen conversions get the window's width, so frames and text keep their shape and frames on the screen's edges go to the window's edges, as in 1.29 (minimap left, command card right). In games the console's art is laid out again in pieces from Tome's FDF (arch, info panel and inventory centered, wall between, top-bar slots) and the middle's frames move to the middle; the menus fill the window too, their panels (the glue manager's sprite layers) in proportion on their sides, and the loading and score screens are laid out at 4:3 in the middle with their art stretched, blurred and darkened across the sides; the cursor is drawn at the pointer. Clicks follow. `core/widescreen.*` unit-tested; checked in game at 1280 x 720 (main menu, Single Player, Options, Custom Game, loading screen, a game: selection by click, command card). Not in the e2e test (4:3); 1.26a: 3D view only |
+| Widescreen (§11.4) | Built-in patch, on by default (Tome > Settings > Widescreen). The 3D view keeps its proportions and shows more at the sides; the 2D UI does too (1.27b and 1.26a): the UI-to-screen conversions get the window's width, so frames and text keep their shape and frames on the screen's edges go to the window's edges, as in 1.29 (minimap left, command card right). In games the console's art is laid out again in pieces from Tome's FDF (arch, info panel and inventory centered, wall between, top-bar slots) and the middle's frames move to the middle; the menus fill the window too, their panels (the glue manager's sprite layers) in proportion on their sides, and the loading and score screens are laid out at 4:3 in the middle with their art stretched, blurred and darkened across the sides; the cursor is drawn at the pointer. Clicks follow. `core/widescreen.*` unit-tested; checked in game at 1280 x 720 (main menu, Single Player, Options, Custom Game, loading screen, a game: selection by click, command card). Not in the e2e test (4:3); 1.26a: 3D view only. Second pass (Nov 2026): the world camera keeps the vertical angle of 4:3 (with the 2D UI the game's projection had zoomed a wide window in), the cinematic panel's bars and the campaign screen's fade span the window, and the credits, both editions' campaign screens and cinematics, movies, Battle.net (against a PvPGN server), the hosted-game lobby and every in-game panel were checked at 16:9, 21:9 and 5:4 on OpenGL and Direct3D; `tools/ui-shots.sh` repeats it, and the e2e tests run at any window shape |
 | Approval of mod code | A mod with a DLL doesn't run (or even load) until the user turns it on once in the mod menu or with `/tome enable`, which records a SHA-256 of its files (everything but `tome.mod.json`) in `state.json` (schema 3). An asset-only mod counts too: game scripts (`.j`, `.ai`, `.pld`) run in every game, and other assets and the icon go through the game's own parsers, which trust them; nothing of an unapproved mod is mounted or decoded. A changed `.tome` asks again; a folder mod in its own folder hot-reloads without asking. Mods from an older `state.json` stay allowed if they ran then, and a schema 2 approval moves over if the code is the same. The menu says "New code" / "Code changed" ("New files" for assets) and shows the hash. `core/mod_state.*`, unit-tested; host tests for asset mods and the schema 2 upgrade; e2e: an unapproved DLL fixture is never loaded, an unapproved script-only one isn't mounted; `TOME_DEBUG_APPROVE` for tests |
 | WebAssembly mods (experimental) | `"wasm"` in `tome.mod.json`: a module run sandboxed by WAMR 2.4.5's interpreter (downloaded at configure time, hash-checked, three MinGW patches), with only Tome's imports, each checked (`core/wasm_abi`); data copied into its memory in wasm32 layout (`core/wasm_layout`); frames as handles looked up by name on each use; natives with converted arguments and checked results; a per-call instruction budget; traps disable the mod like a crash. Almost the whole API (not hooks, `resolve`, services, paths). C SDK: `tome_wasm.h`, `support/tome_wasm.c`, `tome_add_wasm_mod` (clang + wasm-ld or rust-lld), `hello-wasm` example, template. Rust SDK: the `tome-wasm` crate (`sdk/rust/wasm`: closures, `export_mod!`, constants generated from `tome.h`), `hello-wasm-rs`, template, `tome_add_rust_mod(WASM)`. WAMR allocates from a capped heap (`core/wasm_alloc`). Approval says "runs sandboxed code". Unit, host and e2e tests; `fuzz_wasm_abi`, `fuzz_wasm_layout`, and `fuzz_wamr` (WAMR itself in Tome's configuration, for the host: 1.3M runs found 15-byte modules making WAMR allocate gigabytes, now refused by the cap); `docs/wasm-mods.md` |
 | Signed mods | A `tome.sig` (Ed25519 over the mod's id, code hash and `tome.mod.json`, Monocypher; small-order keys refused) records its key with the approval in `state.json`; an update signed by the same key runs without asking, one signed by another key or unsigned asks with a red "Signer changed" and a warning; the details page shows "Signed by". `sdk/support/tome_sign.py` (keygen, sign, verify, RFC 8032 selftest; plain Python) and `tome_package(SIGN_KEY)`. Unit tests (RFC vectors, a Python-made signature, base64, weak keys), host tests (same key, other key, tampered, a Python-signed folder, a signed package), `fuzz_signature` |
@@ -53,8 +53,9 @@ Status as of 2026-10-30. Design rationale: `research.md`. How it works:
 | Tooling | Unit tests, e2e test in the real game (off screen in Xvfb, own Wine prefix, a linked game folder: nothing written to the install; input waits for log lines), `Makefile`, a container with the whole toolchain, `tome-mpq`, `tools/re/*`, `tools/game.sh` |
 | Timers, desync checks, profiler | API version 19: `timer_start`/`timer_stop` on real or game time (game timers fire in the same step on every computer, end with the game; the fake game's ticks move them), `on_checksum` (a required mod's state hash compared between players every 3 s of game time, through `TomeSum` sync actions; the first difference shown to the player, also in replays), and every call into a mod timed by the crash guard (its own time, by frame: the Details page, `/tome perf`, a log line for a mod over 4 ms a frame). Wasm imports for both. Unit, host, fuzz and two-instance e2e tests (sync-test's `/synctest skew`) |
 | Mods' own mappings | API unchanged (`tome.h` comments only). A mod maps functions Tome doesn't: `"mappings"` in `tome.mod.json` (default folder `mappings/`), one file per build in Tome's format (header optional, but checked if present); symbols go by `"<mod id>/<name>"` for `hook`, `resolve` and `requires` (its own or a library mod's). Bytes checked before patching; a function mapped twice (Tome's and a mod's name) shares one patch when the layouts agree, each handler seeing its own name; overlapping patches and aliases of reserved functions refused. Files count for approval and the sync hash. Unit, hook runtime, host and fuzz tests; not yet in the e2e test |
+| Typed hooks and frame destroy | API version 21 (and none for the typed headers): `sdk/include/tome/tome_game.h`, generated from the mapping files, names every mapped function with a signature (name macro, function pointer type with its calling convention, an arguments struct over a hook's `call->args`); `tome_wasm_game.h` and `hook` (C `tome_hook`, Rust `hook`) give WebAssembly mods before and after handlers on the 63 mapped functions that take numbers and handles; `frame_destroy` (C, Rust, Wasm) and `BlzDestroyFrame` destroy a frame made through Tome, 1.27b only (1.26a's destructor slot isn't mapped) |
 
-## Next: public release (0.1.0), in order
+## Done: public release (0.1.0), in order
 
 Licensing is settled: GPL v3 or later for Tome (`LICENSE`), MIT for `sdk/`
 (`sdk/LICENSE`) and MIT-0 for what mods compile in (`sdk/LICENSE-MIT-0`),
@@ -164,10 +165,27 @@ VirtualStore; and whether Defender minds a DLL replacing tome.mix), Mods menu,
     `SECURITY.md`. Left: the secret keys moved offline.
 14. Tag `v0.1.0`.
 
+## Next: 0.2.0
+
+- Mods' `tome` ranges say `<0.2.0`: `pvpgn-connect`, `enhanced-options` and
+  the other mods each need the new range (`">=0.2.0 <0.3.0"`) and a release.
+  The SDK's examples and templates have it.
+- Enhanced Options' HUD scale below 100% on a window wider than 4:3 lays the
+  console out for a 0.8-wide UI (`docs/known-bugs.md`, "Still open"): its fix
+  is in the mod.
+- On the player's side, not run from here: 1.26a (`make test 1.26a`, `make
+  e2e 1.26a`), a real GPU and Windows, fullscreen.
+- The release: CI's container checks (`make container-test`,
+  `make container-fuzz`), a local container build compared with CI's
+  (`docs/releasing.md`), signing, the tag.
+- The two-instance LAN test: at 1056 x 552 the windows land off screen (use
+  800 x 450 or the default); the Reign of Chaos one failed to join about a
+  third of the runs on a busy machine and passed 4 of 4 on a quiet one.
+
 ## Later
 
-- **WebAssembly mods, what's left** (`wasm-mods.md`): typed hooks for both
-  kinds of mod, as mods ask for them.
+- **WebAssembly mods, what's left** (`wasm-mods.md`): typed hooks for more
+  functions (pointers and strings), as mods ask for them.
 - **More game builds** (§6): 1.26a first, then 1.27a, 1.24e, 1.28.x, and
   1.29–1.31, each with its own mapping file and signatures.
 - **World Editor support:** load in `worldedit.exe`, expose Tome natives in GUI triggers.
@@ -216,5 +234,5 @@ See `research.md` §13. The most relevant now:
   so it can't stay hidden: the mod menu's restart prompt right after its
   click showed 45 times in 45 (2026-11-02, screenshots). Popups and
   restarting aren't in `tools/e2e-test.sh` yet;
-- destroying frames (vtable `+0xD8` looks like a deleting destructor); for now
-  a disabled mod's frames are hidden and go away with their screen.
+- destroying frames works for the ones made through Tome (`frame_destroy`);
+  not for the game's own, and not on 1.26a.
